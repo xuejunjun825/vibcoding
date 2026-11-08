@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>静态原型 · DevOps 研发效能平台</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="home">
+  <div class="home-inner">
+    <h1>DevOps 研发效能平台 · 界面风格原型</h1>
+    <p class="lead">按 <b>UI-STYLE.md</b> 的令牌与骨架做的 3 页静态原型，用于确认视觉风格与信息密度；<b>无交互逻辑、无真实数据</b>，点进页面可看布局，接下来再进流水线做工程实现。</p>
+
+    <div class="cards">
+      <a class="pcard" href="requirement-pool.html">
+        <span class="k">页面 01 · 双栏列表</span>
+        <h3>需求池列表</h3>
+        <p>类型 Tab + 域/厂商/状态筛选 + 左侧需求卡片列表 + 右侧需求详情（子需求进度、人天成本、审批流转）。</p>
+        <span class="go">打开原型 →</span>
+      </a>
+      <a class="pcard" href="release-detail.html">
+        <span class="k">页面 02 · 双栏 + 浮层</span>
+        <h3>版本详情</h3>
+        <p>左侧版本卡片列表（状态/日期/进度）+ 右侧工作项（状态计数胶囊、进度条、版本详情 popover、表格）。</p>
+        <span class="go">打开原型 →</span>
+      </a>
+      <a class="pcard" href="workbench.html">
+        <span class="k">页面 03 · 仪表盘</span>
+        <h3>岗位工作台</h3>
+        <p>待办四宫格 + 快捷动作 + 关键数据卡片 + 我的待办列表 + 域分布 / 厂商排名 / 动态。</p>
+        <span class="go">打开原型 →</span>
+      </a>
+    </div>
+
+    <div class="note">
+      <b>风格约束（与 UI-STYLE.md 一致，供评审时对照）</b><br>
+      · 白卡片 + <code>#F5F7FA</code> 浅灰底 + 1px <code>#E5E6EB</code> 边框；蓝色 <code>#2B6FE5</code> 只用于主操作、当前项、链接与数据强调。<br>
+      · 骨架：侧栏 200px（分组导航 + 底部帮助/消息/用户）、顶部项目导航 48px、内容区双栏（左列表 / 右详情）。<br>
+      · 状态一律「浅底方角 pill + 文字」，优先级「圆点 + 文字」，不靠颜色单独表意；表格行高 44–48px，行操作 hover 才出现。<br>
+      · 禁止：渐变、大色块、重阴影、圆角 &gt; 8px、插画式空状态；轻量信息用 popover，不用抽屉。<br>
+      <b>刻意未做</b>：真实数据与交互、移动端适配、暗色模式、图表库（本页图表为纯 CSS 示意）。<br>
+      <span class="hint">原型文件：docs/teamflow/20261108-r2-devops-platform/prototype/（index / requirement-pool / release-detail / workbench + style.css）</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,3 +1,40 @@
-# TeamFlow 运行日志（插件自有产物，非交付物；host 提交时另有 pathspec 强制排除）
+# ---- TeamFlow runtime logs (plugin-owned, must stay ignored) ----
 logs/teamflow/
+
+# ---- Java / Maven ----
+target/
+*.class
+*.jar
+.flattened-pom.xml
+.mvn/timing.properties
+
+# ---- Nacos distribution, downloaded archive and runtime data ----
+.nacos/
+
+# ---- Local run state (pid files) & sandbox Maven repo fallback ----
+.run/
+.m2/
+
+# ---- Logs and local env ----
+logs/
+*.log
+.env
+.env.local
+
+# ---- IDE ----
+.idea/
+*.iml
+*.ipr
+.vscode/
+.settings/
+.classpath
+.project
+
+# ---- macOS ----
+.DS_Store
+
+# ---- Workspace-local gh CLI config (pre-existing rule) ----
 .ghconfig/
+
+# ---- MUST stay tracked (never add: config/nacos/ 种子配置, pom.xml, scripts/, docs/) ----
+# config/nacos/demo-service.yml 是 AC-3 的唯一合法配置来源，忽略它会让 dev-up 发布空配置。
