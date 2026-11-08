@@ -1,0 +1,37 @@
+server:
+  port: ${DEMO_PORT:8081}
+
+spring:
+  application:
+    name: demo-service
+  config:
+    # 非 optional（故意）：Nacos 不可达时启动直接失败，而不是带着本地缺省值“假绿”启动。
+    import: nacos:demo-service.yml?group=DEFAULT_GROUP
+  cloud:
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        # 同 api-gateway：默认 10000ms 的优雅停机等待窗口只是 sleep，注销在它之前
+        # 已经完成；置 0 让 SIGTERM 立即退出，dev-down 才可能满足 AC-2 的 ≤10s。
+        graceful-shutdown-wait-time: 0
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        file-extension: yml
+
+# 配置可证伪性的落点：DemoController 第三个构造参数（缺省 local）对应的那个键，
+# 本文件永远不得定义——一旦在此定义，AC-3 的“值只可能来自 Nacos”就失去证据力。
+# 该键的完整名字与其缺省值写在那里的类注释里；scripts/verify.sh 的第 #10 项按
+# YAML 键名（而非文本）断言本文件不含它，改这里之前先读那一项。
+# 本文件只放“本地缺省值”，运行时的真值由 Nacos 的 demo-service.yml 覆盖。
+demo:
+  greeting: Hello
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always

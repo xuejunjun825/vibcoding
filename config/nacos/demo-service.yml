@@ -1,0 +1,7 @@
+# Seed config published to Nacos by `make dev-up` (idempotent POST).
+# dataId: demo-service.yml   group: DEFAULT_GROUP
+demo:
+  greeting: "Hello from Nacos"
+  # This value is the proof that demo-service reads Nacos config, not local YAML:
+  # local application.yml has no demo.config-source at all.
+  config-source: nacos

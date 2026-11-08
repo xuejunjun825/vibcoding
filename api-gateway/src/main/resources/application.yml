@@ -1,0 +1,25 @@
+server:
+  port: ${GATEWAY_PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        # SCA 的优雅停机等待窗口默认 10000ms（NacosDiscoveryProperties 字段
+        # gracefulShutdownWaitTime）。它是纯粹的 sleep：先 stop() 注销实例，再
+        # `if (wait > 0) Thread.sleep(wait)` —— 注销本身是立即完成的，这 10s 只是
+        # 等待窗口。留着它，每次 SIGTERM 都要多等 10s，两个服务串行就会让
+        # make dev-down 突破 AC-2 的 ≤10s。置 0 只跳过等待，不影响注销。
+        graceful-shutdown-wait-time: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
