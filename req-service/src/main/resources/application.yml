@@ -1,0 +1,77 @@
+server:
+  port: ${REQ_PORT:8082}
+  shutdown: graceful
+
+spring:
+  application:
+    name: req-service
+  datasource:
+    url: ${PLATFORM_DB_URL:jdbc:mysql://127.0.0.1:3306/devops_platform?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8}
+    username: ${PLATFORM_DB_USER:root}
+    password: ${PLATFORM_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 12
+      minimum-idle: 2
+      connection-timeout: 5000
+  jpa:
+    # The schema is owned by Flyway (db/migration). validate turns every entity /
+    # column drift into a boot failure instead of a silent runtime mismatch.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: Asia/Shanghai
+      # `release` is a MySQL reserved word and is also a table name here; let
+      # Hibernate quote keywords so generated SQL agrees with the DDL.
+      hibernate.auto_quote_keyword: true
+      hibernate.default_batch_fetch_size: 64
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    validate-on-migrate: true
+  jackson:
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+  lifecycle:
+    timeout-per-shutdown-phase: 5s
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        # Pure sleep before the already-finished deregistration; 0 keeps SIGTERM fast.
+        graceful-shutdown-wait-time: 0
+
+platform:
+  seed:
+    enabled: ${PLATFORM_SEED_ENABLED:false}
+  # SeedController compares against platform.internal-token; InternalTokenClient
+  # reads platform.internal.token. Both spellings are bound to the same env var so
+  # the two call sites cannot drift apart.
+  internal-token: ${PLATFORM_INTERNAL_TOKEN:dev-internal-token}
+  internal:
+    token: ${PLATFORM_INTERNAL_TOKEN:dev-internal-token}
+  deliver:
+    base-url: ${DELIVER_BASE_URL:http://deliver-service}
+  jwt:
+    secret: ${PLATFORM_JWT_SECRET:dev-only-jwt-secret-please-change-32bytes-min}
+    ttl-minutes: ${PLATFORM_JWT_TTL_MINUTES:720}
+  master-key: ${PLATFORM_MASTER_KEY:ZGV2LW9ubHktbWFzdGVyLWtleS0zMi1ieXRlcy1sb25nISE=}
+  openapi:
+    qps: ${PLATFORM_OPENAPI_QPS:100}
+  perf:
+    # AC-19/R3 knobs: the pool page is keyset-capable; the flag lets the perf
+    # script prove the large-dataset path without changing the API.
+    mode: ${PLATFORM_PERF_MODE:off}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+  health:
+    db:
+      enabled: true

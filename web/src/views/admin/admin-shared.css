@@ -1,0 +1,330 @@
+/* 系统管理域共享样式（T9）。只补 admin 页面独有的结构，通用表面/表格沿用 styles/base.css 与 theme.css。 */
+
+.adm {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.adm-nav {
+  position: sticky;
+  top: 0;
+  width: 160px;
+  flex: 0 0 160px;
+  padding: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.adm-nav__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: var(--r-ctl);
+  color: var(--text-body);
+  font-size: 13px;
+  text-decoration: none;
+  transition: background var(--t-color) var(--ease), color var(--t-color) var(--ease);
+}
+
+.adm-nav__item:hover {
+  background: var(--bg-hover);
+  color: var(--text-title);
+}
+
+.adm-nav__item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.adm-nav__item.is-active {
+  background: var(--bg-selected);
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.adm-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.adm-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.adm-head__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.adm-head__desc {
+  margin: 4px 0 0;
+  color: var(--text-muted-aa);
+  font-size: 12px;
+}
+
+.adm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.adm-toolbar__spacer {
+  flex: 1;
+}
+
+.adm-pager {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+}
+
+.adm-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+
+.adm-form-grid--3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.adm-form-grid .el-select,
+.adm-form-grid .el-date-editor {
+  width: 100%;
+}
+
+.adm-hint {
+  margin: 0;
+  color: var(--text-muted-aa);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.adm-secret {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--warning);
+  border-radius: var(--r-card);
+  background: var(--warning-bg);
+}
+
+.adm-secret__value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--text-title);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  padding: 8px;
+}
+
+.adm-scope-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.adm-scope-pill {
+  padding: 0 6px;
+  height: 20px;
+  line-height: 20px;
+  border-radius: var(--r-pill);
+  background: var(--color-info-bg);
+  color: var(--info-ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* 权限矩阵 */
+.adm-matrix-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 260px);
+}
+
+.adm-matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  min-width: 100%;
+}
+
+.adm-matrix th,
+.adm-matrix td {
+  height: 36px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--divider);
+  border-right: 1px solid var(--divider);
+  white-space: nowrap;
+  text-align: center;
+}
+
+.adm-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-table-head);
+  color: var(--text-muted-aa);
+  font-weight: 500;
+}
+
+.adm-matrix tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-card);
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-title);
+  font-family: var(--font-mono);
+}
+
+.adm-matrix thead th:first-child {
+  left: 0;
+  z-index: 2;
+}
+
+.adm-matrix tbody tr:hover th,
+.adm-matrix tbody tr:hover td {
+  background: var(--bg-hover);
+}
+
+.adm-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  height: 22px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+}
+
+.adm-cell--allow {
+  background: var(--color-success-bg);
+  color: var(--success-ink);
+}
+
+.adm-cell--restricted {
+  background: var(--warning-bg);
+  color: var(--warning-ink);
+}
+
+.adm-cell--deny {
+  color: var(--text-weak);
+}
+
+.adm-legend {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+
+/* 流程定义节点编辑 */
+.adm-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.adm-node {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 10px 12px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.adm-node__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.adm-node__key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted-aa);
+}
+
+.adm-node__spacer {
+  flex: 1;
+}
+
+.adm-node__error {
+  color: var(--danger-ink);
+  font-size: 12px;
+}
+
+.adm-json {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--bg-table-head);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-body);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 二级页内 tabs（租户/组织、域/厂商）——全局只有这一份定义 */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.tabs__item {
+  position: relative;
+  height: 36px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--text-body);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tabs__item:hover {
+  color: var(--color-primary);
+}
+
+.tabs__item--active {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.tabs__item--active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--color-primary);
+}

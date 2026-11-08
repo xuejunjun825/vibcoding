@@ -1,0 +1,225 @@
+/**
+ * Element Plus 变量覆盖（DESIGN §9）。
+ * 只覆盖变量 + 一层结构性样式，不引入第二套 UI 框架。
+ */
+:root {
+  --el-color-primary: #2b6fe5;
+  --el-color-primary-light-3: #5b8eeb;
+  --el-color-primary-light-5: #85a9ef;
+  --el-color-primary-light-7: #b0c8f5;
+  --el-color-primary-light-8: #c7d9f8;
+  --el-color-primary-light-9: #eaf1fe;
+  --el-color-primary-dark-2: #1f5fd0;
+
+  --el-color-success: #1f9d45;
+  --el-color-success-light-9: #e8f7ec;
+  --el-color-warning: #c77700;
+  --el-color-warning-light-9: #fff7e6;
+  --el-color-danger: #d9363e;
+  --el-color-danger-light-9: #fdecec;
+  --el-color-error: #d9363e;
+  --el-color-info: #4e5969;
+  --el-color-info-light-9: #f2f3f5;
+
+  --el-text-color-primary: #1f2329;
+  --el-text-color-regular: #4e5969;
+  --el-text-color-secondary: #6b7280;
+  --el-text-color-placeholder: #a9aeb8;
+  --el-text-color-disabled: #a9aeb8;
+
+  --el-border-color: #e5e6eb;
+  --el-border-color-light: #e5e6eb;
+  --el-border-color-lighter: #f2f3f5;
+  --el-border-color-extra-light: #f2f3f5;
+  --el-border-color-hover: #c9cdd4;
+  --el-fill-color: #f2f3f5;
+  --el-fill-color-light: #f7f9fc;
+  --el-fill-color-lighter: #fafbfc;
+  --el-fill-color-blank: #ffffff;
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #f5f7fa;
+  --el-bg-color-overlay: #ffffff;
+  --el-mask-color: rgba(31, 35, 41, 0.32);
+
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-font-size-base: 13px;
+  --el-font-size-small: 12px;
+  --el-font-family: var(--font-sans);
+  --el-box-shadow-light: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --el-box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --el-transition-duration: 120ms;
+  --el-transition-duration-fast: 120ms;
+  --el-disabled-bg-color: #f2f3f5;
+  --el-disabled-text-color: #a9aeb8;
+  --el-disabled-border-color: #e5e6eb;
+}
+
+/* ---- 按钮：高 32、圆角 6、无阴影 ---- */
+.el-button {
+  height: 32px;
+  padding: 0 12px;
+  font-weight: 500;
+  box-shadow: none;
+}
+.el-button--large {
+  height: 36px;
+}
+.el-button--small {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.el-button.is-text,
+.el-button--primary.is-text {
+  height: 28px;
+  padding: 0 8px;
+}
+.el-button + .el-button {
+  margin-left: 8px;
+}
+.el-button.is-disabled,
+.el-button.is-disabled:hover {
+  cursor: not-allowed;
+}
+
+/* ---- 输入 / 选择器 ---- */
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  box-shadow: 0 0 0 1px var(--border) inset;
+  border-radius: var(--r-ctl);
+}
+.el-input__wrapper:hover,
+.el-select__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--border-strong) inset;
+}
+.el-input__wrapper.is-focus,
+.el-textarea__inner:focus,
+.el-select__wrapper.is-focused {
+  box-shadow:
+    0 0 0 1px var(--color-primary) inset,
+    0 0 0 2px rgba(43, 111, 229, 0.12);
+}
+.el-input.is-disabled .el-input__wrapper {
+  background: var(--bg-hover);
+}
+
+/* ---- 表格：行高 44、表头 40、12px 列头 ---- */
+.el-table {
+  --el-table-header-bg-color: var(--bg-table-head);
+  --el-table-row-hover-bg-color: var(--bg-hover);
+  --el-table-border-color: var(--divider);
+  --el-table-text-color: var(--text-title);
+  --el-table-header-text-color: var(--text-muted-aa);
+  font-size: 13px;
+}
+.el-table th.el-table__cell {
+  height: 40px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+.el-table td.el-table__cell {
+  height: 44px;
+  padding: 0;
+}
+.el-table .cell {
+  padding: 0 12px;
+  line-height: 20px;
+}
+.el-table__body tr:last-child td.el-table__cell {
+  border-bottom: none;
+}
+
+/* ---- 分页 ---- */
+.el-pagination {
+  --el-pagination-font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 标签：方角 pill（不是胶囊） ---- */
+.el-tag {
+  border-radius: var(--r-ctl);
+  font-weight: 500;
+}
+
+/* ---- 抽屉 / 弹窗 ---- */
+.el-drawer {
+  --el-drawer-padding-primary: 24px;
+  box-shadow: var(--shadow-drawer);
+}
+.el-drawer__header {
+  margin-bottom: 16px;
+  color: var(--text-title);
+  font-size: 14px;
+  font-weight: 600;
+}
+.el-dialog {
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-pop);
+  padding: 20px 24px;
+}
+.el-dialog__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-title);
+}
+.el-overlay {
+  background-color: var(--scrim);
+}
+
+/* ---- tab：文字 + 2px 下划线（与顶部导航一致） ---- */
+.el-tabs__item {
+  height: 36px;
+  font-size: 13px;
+  color: var(--text-body);
+}
+.el-tabs__item.is-active {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+.el-tabs__active-bar {
+  height: 2px;
+  background-color: var(--color-primary);
+  transition: width var(--t-expand) var(--ease);
+}
+.el-tabs__nav-wrap::after {
+  height: 1px;
+  background-color: var(--border);
+}
+
+/* ---- 其他 ---- */
+.el-card {
+  --el-card-border-color: var(--border);
+  --el-card-border-radius: var(--r-card);
+  --el-card-padding: 16px;
+  box-shadow: none;
+}
+.el-progress-bar__outer {
+  background-color: var(--divider);
+}
+.el-tooltip__popper,
+.el-popper.is-light {
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-pop);
+  font-size: 12px;
+}
+.el-message {
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-pop);
+  font-size: 13px;
+}
+.el-menu {
+  border-right: none;
+}
+.el-form-item__label {
+  color: var(--text-body);
+  font-size: 13px;
+}
+.el-form-item__error {
+  font-size: 12px;
+  padding-top: 4px;
+}

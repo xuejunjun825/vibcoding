@@ -223,5 +223,35 @@ make dev-up && make verify && make test-negative && make dev-down
 
 ### 10.3 边界与明确不做
 
-- ⛔ 不做：Python 交付物、Docker、CI、业务功能、MySQL 接入（PRD 非目标，本期不变）。
+- ⛔ 不做（**仅指 r1 骨架范围**）：Python 交付物、Docker、CI、业务功能；MySQL 接入已在 20261108-r2 的平台层引入，见 §11。
 - 其余边界（无业务单测、单实例端口、Nacos 仅本机）见 §9。
+
+## 11. 平台层（20261108-r2：DevOps 研发管理 M1–M5）
+
+r1 的四步（`dev-up / verify / test-negative / dev-down`）与 `/api/demo/**` 链路保持不变；平台层在其之上**叠加**，不改 r1 已验证的 `ApiGatewayApplication`。
+
+### 11.1 模块与端口
+
+| 模块 | 端口 | 职责 | 禁止 |
+|---|---|---|---|
+| `platform-contract` | — | 纯 Java 契约（零 Spring）：权限矩阵、状态表、指标公式、JWT、HMAC、门禁判定 DTO | 依赖 Servlet/Spring；被网关引用的类不得引入运行时框架 |
+| `platform-common` | — | 租户上下文、鉴权过滤器、强制 scope 的 `ScopedJdbc`、审计、编号、通知、错误体 | 承载业务规则；直连某服务的表 |
+| `req-service` | 8082 | 需求/拆解/状态机/需求池/审批引擎/版本/发布单 + **唯一 Flyway 迁移者** + 种子 | 自行判定测试门禁（必须经 `GatePort`） |
+| `deliver-service` | 8083 | 缺陷/任务迭代/用例版本/测试计划执行/门禁唯一实现/追溯/指标/开放 API | 直写 `requirement`/`release` 等 req 侧表（只经 `ReqReadModel`） |
+| `web` | 5173 | Vue 3 + Element Plus + Vite：需求域/交付域/分析域/设置 | 复制权限矩阵或状态表（来自服务端下发） |
+
+### 11.2 四条硬边界
+
+1. **写读分离**：写走 JPA，读走 `ScopedJdbc`——SQL 必须带 `/*scope:alias*/`，缺失即抛（fail-closed）；8 个隔离入口共用 `ScopeSql`。
+2. **单一定义**：状态表/权限矩阵/指标公式只在 `platform-contract`；门禁只在 `deliver` 的 `TestGateService`；`req` 经 `GatePort` 调用。
+3. **审批版本化**：`wf_instance` 钉 `definition_id + definition_version`，已发布版本不可编辑；会签按"剩余待办为 0"推进。
+4. **网关零侵入**：新增 `PlatformRoutes`（order -100/-90/-80）+ `JwtGatewayFilter`，放行 `/api/demo/**`。
+
+### 11.3 验收分层（`make test` 的顺序）
+
+`lint`（r1 7 项 + 平台 6 项）→ `platform-unit`（契约全表）→ r1 `dev-up/verify/test-negative` → `platform-up` → `platform-verify`（AC-1..AC-20，每项 HTTP + DB 计数）→ `platform-test-negative`（15 条"拒绝 + 不落库"）→ `platform-seed`（连跑两遍计数不变）。`platform-perf` 单独跑，结论写 `logs/teamflow/<runId>/perf-baseline.md`。
+
+### 11.4 已知偏差（详见 TECHNICAL §0.1）
+
+密钥可逆存储（`secret_hash` + `secret_enc`）、无计划走快速测试、发布驳回回 `DRAFT`、权限矩阵写代码、版本发布级联只前推不伪造。这些偏差由 QA 按原样验收，不是待修缺陷。
+

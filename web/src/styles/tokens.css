@@ -1,0 +1,75 @@
+/**
+ * 设计令牌（DESIGN §7.1 基础 + §7.2 本轮新增/修订）
+ * 唯一来源：页面与组件只允许引用变量，禁止写死十六进制色值。
+ */
+:root {
+  /* ---- 品牌与交互 ---- */
+  --color-primary: #2b6fe5;
+  --color-primary-hover: #1f5fd0;
+  --color-primary-active: #1a54bc;
+  --color-primary-light: #eaf1fe;
+
+  /* ---- 表面 ---- */
+  --bg-page: #f5f7fa;
+  --bg-card: #ffffff;
+  --bg-hover: #f7f9fc;
+  --bg-selected: #eaf1fe;
+  --bg-table-head: #fafbfc;
+
+  /* ---- 文字 ---- */
+  --text-title: #1f2329;
+  --text-body: #4e5969;
+  --text-secondary: #86909c; /* 仅 ≥14px 或纯装饰 */
+  --text-muted-aa: #6b7280; /* 12px 辅助文字，对白底 ≈4.8:1 */
+  --text-weak: #a9aeb8;
+
+  /* ---- 线与描边 ---- */
+  --border: #e5e6eb;
+  --border-strong: #c9cdd4;
+  --divider: #f2f3f5;
+
+  /* ---- 语义色（浅底 + ink） ---- */
+  --color-success: #1f9d45;
+  --color-success-bg: #e8f7ec;
+  --success-ink: #157a38;
+  --color-warning: #c77700;
+  --color-warning-bg: #fff7e6;
+  --warning-ink: #9a5b00;
+  --color-danger: #d9363e;
+  --color-danger-bg: #fdecec;
+  --danger-ink: #b3262e;
+  --color-info: #4e5969;
+  --color-info-bg: #f2f3f5;
+  --info-ink: #4e5969;
+
+  /* ---- 几何 ---- */
+  --r-ctl: 6px;
+  --r-card: 8px;
+  --r-cell: 4px;
+  --r-pill: 999px;
+
+  /* ---- 阴影（仅浮层） ---- */
+  --shadow-pop: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-card-hover: 0 2px 8px rgba(43, 111, 229, 0.1);
+  --shadow-drawer: -8px 0 24px rgba(0, 0, 0, 0.06);
+
+  /* ---- 焦点 / 遮罩 / 回写 ---- */
+  --focus-ring: 0 0 0 2px var(--color-primary);
+  --scrim: rgba(31, 35, 41, 0.32);
+  --flash-ok: #e8f7ec;
+
+  /* ---- 动效（DESIGN §1.3：禁止 scale/bounce/spring） ---- */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --t-color: 120ms;
+  --t-expand: 160ms;
+  --t-overlay: 240ms;
+
+  /* ---- 布局 ---- */
+  --w-sidebar: 200px;
+  --h-topnav: 48px;
+  --h-side-item: 40px;
+
+  /* ---- 字体 ---- */
+  --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

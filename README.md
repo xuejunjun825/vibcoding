@@ -32,21 +32,87 @@ make dev-down
 首次运行会下载约 233MB 的 Nacos 发行包（打印进度与 sha256），缓存在 `.nacos/` 后不再下载；缓存命中时 `make dev-up` 约 21–26 秒（2026-11-08 多次实测 21.5–26s，预算 ≤180s）。
 `make dev-down` 约 5 秒（实测 5s）：两个服务已设 `spring.cloud.nacos.discovery.graceful-shutdown-wait-time: 0`，不再有默认 10s 的优雅下线等待，脚本会打印实测耗时。
 
+## 平台层（DevOps 研发管理，M1–M5）
+
+在 r1 骨架之上叠一层多租户研发管理：需求状态机与审批流、需求池/版本/发布准入、缺陷闭环、追溯矩阵、用例版本与测试计划、外部 CI 上报与测试门禁。r1 的四条命令与 `/api/demo/**` 链路**一行不改**，平台命令在其之上叠加。
+
+```bash
+# 1) 幂等拉起：Nacos+网关+demo（r1 的 dev-up）→ 建库 → 两服务 → 前端
+make platform-up          # req-service 8082 / deliver-service 8083 / web 5173
+
+# 2) 平台全量验收：AC-1..AC-20 逐项断言 HTTP + DB 计数
+make platform-verify
+
+# 3) 负向用例：15 条"必须被拒且不落库"
+make platform-test-negative
+
+# 4) 种子幂等：连跑两次计数不变，10 个账号都能登录
+make platform-seed
+
+# 5) 单元测试（状态机全表 / 权限矩阵 / JWT / HMAC / 指标公式）
+make platform-unit
+
+# 6) 性能基线（10 万需求、六项 P95 阈值），结论写 logs/teamflow/<runId>/perf-baseline.md
+make platform-perf
+
+# 7) 平台栈停止（只关本项目的进程）
+make platform-down
+```
+
+`make test` = 静态门禁 → 单元测试 → r1 四步 → 平台 up/verify/negative/seed（跑两遍），任一环节红即整体红。
+
+- 端口：网关 `8080`、demo `8081`、**req `8082`**、**deliver `8083`**、Nacos `8848/8849`、**web `5173`**
+- 数据库：MySQL `127.0.0.1:3306/devops_platform`（可用 `PLATFORM_DB_*` 覆盖）
+- 登录：`t1/admin/Admin@12345`（种子创建；其余 9 个账号见 `make platform-seed` 输出）
+- 开放 API：`POST /openapi/v1/test-executions`，`X-App-Key` + `X-Timestamp` + `X-Signature`（HMAC-SHA256，canonical 见下）
+
+签名串（逐字节一致，脚本与 CI 客户端共用）：
+
+```
+METHOD\nPATH\nAPP_KEY\nTIMESTAMP\nsha256_hex(body)
+```
+
+```bash
+BODY='{"run_id":"run-1","case_id":1,"result":"PASS","duration_ms":12,"executed_at":"2026-11-09T00:00:00+08:00"}'
+TS=$(date +%s); DIGEST=$(printf '%s' "$BODY" | openssl dgst -sha256 -hex | awk '{print $NF}')
+SIG=$(printf 'POST\n/openapi/v1/test-executions\n%s\n%s\n%s' "$APP_KEY" "$TS" "$DIGEST" \
+      | openssl dgst -sha256 -hmac "$APP_SECRET" -hex | awk '{print $NF}')
+curl -s -X POST http://localhost:8080/openapi/v1/test-executions \
+  -H "X-App-Key: $APP_KEY" -H "X-Timestamp: $TS" -H "X-Signature: $SIG" \
+  -H 'Content-Type: application/json' -d "$BODY"
+```
+
 ## 目录结构
 
 ```
 .
-├── pom.xml                  # 父 POM：java 25 + Boot/Cloud/SCA 三个 BOM
+├── pom.xml                  # 父 POM：java 25 + Boot/Cloud/SCA 三个 BOM + 六个模块
 ├── api-gateway/             # 8080，/api/** -> lb://demo-service（Java 声明路由）
+│                            #        + /api/req/**、/api/deliver/**、/openapi/** 与 JWT 过滤器
 ├── demo-service/            # 8081，Nacos discovery + config，GET /demo/hello
+├── platform-contract/       # 纯 Java 契约：权限矩阵/状态表/指标公式/JWT/HMAC/门禁判定（零 Spring）
+├── platform-common/         # Servlet 运行时：租户上下文/鉴权/强制 scope 的 ScopedJdbc/审计/编号
+├── req-service/             # 8082，需求/审批/版本/发布单 + Flyway 迁移（唯一迁移者）+ 种子
+├── deliver-service/         # 8083，缺陷/任务迭代/用例/计划/门禁/追溯/指标/开放 API
+├── web/                     # 5173，Vue 3 + Element Plus + Vite（需求域/交付域/分析域/设置）
 ├── config/nacos/            # Nacos 种子配置（dev-up 幂等发布）
 ├── scripts/
 │   ├── env-precheck.sh      # JDK/端口/磁盘/网络前置检查
 │   ├── nacos.sh             # ensure/start/stop/status
 │   ├── dev-up.sh            # 一条命令起环境
 │   ├── dev-down.sh          # 逆序停 + 端口校验
-│   ├── verify.sh            # 全链路体检
-│   └── tests/verify-negative.sh
+│   ├── verify.sh            # 全链路体检（r1 14 项）
+│   ├── lib.sh               # 唯一公共库（进程/端口/HTTP/DB/登录/内部接口）
+│   ├── platform-up.sh       # 平台栈拉起（叠加在 dev-up 之上，幂等）
+│   ├── platform-down.sh     # 平台栈停止（只关本项目的进程）
+│   ├── platform-verify.sh   # AC-1..AC-20 分组断言（HTTP + DB 计数）
+│   ├── platform-test-negative.sh  # §8.3 的 15 条负向用例
+│   ├── platform-seed.sh     # 种子幂等：连跑两遍 + 10 账号登录
+│   ├── platform-unit.sh     # 四个模块的单元测试（真实计数，拒绝假绿）
+│   ├── platform-perf.sh     # AC-20 六项性能基线（p50/p95 + EXPLAIN）
+│   ├── platform-web.sh      # 前端 install/build/preview
+│   ├── test-all.sh          # make test 的唯一编排入口
+│   └── tests/               # verify-negative.sh + lint.sh + platform/
 ├── Makefile
 ├── docs/teamflow/           # 需求产物 / 架构 / 产品记忆
 └── .nacos/                  # Nacos 发行包与数据（gitignore，不入库）

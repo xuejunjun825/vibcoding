@@ -1,0 +1,356 @@
+/**
+ * 基础层：reset、字体角色（DESIGN §1.5）、状态反馈（§1.3）、动效（§1.4）。
+ * 组件内只写自己的结构样式；可复用的表面/文字/骨架/空态在这里。
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text-body);
+  font: 400 13px/1.5 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--color-primary-hover);
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* 键盘焦点统一 2px 实心 ring（不用渐变，防低端屏闪烁） */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::placeholder {
+  color: var(--text-weak);
+}
+
+/* ---------------- 文字角色 ---------------- */
+.t-page-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-title);
+}
+.t-block-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-title);
+}
+.t-body {
+  font-size: 13px;
+  color: var(--text-body);
+}
+.t-aux {
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+.t-num {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-title);
+}
+.t-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-body);
+}
+
+/* ---------------- 表面 ---------------- */
+.surface {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+.surface--pad {
+  padding: 16px;
+}
+.surface--flush {
+  border-radius: 0;
+}
+.surface-divider {
+  height: 1px;
+  background: var(--divider);
+  border: 0;
+  margin: 0;
+}
+
+/* 页面标题行：左标题+计数，右操作（一屏最多 1 个主按钮） */
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  min-height: 32px;
+}
+.page-head__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* 页面主标题：h1 默认 32px 会把标题行撑高，统一到 16/600（与 .t-page-title 同角色）。
+   早先 5 个页面各自 scoped 复制了这段，现下沉到基座；scoped 副本保留亦不冲突。 */
+.page-head__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--text-title);
+}
+.page-head__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* 计数胶囊：高 18，min-width 18 */
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--color-info-bg);
+  color: var(--text-muted-aa);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+}
+.count-badge--danger {
+  background: var(--color-danger);
+  color: #fff;
+}
+
+/* ---------------- 骨架屏（8 行灰块 + shimmer） ---------------- */
+.skeleton {
+  padding: 8px 0;
+}
+.skeleton__row {
+  height: 14px;
+  margin: 0 16px 16px;
+  border-radius: 3px;
+  background: var(--divider);
+  animation: shimmer 1.2s var(--ease) infinite;
+}
+.skeleton__row:nth-child(3n + 1) {
+  width: 68%;
+}
+.skeleton__row:nth-child(3n + 2) {
+  width: 84%;
+}
+.skeleton__row:nth-child(3n) {
+  width: 52%;
+}
+@keyframes shimmer {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+/* 翻页/重载：顶部 2px 进度条，保留旧数据 */
+.loading-bar {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  background: var(--divider);
+}
+.loading-bar--idle {
+  background: transparent;
+}
+.loading-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: var(--color-primary);
+  animation: loading-slide 1s var(--ease) infinite;
+}
+@keyframes loading-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+/* 数据回写 flash（600ms 渐隐） */
+.flash-ok {
+  animation: flash-ok 600ms var(--ease);
+}
+@keyframes flash-ok {
+  0% {
+    background: var(--flash-ok);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* ---------------- 表格行操作：默认隐藏，hover / focus-within 出现 ---------------- */
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--t-color) var(--ease);
+}
+tr:hover .row-actions,
+tr:focus-within .row-actions,
+.row-actions:focus-within {
+  opacity: 1;
+}
+
+/* ---------------- 筛选条 ---------------- */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--divider);
+  flex-wrap: wrap;
+}
+.filter-bar__spacer {
+  flex: 1;
+}
+.chip-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--text-body);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--t-color) var(--ease);
+}
+.chip-count:hover {
+  background: var(--bg-hover);
+}
+.chip-count.is-active {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-weight: 500;
+}
+.chip-count.is-active .count-badge {
+  background: #fff;
+  color: var(--color-primary);
+}
+
+/* ---------------- 语义文字 ---------------- */
+.ink-success {
+  color: var(--success-ink);
+}
+.ink-warning {
+  color: var(--warning-ink);
+}
+.ink-danger {
+  color: var(--danger-ink);
+}
+.ink-muted {
+  color: var(--text-muted-aa);
+}
+
+/* ---------------- 滚动区 ---------------- */
+.scroll-y {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.scroll-y::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-y::-webkit-scrollbar-thumb {
+  background: #d9dde3;
+  border-radius: 4px;
+}
+.scroll-y::-webkit-scrollbar-thumb:hover {
+  background: #c9cdd4;
+}
+.scroll-y::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 只读 / 摘要态标识 */
+.readonly-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 16px;
+  background: var(--color-info-bg);
+  color: var(--text-body);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--r-ctl);
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ---------------- 动效降级 ---------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+  .skeleton__row {
+    animation: none;
+    opacity: 0.55;
+  }
+}

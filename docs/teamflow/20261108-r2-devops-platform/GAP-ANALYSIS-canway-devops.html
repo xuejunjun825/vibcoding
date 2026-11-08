@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>对标嘉为蓝鲸 DevOps 的能力差距评估</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 0 60px;background:#fff;color:var(--body);
+  font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:960px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;
+  font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.meta-note{font-size:12px;color:var(--muted)}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+@media print{body{padding:0}.toc{break-inside:avoid}}
+
+h1.title{display:none}
+td:first-child,th:first-child{white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="page">
+<h1 id="对标嘉为蓝鲸-devops-解决方案的-prd-差距评估">对标嘉为蓝鲸 DevOps
+解决方案的 PRD 差距评估</h1>
+<ul>
+<li>对标材料：《2026-嘉为蓝鲸DevOps解决方案介绍.pdf》（72
+页，含解决方案总览、CTeam/CCode/CCI/CPack/CTest/CMeas/CFlow
+产品能力、中行与人保案例）</li>
+<li>评估对象：<code>docs/teamflow/20261108-r2-devops-platform/PRD.md</code>（455
+行，15 章）</li>
+<li>评估日期：2026-11-08</li>
+<li>结论：<strong>主干对齐</strong>（需求全流程 + 审批 + 版本 + 交付 +
+度量闭环在 PDF
+中都有对应能力域）；<strong>缺口集中在“交付过程的后半段”与“平台化能力”</strong>——缺陷闭环、发布单/准入、追溯矩阵、任务与迭代、工时与产能、指标字典与报告、通知渠道、开放
+API。本期建议补 8 项，其余进二期 roadmap。</li>
+</ul>
+<h2 id="1-覆盖度总览">1. 覆盖度总览</h2>
+<table>
+<thead>
+<tr>
+<th>嘉为能力域</th>
+<th>PDF 位置</th>
+<th>当前 PRD</th>
+<th>判定</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>需求提报/评审/分派/状态流转/拆解</td>
+<td>CTeam 产品功能架构</td>
+<td>§3.2、§4.2–4.5</td>
+<td>✅ 覆盖（更细：三类需求 + 三层父子）</td>
+</tr>
+<tr>
+<td>版本/里程碑/规划发布</td>
+<td>CTeam</td>
+<td>§4.6</td>
+<td>✅ 覆盖</td>
+</tr>
+<tr>
+<td>需求矩阵（追溯）</td>
+<td>CTeam「需求矩阵」</td>
+<td>无</td>
+<td>❌ 缺</td>
+</tr>
+<tr>
+<td>任务拆分 / 迭代（Sprint）/ 迭代看板 / 甘特</td>
+<td>CTeam</td>
+<td>无（只有需求与 Release）</td>
+<td>❌ 缺</td>
+</tr>
+<tr>
+<td>缺陷管理</td>
+<td>CTeam「缺陷管理」+ 全景图</td>
+<td>仅「测试不通过 + 缺陷记录」一句</td>
+<td>⚠️ 极弱</td>
+</tr>
+<tr>
+<td>工时登记 / 工时核算</td>
+<td>CTeam「工时登记」+ 度量「工时统计」</td>
+<td>只有人天预估/实际</td>
+<td>⚠️ 缺登记过程</td>
+</tr>
+<tr>
+<td>风险 / 基线</td>
+<td>CTeam「风险」「基线」</td>
+<td>仅版本延期标红</td>
+<td>⚠️ 弱</td>
+</tr>
+<tr>
+<td>知识管理（Wiki/文件与需求关联）</td>
+<td>CTeam「知识沉淀」</td>
+<td>仅附件</td>
+<td>⚠️ 弱</td>
+</tr>
+<tr>
+<td>项目/团队目标（OKR）</td>
+<td>框架图「团队目标」</td>
+<td>无</td>
+<td>❌ 缺（可二期）</td>
+</tr>
+<tr>
+<td>代码托管 / 分支保护 / MR·CR 评审</td>
+<td>CCode 全章</td>
+<td>明确非目标，仅手工 MR 链接</td>
+<td>⛔ 不做（二期对接）</td>
+</tr>
+<tr>
+<td>持续集成 / 流水线 / 质量门禁 / 编译加速</td>
+<td>CCI 全章</td>
+<td>明确非目标</td>
+<td>⛔ 不做（二期对接）</td>
+</tr>
+<tr>
+<td>制品仓库 / 元数据 / 漏洞扫描</td>
+<td>CPack 全章</td>
+<td>明确非目标</td>
+<td>⛔ 不做（二期对接）</td>
+</tr>
+<tr>
+<td>测试计划 / 用例 / 执行 / 报告 / 自动化</td>
+<td>CTest</td>
+<td>仅结果与缺陷</td>
+<td>⚠️ 缺用例与报告</td>
+</tr>
+<tr>
+<td>多数据源度量 / 数据集 / 仪表板 / 拖拽</td>
+<td>CMeas</td>
+<td>§4.11 自助报表</td>
+<td>✅ 覆盖（数据源仅内部，缺外部接入）</td>
+</tr>
+<tr>
+<td>指标字典 / 岗位视图 / 报告定时发送 / 阈值告警</td>
+<td>CMeas</td>
+<td>看板 + 手动导出</td>
+<td>⚠️ 缺</td>
+</tr>
+<tr>
+<td>价值流管理（CFlow：阶段、WIP、瓶颈）</td>
+<td>产品矩阵</td>
+<td>§4.10 周期分段（提报→入池→交付）</td>
+<td>⚠️ 近似，缺可配置与瓶颈分析</td>
+</tr>
+<tr>
+<td>审批流（四类单据可配）</td>
+<td>PDF 未展开（我方扩展）</td>
+<td>§4.8 自研引擎 + 加签/减签</td>
+<td>✅ 超出 PDF</td>
+</tr>
+<tr>
+<td>多厂商 × 业务域隔离 / 二级企业提报</td>
+<td>PDF 只在案例讲多方协作</td>
+<td>§7 双维度隔离 + 二级企业</td>
+<td>✅ 超出 PDF</td>
+</tr>
+<tr>
+<td>权限中心 / 审计日志 / 安全设置</td>
+<td>CCode/CPack 基础支撑</td>
+<td>§4.13、§8</td>
+<td>✅ 覆盖（缺字段级与 IP 白名单）</td>
+</tr>
+<tr>
+<td>Open API / Webhook / 系统集成</td>
+<td>CCode「开放集成能力」</td>
+<td>无</td>
+<td>❌ 缺</td>
+</tr>
+<tr>
+<td>邮件/企微/钉钉/飞书通知</td>
+<td>CCode「消息通知集成」</td>
+<td>仅站内</td>
+<td>⚠️ 缺</td>
+</tr>
+<tr>
+<td>SSO / LDAP 统一账号</td>
+<td>CPack「对接已有账号体系」</td>
+<td>本地 JWT（假设 A2）</td>
+<td>⚠️ 二期</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-建议本期补充p0按价值成本排序">2.
+建议本期补充（P0，按价值/成本排序）</h2>
+<h3 id="p0-1-缺陷bug闭环">P0-1 缺陷（Bug）闭环</h3>
+<ul>
+<li>缺口：当前只有「测试不通过 +
+缺陷记录」，没有缺陷实体、状态机与指标；交付质量看板因此算不准。</li>
+<li>PDF：CTeam「缺陷管理」、「关联缺陷」；CMeas「缺陷等级分布/重开率/缺陷密度」。</li>
+<li>建议：<code>defect</code> 表（编号
+BUG-0001、关联需求/版本/测试记录、严重级 P0–P3、发现人/处理人、状态
+新建→处理中→待验证→关闭/重开、原因分类）；缺陷列表与看板；测试不通过自动建缺陷；发布准入校验依赖它。</li>
+<li>成本：M。验收：缺陷可创建/流转/关闭重开；版本详情显示未关闭缺陷数；AC
+新增 1 条。</li>
+</ul>
+<h3 id="p0-2-发布单升级为上线单-准入校验">P0-2 发布单升级为「上线单」+
+准入校验</h3>
+<ul>
+<li>缺口：§4.7 只有「发布申请 →
+审批」，缺发布内容清单、目标环境、计划窗口、回滚方案、执行结果，导致「发布成功率/发布日历」无数据来源。</li>
+<li>PDF：CCI「发布上线/回滚」、CD 多环境（测试/准生产/生产）+
+蓝绿/灰度；CTeam「发布审批」。</li>
+<li>建议：发布单（关联 Release + 需求清单 + 制品版本号手填 + 目标环境 +
+窗口 + 回滚方案 + 执行结果 成功/失败/回滚 +
+耗时）；提交时自动准入校验：需求全部测试通过、无未关闭 P0/P1
+缺陷、人天已填、前置审批已过；不满足则禁止提交，PMO
+可强制放行并记录原因。</li>
+<li>成本：M。验收：不满足条件的发布单提交被拒且提示缺哪项；放行留痕；发布结果可统计。</li>
+</ul>
+<h3 id="p0-3-需求追溯矩阵需求--任务mr--测试--发布">P0-3
+需求追溯矩阵（需求 → 任务/MR → 测试 → 发布）</h3>
+<ul>
+<li>缺口：PDF 强调「Commit 带工作项编号、MR
+关联需求、构建结果回流、全链路可追溯」；我方只有手工 MR
+链接字符串，无法回答「这条研发需求交付完了吗」。</li>
+<li>建议（不接代码平台版本）：需求详情时间线（提报→审批→拆解→分派→MR
+链接→测试记录→缺陷→发布单）；矩阵页行=需求、列=阶段（有/无），可筛「缺
+MR」「缺测试」「未发布」；数据全部来自本平台手工字段，后续对接 webhook
+可自动填充。</li>
+<li>成本：M。验收：任一 RD-xxx
+能一屏看到全链路；矩阵可导出（带水印）。</li>
+</ul>
+<h3 id="p0-4-任务task与迭代sprint">P0-4
+任务（Task）与迭代（Sprint）</h3>
+<ul>
+<li>缺口：PDF CTeam 核心是「需求→任务→迭代看板」，我方只有需求与
+Release，研发无法做日粒度排期与看板拉动。</li>
+<li>建议：研发需求下挂任务（标题/负责人/预估小时/状态
+待办/进行中/完成/阻塞/截止日）；迭代=Release
+下的时间盒（起止日、目标、容量）；任务看板（按人/按状态）；任务完成率回写研发需求进度。</li>
+<li>成本：M。验收：一个迭代内可建任务、拖动状态、看板实时；需求进度由任务完成率驱动（与
+AC-3 汇总口径兼容）。</li>
+</ul>
+<h3 id="p0-5-工时填报与产能负载视图">P0-5 工时填报与产能/负载视图</h3>
+<ul>
+<li>缺口：PDF
+有「工时登记/工时统计/资源利用率/成员饱和度」；我方只有人天字段，无法回答「谁这周满了、哪个厂商产能不足」。</li>
+<li>建议：<code>worklog</code>（用户/日期/需求或任务/工时 0.5h
+精度/备注）→ 汇总实际人天；产能视图按
+厂商×人×周：可用人天、已排人天、负载率、超载预警；排期时提示超载。</li>
+<li>成本：M。验收：填报后实际人天自动更新（手填与填报二选一，需先定口径）；负载视图数字可核对。</li>
+</ul>
+<h3 id="p0-6-指标字典--周报月报导出">P0-6 指标字典 + 周报/月报导出</h3>
+<ul>
+<li>缺口：看板指标散在各处、口径靠文档；PDF
+有「指标字典/报告管理/日报周报月报自动发送」。</li>
+<li>建议：产品内「指标字典」页（指标名、公式、数据源、口径说明、负责人、版本）；报告模板（周报/月报
+XLSX，复用 §4.11 导出与水印）；本期先做「一键生成 +
+下载」，定时发送放二期。</li>
+<li>成本：S/M。验收：每个看板数字可点开看定义；生成的周报含核心指标与环比。</li>
+</ul>
+<h3 id="p0-7-通知渠道邮件--出站-webhook">P0-7 通知渠道：邮件 + 出站
+Webhook</h3>
+<ul>
+<li>缺口：PDF 有邮件/企微/钉钉/飞书与
+Webhook；我方仅站内，审批超时与发布提醒出不了平台。</li>
+<li>建议：SMTP 邮件通道（审批待办/超时/发布结果）；通用出站
+webhook（固定 JSON payload + 签名 + 失败重试 +
+投递日志），企微/钉钉适配器二期。</li>
+<li>成本：S/M。验收：配置后审批待办能收到邮件；webhook 可用本地 mock
+收到事件且重试可见。</li>
+</ul>
+<h3 id="p0-8-平台开放-api-与字段级脱敏">P0-8 平台开放 API
+与字段级脱敏</h3>
+<ul>
+<li>缺口：PDF 强调 Open API
+与「对接已有账号体系/ITSM/通知系统」；我方无对外接口，且「成本人天不可见」靠视图隔离而非字段级规则。</li>
+<li>建议：对外 Open API（需求创建/查询、状态变更回调、审批结果）带
+AppKey 鉴权与限流、写审计；字段级可见性规则表（字段 ×
+角色/数据范围），成本字段、厂商评分默认仅管理层/PMO
+可见，接口与导出同一套规则。</li>
+<li>成本：M。验收：API
+可创建需求并在平台可见；越权字段在接口返回中被过滤而非前端隐藏。</li>
+</ul>
+<h2 id="3-二期p1建议登记进-roadmap暂不实现">3. 二期（P1）建议登记进
+roadmap，暂不实现</h2>
+<ol type="1">
+<li>测试用例库 + 测试计划 + 覆盖率口径（CTest）。</li>
+<li>Wiki/文档库与需求双向关联（CTeam 知识沉淀）。</li>
+<li>需求变更单：锁定版本内的变更影响分析（人天/里程碑/关联需求
+diff）。</li>
+<li>风险登记（版本/域维度）与应对跟踪。</li>
+<li>甘特图、基线对比（两个 Release 差异）。</li>
+<li>CFlow 价值流：阶段可配置、WIP 限制、漏斗与瓶颈分析。</li>
+<li>报表订阅推送（定时邮件/企微）、阈值告警。</li>
+<li>外部数据源接入（数仓/第三方平台）与仪表板模板市场。</li>
+<li>SSO / LDAP / OAuth2 统一登录。</li>
+<li>移动端 H5（审批、进度）。</li>
+<li>与 CCode/CCI/CPack/CTest 类外部平台对接：MR/提交/构建/制品/测试结果
+webhook 回传，自动填充 P0-3 矩阵。</li>
+<li>AI 辅助（需求润色/摘要、相似需求语义化、智能问答）——PDF CAgent
+能力，需单独评估成本。</li>
+<li>多租户独立库、IP
+白名单、国密/等保加固、登录失败锁定与会话策略。</li>
+</ol>
+<h2 id="4-明确不做维持现行非目标">4. 明确不做（维持现行非目标）</h2>
+<ul>
+<li>自研代码托管、CI 流水线引擎、制品仓库、自动化测试平台（对应
+CCode/CCI/CPack/CTest 全量能力）。</li>
+<li>外部 BI 工具集成（Superset/Tableau/帆软）。</li>
+<li>编译加速、代码扫描规则引擎等腾讯内部重资产能力。</li>
+</ul>
+<h2 id="5-我方已超出-pdf-的能力差异化建议写进方案说明">5. 我方已超出 PDF
+的能力（差异化，建议写进方案说明）</h2>
+<p>PDF 是通用产品介绍，未展开以下定制点，而我们已明确：</p>
+<ol type="1">
+<li>「业务域 × 厂商」双维度行级隔离 + 统一过滤面（PDF
+只在案例里讲多方协作）。</li>
+<li>二级管理企业业务人员提报与全集团需求池只读浏览。</li>
+<li>三类需求（BUS/PDR/RD）三层父子 + 差异化状态机 + 类型化权限。</li>
+<li>审批流加签/减签、流程版本化、在途实例按启动版本执行。</li>
+<li>报表默认私有 + 导出强制水印（含 CSV 元信息）。</li>
+<li>人天三级汇总口径（研发→产品→业务，父需求只读）。</li>
+</ol>
+<h2 id="6-若采纳prd-需改动的位置">6. 若采纳，PRD 需改动的位置</h2>
+<table>
+<thead>
+<tr>
+<th>改动</th>
+<th>位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>新增 §4.14 缺陷管理、§4.15 任务与迭代、§4.16 发布单与准入、§4.17
+工时与产能、§4.18 指标字典</td>
+<td>§4 功能需求</td>
+</tr>
+<tr>
+<td>新增表：<code>defect</code>、<code>task</code>、<code>sprint</code>、<code>worklog</code>、<code>deploy_order</code>、<code>metric_definition</code>、<code>field_visibility</code>、<code>webhook_subscription</code>、<code>api_client</code></td>
+<td>§5 数据模型</td>
+</tr>
+<tr>
+<td>新增
+AC：缺陷闭环、准入拦截、追溯矩阵、任务看板、工时回写、指标可解释、webhook
+投递、API 鉴权与字段脱敏</td>
+<td>§9</td>
+</tr>
+<tr>
+<td>范围表补 8
+项；非目标表把「测试用例库/Wiki/甘特/CFlow/AI/SSO/移动端」明确列二期</td>
+<td>§10</td>
+</tr>
+<tr>
+<td>里程碑：M3 加「发布单+准入」、M4 加「缺陷/任务/工时」、M6
+加「指标字典+报告」</td>
+<td>§13</td>
+</tr>
+<tr>
+<td>风险表补：工时口径变更、webhook
+安全（签名/重放）、字段级权限漏配</td>
+<td>§12</td>
+</tr>
+</tbody>
+</table>
+</div>
+</body>
+</html>
