@@ -1,7 +1,7 @@
 # 集成对接规格（Jenkins / GitLab / Sonar / 制品库）
 
 > 用户明确要求：「CI对接 jekins、gitlab、sonar、制品库」。
-> 排期已定：**本轮 r2（M1–M5）先跑完，紧接着开增量 run「M6 集成对接」**，本文件是那一轮的现成输入。
+> 排期已定：**本轮 r2（M1–M5）先跑完 → M6 质量管理补全（见 [QUALITY-MANAGEMENT-GAP.md](QUALITY-MANAGEMENT-GAP.md)）→ M7 集成对接**，本文件是 M7 的现成输入。
 > 与 [PRD.md](PRD.md) 的关系：PRD §4.19 已定通用开放 API + 出站 Webhook（AC-17 通用上报契约）；本文件把「具体系统」的适配细节补齐，不改变已定验收口径。
 
 ## 1. 通用原则（四条，所有集成共享）

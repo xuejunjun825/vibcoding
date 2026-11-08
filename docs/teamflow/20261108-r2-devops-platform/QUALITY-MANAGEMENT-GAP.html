@@ -325,12 +325,16 @@ P0/P1、必需用例集三类中任一不满足，计划标记「完成」返回
 <li><strong>AC-Q8</strong>：质量指标补齐：一次通过率（FPY）、回归通过率、缺陷逃逸率、发布后
 72h 缺陷数、回滚率，均可按域/厂商/版本切片并与看板同源。</li>
 </ul>
-<h2 id="7-排期建议">7. 排期建议</h2>
+<h2 id="7-排期已定">7. 排期（已定）</h2>
 <p>缺口中 <strong>P0 有 5
-条</strong>（计划评审与变更、准出条件、轮次、测试报告、质量门+豁免），它们是「用户要的测试报告质量门」的直接前置，建议作为<strong>一轮独立交付（M6
-质量管理补全）</strong>，CI 集成对接（Jenkins/GitLab/Sonar/制品库，见 <a
-href="INTEGRATION-ci.md">INTEGRATION-ci.md</a>）顺延为 M7 —— 两者都碰
-<code>deploy_order.quality_gate_id</code>，质量门先落地能让集成接入时直接挂到门禁规则上。</p>
+条</strong>（计划评审与变更、准出条件、轮次、测试报告、质量门+豁免），它们是「用户要的测试报告质量门」的直接前置。</p>
+<p><strong>排期决定</strong>：本轮 r2（M1–M5）跑完后，下一个 run 作为
+<strong>M6 质量管理补全</strong> 交付本节 P0 五条 + P1
+的（测试策略、执行分配与进度、环境台账、Go/No-Go
+评审、生产缺陷回流与观察窗）；CI 集成对接（<a
+href="INTEGRATION-ci.md">INTEGRATION-ci.md</a>）顺延为
+<strong>M7</strong>——两者都碰
+<code>deploy_order.quality_gate_id</code>，质量门先落地后，集成可直接作为门禁规则接入。</p>
 </div>
 </body>
 </html>
