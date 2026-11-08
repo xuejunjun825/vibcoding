@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>质量管理作业流程差距分析（测试计划 / 测试报告 /
+版本质量门）</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 0 60px;background:#fff;color:var(--body);
+  font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:960px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;
+  font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.meta-note{font-size:12px;color:var(--muted)}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+@media print{body{padding:0}.toc{break-inside:avoid}}
+
+h1.title{display:none}
+td:first-child,th:first-child{white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="page">
+<h1
+id="质量管理作业流程差距分析测试计划--测试报告--版本质量门">质量管理作业流程差距分析（测试计划
+/ 测试报告 / 版本质量门）</h1>
+<blockquote>
+<p>用户要求：测试要有<strong>完整的测试计划管理</strong>；梳理<strong>质量管理缺失的作业流程</strong>；版本发布要有<strong>测试报告的质量门</strong>管理。
+已实现基线见本轮流水线 PRD：<a
+href="../20261108-r2-devops-req-platform/PRD.md">docs/teamflow/20261108-r2-devops-req-platform/PRD.md</a>
+§4.14（测试计划与执行）、§4.9（发布准入 5
+项）、§4.16（指标）。本文件只谈差距与补法，不改已定验收口径。</p>
+</blockquote>
+<h2 id="1-现状本轮-m5-会交付什么">1. 现状（本轮 M5 会交付什么）</h2>
+<ul>
+<li>测试<strong>用例库</strong>：模块树≤3 层、TC
+编号、用例版本化、执行记录绑 <code>case_version</code>。</li>
+<li>测试<strong>计划</strong>：挂
+Release、选用例集合、执行人、时间窗、状态（草稿/执行中/完成）、四种执行结果、通过率/覆盖率汇总。</li>
+<li><strong>门禁</strong>：RD「测试通过」按 Release 开关 +
+严格/宽松模式。</li>
+<li><strong>失败转缺陷</strong>：带用例/版本/需求/执行记录。</li>
+<li><strong>发布准入 5 项</strong>：需求全测过、无未关闭 P0/P1、MR
+已填、人天已填、审批已过；PMO 可强制放行。</li>
+</ul>
+<h2 id="2-缺口清单按质量管理的四个作业域">2.
+缺口清单（按质量管理的四个作业域）</h2>
+<p>优先级：<strong>P0</strong>=缺了就「质量门形同虚设」；<strong>P1</strong>=作业流程不完整、靠人盯；<strong>P2</strong>=成熟度提升。</p>
+<h3 id="21-质量策划把测什么谁测什么时候算完定清楚">2.1
+质量策划（把「测什么、谁测、什么时候算完」定清楚）</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>缺失流程</th>
+<th>现状/缺口</th>
+<th>建议</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>QP-1</td>
+<td>版本测试策略/方案</td>
+<td>只有用例集合，没有版本级测试策略（范围、风险分级、环境、资源、进入/退出条件）</td>
+<td>版本下建「测试策略」文档对象：必测范围（需求清单）、风险点、环境清单、轮次计划、资源；作为测试计划的父级</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>QP-2</td>
+<td>测试计划评审与变更控制</td>
+<td>计划可直接编辑，无评审、无变更留痕</td>
+<td>计划加「提交评审 →
+批准」两态（可接审批流第五类单据，默认关）；范围/时间/用例增删写
+<code>plan_change_log</code>（原因、审批人）</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>QP-3</td>
+<td>计划准出条件（Exit Criteria）结构化</td>
+<td>「完成」只等于「无未执行」，通过率/缺陷留存量没有判定口径</td>
+<td>计划配结构化准出条件：通过率≥阈值、P0/P1 未关闭=0、必需用例集 100%
+通过、遗留缺陷豁免清单；不满足时计划不可标「完成」</td>
+<td>P0</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-质量控制执行过程的可见与可控">2.2
+质量控制（执行过程的可见与可控）</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>缺失流程</th>
+<th>现状/缺口</th>
+<th>建议</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>QC-1</td>
+<td>测试轮次（Round）与回归再测</td>
+<td>计划只有一份执行状态，缺陷修复后无法「再测一轮」并区分首轮/回归</td>
+<td><code>test_plan_round</code>（R1 新功能、R2 回归、R3
+缺陷验证…）：每轮独立记录结论、用例集、执行人、起止；计划汇总按最后一轮或全部轮次视图</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>QC-2</td>
+<td>执行任务分配与进度跟踪</td>
+<td>只有「执行人」一个字段，无法按模块/人分配与跟踪</td>
+<td><code>plan_assignment</code>（执行人 × 模块 ×
+用例数）：进度按人/模块汇总、超期提醒、未执行催办；工作台出「我的待执行用例」</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>QC-3</td>
+<td>测试环境台账</td>
+<td>发布单有「目标环境」但环境本身无台账</td>
+<td><code>test_env</code>（环境名、类型
+DEV/TEST/STAGING/PROD、地址、负责人、状态
+可用/维护/停用）；计划与执行记录绑定环境</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>QC-4</td>
+<td>测试数据准备</td>
+<td>无</td>
+<td>计划下挂「测试数据说明」文本 +
+附件（脚本/数据集），不做数据造数平台</td>
+<td>P2</td>
+</tr>
+<tr>
+<td>QC-5</td>
+<td>用例评审</td>
+<td>PRD 预留了开关但默认关</td>
+<td>保持默认关；先在计划评审里做用例抽查说明</td>
+<td>P2</td>
+</tr>
+</tbody>
+</table>
+<h3 id="23-质量保证结论可签门禁可执行">2.3
+质量保证（结论可签、门禁可执行）</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>缺失流程</th>
+<th>现状/缺口</th>
+<th>建议</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>QA-1</td>
+<td><strong>测试报告</strong>（自动生成 + 版本化 + 签核）</td>
+<td>完全没有。用户明确要求「版本发布要有测试报告的质量门」</td>
+<td><code>test_report</code>：按计划/轮次自动生成（范围快照、用例执行分布、通过率/覆盖率、缺陷统计与趋势、遗留缺陷与豁免清单、风险与结论
+PASS/FAIL/CONDITIONAL）；报告版本化、可导出
+XLSX/PDF（带水印）、可会签（测试负责人→产品→PMO）</td>
+<td><strong>P0</strong></td>
+</tr>
+<tr>
+<td>QA-2</td>
+<td><strong>版本发布质量门</strong>（Quality Gate）</td>
+<td>准入 5 项里没有「报告」，测试通过是状态而不是可核验的结论</td>
+<td><code>quality_gate</code>：绑
+Release/发布单，规则集（测试报告结论=通过且在有效期内、通过率≥X%、P0/P1=0、可选
+Sonar 门禁/制品校验）；结果
+PASS/FAIL/WAIVED；<code>quality_gate_snapshot</code>
+固化门禁时刻的数据；发布单准入增加「质量门通过」项</td>
+<td><strong>P0</strong></td>
+</tr>
+<tr>
+<td>QA-3</td>
+<td>门禁豁免（Waiver）与留痕</td>
+<td>现在只有「强制放行」一个大按钮，无豁免范围与审批</td>
+<td><code>quality_gate_waiver</code>：规则级豁免（哪条门禁、原因、影响范围、审批人、有效期），发布单展示豁免清单；强制放行降级为「豁免
++ PMO 审批」</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>QA-4</td>
+<td>发布评审 Go/No-Go</td>
+<td>只有发布单审批</td>
+<td>发布评审会视图：质量门结果 + 测试报告 + 遗留缺陷 +
+风险清单，一键生成评审记录</td>
+<td>P1</td>
+</tr>
+</tbody>
+</table>
+<h3 id="24-质量改进把结果变成下一轮的依据">2.4
+质量改进（把结果变成下一轮的依据）</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>缺失流程</th>
+<th>现状/缺口</th>
+<th>建议</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>QI-1</td>
+<td>生产缺陷回流</td>
+<td>缺陷只能从测试执行或手工提，发布后无回流路径</td>
+<td>缺陷来源加 <code>PROD</code>；发布后观察窗（默认
+72h）内产生的缺陷标记为「逃逸缺陷」并回写版本质量门统计</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>QI-2</td>
+<td>发布后观察与回滚阈值</td>
+<td>无</td>
+<td>发布单记录观察窗与回滚执行；指标加「发布后 72h
+缺陷数」「回滚率」</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>QI-3</td>
+<td>质量复盘（根因/逃逸分析）</td>
+<td>无</td>
+<td>缺陷加根因分类（需求/设计/编码/环境/数据）与发现阶段；按版本出「逃逸分析」报表</td>
+<td>P2</td>
+</tr>
+<tr>
+<td>QI-4</td>
+<td>供应商质量评价</td>
+<td>无</td>
+<td>按厂商聚合：一次通过率、缺陷密度、重开率、按时交付率，出厂商质量评分卡（对接管理者视角）</td>
+<td>P2</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-完整的测试计划管理对象模型">3.
+完整的测试计划管理（对象模型）</h2>
+<pre><code>测试策略(版本) ── 测试计划 ── 轮次 Round ── 执行记录 ── 缺陷
+                     │              └── 测试报告 ── 签核 ── 质量门 ── 发布单
+                     ├── 计划范围（需求集合 / 用例集合，含 case_version 快照）
+                     ├── 执行分配（执行人 × 模块 × 用例数）
+                     ├── 准出条件（结构化）
+                     └── 变更日志（范围/时间/用例增删 + 原因 + 审批）</code></pre>
+<ul>
+<li><strong>生命周期</strong>：草稿 → 待评审 → 已批准 →
+执行中（可多轮次）→ 已完成（准出条件满足）→
+已关闭/归档；任一状态变更写审计。</li>
+<li><strong>完成判定</strong>：服务端唯一实现——所有轮次里最新状态为准，准出条件不满足返回
+409 并列出未满足项；与发布门禁同源，不允许「界面置灰、接口可过」。</li>
+<li><strong>与发布的关系</strong>：发布单必须挂到某个「已出具测试报告且质量门通过」的版本；报告过期（超有效期/版本内容变更）时门禁自动失效并提示重新出具。</li>
+</ul>
+<h2 id="4-版本发布质量门quality-gate设计">4. 版本发布质量门（Quality
+Gate）设计</h2>
+<ul>
+<li><strong>门禁规则（可配，默认全开）</strong>：
+<ol type="1">
+<li>版本存在<strong>测试报告</strong>，结论 =
+<code>PASS</code>，且在有效期内（默认 7 天，按版本可配）；</li>
+<li>报告结论为 <code>CONDITIONAL</code>
+时必须有<strong>豁免清单</strong>且经 PMO 审批；</li>
+<li>计划通过率 ≥ 阈值（默认 95%，严格模式=100%）；</li>
+<li>未关闭 P0/P1 缺陷 = 0；</li>
+<li>（M6 起可选）Sonar 质量门通过、制品校验通过、最近一次构建成功。</li>
+</ol></li>
+<li><strong>门禁执行</strong>：发布单提交时实时计算 +
+固化快照（<code>quality_gate_snapshot</code>），发布单详情展示每条规则的
+PASS/FAIL/WAIVED 与证据链接（报告、缺陷列表、Sonar 链接）。</li>
+<li><strong>不通过</strong>：409 + 失败项 + 修复指引；仅
+PMO/管理员可对<strong>单条规则</strong>豁免，必须填原因、影响范围、有效期，写审计并通知域负责人；豁免记录随单与版本留存。</li>
+<li><strong>可复算</strong>：任一历史发布单可回看当时的门禁快照与报告版本，数字可由明细复算（不接受只存结论）。</li>
+</ul>
+<h2 id="5-数据模型增量建议写入下一轮-prd">5.
+数据模型增量（建议写入下一轮 PRD）</h2>
+<p><code>test_strategy</code>、<code>test_plan_round</code>、<code>plan_assignment</code>、<code>plan_change_log</code>、<code>test_env</code>、<code>test_report</code>、<code>test_report_version</code>、<code>report_signoff</code>、<code>quality_gate</code>、<code>quality_gate_rule</code>、<code>quality_gate_snapshot</code>、<code>quality_gate_waiver</code>；
+<code>test_plan</code> 增
+<code>entry_criteria_json</code>、<code>exit_criteria_json</code>、<code>approved_by</code>、<code>approved_at</code>；<code>test_execution</code>
+增 <code>round_id</code>、<code>env_id</code>；<code>deploy_order</code>
+增
+<code>quality_gate_id</code>、<code>report_id</code>；<code>defect</code>
+增
+<code>source</code>（TEST/PROD/MANUAL）、<code>root_cause</code>、<code>found_phase</code>。</p>
+<h2 id="6-验收标准建议供下一轮-prd-直接引用">6. 验收标准建议（供下一轮
+PRD 直接引用）</h2>
+<ul>
+<li><strong>AC-Q1</strong>：测试计划的完整生命周期可走通：草稿→评审→批准→执行→完成→关闭；未批准的计划不能被发布单引用；变更写
+<code>plan_change_log</code> 且可查。</li>
+<li><strong>AC-Q2</strong>：计划支持多轮次（R1/R2…），每轮独立记录用例集、执行人、结果与结论；缺陷修复后开新轮次再测，历史轮次不被覆盖。</li>
+<li><strong>AC-Q3</strong>：准出条件结构化判定——通过率、未关闭
+P0/P1、必需用例集三类中任一不满足，计划标记「完成」返回 409
+并列出未满足项。</li>
+<li><strong>AC-Q4</strong>：测试报告可按计划/轮次自动生成，含范围快照、执行分布、通过率/覆盖率、缺陷统计、遗留缺陷与豁免清单、结论；报告版本化、可导出带水印，会签后才能被质量门引用。</li>
+<li><strong>AC-Q5</strong>：发布单准入含「质量门」项：无报告 /
+报告结论非 PASS / 报告过期 / P0/P1 未清 → FAIL
+并列出具体规则；绕过前端直接提交同样被拒。</li>
+<li><strong>AC-Q6</strong>：门禁豁免按规则级生效：必须填原因、影响范围与有效期，PMO
+审批后该条转 WAIVED，其余规则仍然生效；豁免与快照随发布单可回看。</li>
+<li><strong>AC-Q7</strong>：门禁快照可回放——历史发布单能看当时的规则值、报告版本与缺陷清单，数字与明细一致。</li>
+<li><strong>AC-Q8</strong>：质量指标补齐：一次通过率（FPY）、回归通过率、缺陷逃逸率、发布后
+72h 缺陷数、回滚率，均可按域/厂商/版本切片并与看板同源。</li>
+</ul>
+<h2 id="7-排期建议">7. 排期建议</h2>
+<p>缺口中 <strong>P0 有 5
+条</strong>（计划评审与变更、准出条件、轮次、测试报告、质量门+豁免），它们是「用户要的测试报告质量门」的直接前置，建议作为<strong>一轮独立交付（M6
+质量管理补全）</strong>，CI 集成对接（Jenkins/GitLab/Sonar/制品库，见 <a
+href="INTEGRATION-ci.md">INTEGRATION-ci.md</a>）顺延为 M7 —— 两者都碰
+<code>deploy_order.quality_gate_id</code>，质量门先落地能让集成接入时直接挂到门禁规则上。</p>
+</div>
+</body>
+</html>
