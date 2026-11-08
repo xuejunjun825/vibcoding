@@ -1,0 +1,67 @@
+server:
+  port: ${DELIVER_PORT:8083}
+  shutdown: graceful
+
+spring:
+  application:
+    name: deliver-service
+  datasource:
+    url: ${PLATFORM_DB_URL:jdbc:mysql://127.0.0.1:3306/devops_platform?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8}
+    username: ${PLATFORM_DB_USER:root}
+    password: ${PLATFORM_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 12
+      minimum-idle: 2
+      connection-timeout: 5000
+  jpa:
+    # req-service is the only migration authority; this side only validates that the
+    # shared schema really carries the columns its entities expect.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: Asia/Shanghai
+      hibernate.auto_quote_keyword: true
+      hibernate.default_batch_fetch_size: 64
+  flyway:
+    enabled: false
+  jackson:
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+  lifecycle:
+    timeout-per-shutdown-phase: 5s
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        graceful-shutdown-wait-time: 0
+
+platform:
+  internal-token: ${PLATFORM_INTERNAL_TOKEN:dev-internal-token}
+  internal:
+    token: ${PLATFORM_INTERNAL_TOKEN:dev-internal-token}
+  req:
+    # Read model only — deliver never writes the requirement-side tables.
+    base-url: ${REQ_BASE_URL:http://req-service}
+  jwt:
+    secret: ${PLATFORM_JWT_SECRET:dev-only-jwt-secret-please-change-32bytes-min}
+  master-key: ${PLATFORM_MASTER_KEY:ZGV2LW9ubHktbWFzdGVyLWtleS0zMi1ieXRlcy1sb25nISE=}
+  openapi:
+    qps: ${PLATFORM_OPENAPI_QPS:100}
+    # Clock skew tolerated by the HMAC timestamp check (seconds).
+    skew-seconds: ${PLATFORM_OPENAPI_SKEW_SECONDS:300}
+  gate:
+    # AC-9 default when a release has no explicit mode.
+    default-mode: ${PLATFORM_GATE_DEFAULT_MODE:STRICT}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+  health:
+    db:
+      enabled: true

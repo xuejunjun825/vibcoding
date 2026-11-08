@@ -32,6 +32,32 @@ NACOS_BASE="http://127.0.0.1:${NACOS_HTTP_PORT}"
 GATEWAY_URL="http://127.0.0.1:${GATEWAY_PORT}"
 DEMO_URL="http://127.0.0.1:${DEMO_PORT}"
 
+# ---- Platform layer (20261108-r2): req 8082 / deliver 8083 / web 5173 ----
+REQ_PORT="${REQ_PORT:-8082}"
+DELIVER_PORT="${DELIVER_PORT:-8083}"
+WEB_PORT="${WEB_PORT:-5173}"
+REQ_URL="http://127.0.0.1:${REQ_PORT}"
+DELIVER_URL="http://127.0.0.1:${DELIVER_PORT}"
+WEB_URL="http://127.0.0.1:${WEB_PORT}"
+PLATFORM_DB_URL="${PLATFORM_DB_URL:-jdbc:mysql://127.0.0.1:3306/devops_platform?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8}"
+PLATFORM_DB_USER="${PLATFORM_DB_USER:-root}"
+PLATFORM_DB_PASSWORD="${PLATFORM_DB_PASSWORD:-}"
+PLATFORM_INTERNAL_TOKEN="${PLATFORM_INTERNAL_TOKEN:-dev-internal-token}"
+PLATFORM_JWT_SECRET="${PLATFORM_JWT_SECRET:-dev-only-jwt-secret-please-change-32bytes-min}"
+PLATFORM_MASTER_KEY="${PLATFORM_MASTER_KEY:-ZGV2LW9ubHktbWFzdGVyLWtleS0zMi1ieXRlcy1sb25nISE=}"
+PLATFORM_SEED_ENABLED="${PLATFORM_SEED_ENABLED:-false}"
+
+_platform_db_parse() {
+    # jdbc:mysql://host:port/db?query  ->  PLATFORM_DB_HOST/PORT/NAME
+    local rest="${PLATFORM_DB_URL#jdbc:mysql://}"
+    local hp="${rest%%/*}" dbq="${rest#*/}"
+    PLATFORM_DB_HOST="${hp%%:*}"
+    PLATFORM_DB_PORT="${hp##*:}"
+    [[ "$PLATFORM_DB_PORT" == "$PLATFORM_DB_HOST" ]] && PLATFORM_DB_PORT=3306
+    PLATFORM_DB_NAME="${dbq%%\?*}"
+}
+_platform_db_parse
+
 RUN_DIR="$ROOT/.run"
 LOG_DIR="$ROOT/logs"
 mkdir -p "$RUN_DIR" "$LOG_DIR"
@@ -345,4 +371,200 @@ port_free_after() {
         sleep 1
     done
     return 1
+}
+
+# ===================== platform layer (20261108-r2) =====================
+# MySQL CLI helpers. The DB name defaults to devops_platform (see §2.4); every
+# assertion in platform-verify cross-checks HTTP against a real count, so these
+# must fail loudly rather than return an empty string.
+db_q() {
+    MYSQL_PWD="${PLATFORM_DB_PASSWORD:-}" mysql --protocol=TCP \
+        -h "$PLATFORM_DB_HOST" -P "$PLATFORM_DB_PORT" \
+        -u "$PLATFORM_DB_USER" -N -B --default-character-set=utf8mb4 \
+        "$PLATFORM_DB_NAME" -e "$1" 2>/dev/null
+}
+
+db_admin_q() {
+    MYSQL_PWD="${PLATFORM_DB_PASSWORD:-}" mysql --protocol=TCP \
+        -h "$PLATFORM_DB_HOST" -P "$PLATFORM_DB_PORT" \
+        -u "$PLATFORM_DB_USER" -N -B --default-character-set=utf8mb4 \
+        -e "$1" 2>/dev/null
+}
+
+db_up() {
+    [[ "$(db_admin_q 'SELECT 1' 2>/dev/null)" == "1" ]]
+}
+
+db_exists() {
+    [[ "$(db_admin_q "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='${PLATFORM_DB_NAME}'")" == "1" ]]
+}
+
+db_count() {
+    local table="$1" where="${2:-}"
+    local sql="SELECT COUNT(*) FROM ${table}"
+    [[ -n "$where" ]] && sql="${sql} WHERE ${where}"
+    db_q "$sql"
+}
+
+# HTTP helpers: every call records both code and body so a check can assert the
+# status AND the payload (a 200 with the wrong body is still a failure).
+http_call() {
+    local method="$1" url="$2" body="${3:-}"; shift 3 || true
+    local args=(-sS --max-time 25 -X "$method" "$url")
+    [[ -n "$body" ]] && args+=(-H 'Content-Type: application/json' -d "$body")
+    args+=("$@")
+    local out
+    out="$(curl "${args[@]}" -w '\n%{http_code}' 2>&1)" || true
+    HTTP_BODY="$(printf '%s' "$out" | sed '$d')"
+    HTTP_CODE="$(printf '%s' "$out" | tail -n1)"
+}
+
+# api_call: through the gateway with the current bearer token + tenant header.
+api_call() {
+    local method="$1" path="$2" body="${3:-}"
+    local args=(-H 'Accept: application/json')
+    [[ -n "${API_TOKEN:-}" ]] && args+=(-H "Authorization: Bearer ${API_TOKEN}")
+    [[ -n "${API_TENANT:-}" ]] && args+=(-H "X-Tenant-Id: ${API_TENANT}")
+    http_call "$method" "${GATEWAY_URL}${path}" "$body" "${args[@]}"
+}
+
+# api_direct: straight to a service (internal endpoints bypass the gateway).
+api_direct() {
+    local method="$1" base="$2" path="$3" body="${4:-}"; shift 4 || true
+    http_call "$method" "${base}${path}" "$body" "$@"
+}
+
+jget() {
+    printf '%s' "$1" | jq -r "$2" 2>/dev/null || true
+}
+
+jlen() {
+    printf '%s' "$1" | jq -r "$2 | length" 2>/dev/null || true
+}
+
+json_ok() {
+    printf '%s' "$1" | jq -e . >/dev/null 2>&1
+}
+
+# Poll a URL until its HTTP status is one of `want` (space-separated).
+wait_http_code() {
+    local url="$1" want="$2" timeout="$3" code=""
+    local i=0
+    while (( i < timeout )); do
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "$url" 2>/dev/null || true)"
+        [[ " $want " == *" $code "* ]] && return 0
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+wait_http_json() {
+    local url="$1" timeout="$2" body=""
+    local i=0
+    while (( i < timeout )); do
+        body="$(curl -fsS --max-time 4 "$url" 2>/dev/null || true)"
+        if json_ok "$body"; then
+            printf '%s' "$body"
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+web_up() {
+    curl -fsS --max-time 4 "${WEB_URL}/" 2>/dev/null | grep -qi '<!doctype html>'
+}
+
+# The run's scratch dir (logs/teamflow/<runId>/). Checkers keep conclusions and
+# non-derivable payloads there; it is archived by the host at run end.
+run_log_dir() {
+    local d
+    d="$(ls -dt "$ROOT"/logs/teamflow/*/ 2>/dev/null | head -n 1 || true)"
+    if [[ -n "$d" ]]; then
+        printf '%s' "${d%/}"
+    else
+        printf '%s' "$LOG_DIR"
+    fi
+}
+
+# Login through the gateway and keep TOKEN/TENANT (the two headers every
+# protected call needs). Fails loudly: a silent empty token would make the next
+# ten assertions fail for the wrong reason.
+platform_login() {
+    local tenant="$1" user="$2" pass="$3"
+    api_call POST /api/req/auth/login \
+        "{\"tenantCode\":\"${tenant}\",\"username\":\"${user}\",\"password\":\"${pass}\"}"
+    [[ "$HTTP_CODE" == "200" ]] || {
+        err "登录失败 (HTTP ${HTTP_CODE}): $(printf '%s' "$HTTP_BODY" | head -c 300)"
+        return 1
+    }
+    API_TOKEN="$(jget "$HTTP_BODY" '.token')"
+    # X-Tenant-Id 是数字 tenantId（TECHNICAL §2.2），不是登录用的 tenant code：
+    # 网关的 JwtGatewayFilter 会把它按 Long 解析并与 JWT 的 tenantId 比对，传 code 直接 403。
+    local tid; tid="$(jget "$HTTP_BODY" '.tenantId')"
+    API_TENANT="${tid:-$tenant}"
+    [[ -n "$API_TOKEN" && "$API_TOKEN" != "null" ]] || {
+        err "登录响应缺 token: $(printf '%s' "$HTTP_BODY" | head -c 300)"
+        return 1
+    }
+    ok "登录成功: ${tenant}/${user}"
+}
+
+# Internal calls (health/seed/gates) require X-Internal-Token.
+internal_call() {
+    local method="$1" base="$2" path="$3" body="${4:-}"
+    http_call "$method" "${base}${path}" "$body" \
+        -H "X-Internal-Token: ${PLATFORM_INTERNAL_TOKEN}"
+}
+
+# Strict readiness for req-service: status=UP + db=up + flyway set.
+req_ready() {
+    local body
+    body="$(curl -fsS --max-time 4 "${REQ_URL}/internal/health" 2>/dev/null || true)"
+    json_ok "$body" || return 1
+    [[ "$(jget "$body" '.status')" == "UP" ]] || return 1
+    [[ "$(jget "$body" '.db')" == "up" ]] || return 1
+    [[ -n "$(jget "$body" '.flyway')" && "$(jget "$body" '.flyway')" != "null" ]]
+}
+
+deliver_ready() {
+    local body
+    body="$(curl -fsS --max-time 4 "${DELIVER_URL}/internal/health" 2>/dev/null || true)"
+    json_ok "$body" || return 1
+    [[ "$(jget "$body" '.status')" == "UP" ]] || return 1
+    [[ "$(jget "$body" '.db')" == "up" ]]
+}
+
+# vite preview is a Node process, so it has no module target/ marker for
+# app_alive(). It gets its own stop path that only kills a process whose open
+# files prove it belongs to this workspace's web/ tree.
+stop_web() {
+    local pid pids i owned
+    pid="$(app_pid web)"
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        log "停止 web (pid ${pid})"
+        kill "$pid" 2>/dev/null || true
+        for i in $(seq 1 10); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+        done
+        kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$RUN_DIR/web.pid"
+    pids="$(port_pids "$WEB_PORT")"
+    if [[ -n "${pids// /}" ]]; then
+        for pid in $pids; do
+            owned="$(lsof -nP -p "$pid" 2>/dev/null | grep -F "$ROOT/web/" || true)"
+            if [[ -n "$owned" ]]; then
+                kill "$pid" 2>/dev/null || true
+            else
+                warn "端口 ${WEB_PORT} 的进程 ${pid} 不属于本工作区，未终止"
+            fi
+        done
+        port_free_after "$WEB_PORT" 5 || warn "端口 ${WEB_PORT} 仍被占用"
+    fi
+    ok "web 已停止"
 }

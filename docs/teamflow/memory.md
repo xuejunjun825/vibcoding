@@ -13,6 +13,16 @@
 - **本产品线 P0 交付不含 Python 工程**（用户 20261108-r1 确认移除）：`make verify` 与负向用例由 bash 承担；README 可把本机 Python 3.14.3 作为事实记录，但不得作为验收依赖。
 - 仓洁：`target/`、`.nacos/`、`*.log`、`.env`、`.DS_Store`、`.idea/` 一律忽略；`logs/teamflow/` 为插件运行日志，已被忽略且不得从 `.gitignore` 删除；`config/nacos/` 种子配置必须入库。
 
+## DevOps 研发管理平台（20261108-r2 起，本轮 M1–M5）
+
+- 服务与端口：复用 `api-gateway`(8080) + Nacos；新增 `req-service`(8082：组织/需求/版本/审批/发布)、`deliver-service`(8083：缺陷/任务/测试/追溯/开放 API)、`web/`(Vue 3 + Element Plus + Vite + ECharts)；**8081 demo-service 保留不动**。
+- 数据：本机 **MySQL 9.6**（brew service，已运行）+ Flyway，库 `devops_platform`；本轮只做 **ROW 行级**隔离（`tenant_id`/`domain_id`/`vendor_id`），SCHEMA/DATABASE 形态留 M9。
+- 认证与集成：JWT + 租户上下文（`X-Tenant-Id` 必须与 JWT 一致，缺失/不一致 403 且不落库）；开放 API 用 AppKey/Secret + HMAC-SHA256 + 时间戳 ±5min + IP 白名单 + scope，**自动化测试结果只接收上报、不自建执行器**。
+- 质量铁律：执行记录必须绑定 `case_version`（改用例不改历史结论）；测试门禁在服务端唯一判定（默认严格模式，界面与接口同源）；缺陷/测试数据与需求同受 §7 隔离。
+- 验证：新增 `make platform-up / platform-verify / platform-test-negative / platform-seed` 并纳入 `make test`；r1 的 `make dev-up / verify / test-negative / dev-down` 必须继续全绿。
+- 禁止：Docker、Gradle、Python 交付物（示例脚本用 bash/curl）、Flowable/Camunda、Redis/MQ；不替换版本矩阵而不改 README/ARCHITECTURE。
+- 仓洁新增：`node_modules/`、`dist/`、`.vite/`、`.pnpm-store/`、`coverage/`、`*.tsbuildinfo`、`.env.*`（`.env.example` 入库）必须忽略。
+
 ## 已解决（20261108-r1 修复轮实测复核，勿按旧结论排障）
 
 - `make dev-down` 实测 **4–5s**（≤10s）：两个模块已设 `spring.cloud.nacos.discovery.graceful-shutdown-wait-time: 0`，不再有 SCA 默认 10s × 2 的等待。

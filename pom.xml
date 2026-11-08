@@ -18,9 +18,15 @@
     <name>springcloud-env</name>
     <description>Spring Cloud + Nacos development environment skeleton (JDK 25 / Boot 4 / Cloud 2025.1)</description>
 
+    <!-- Build order matters: the pure-Java contract module is consumed by the
+         runtime modules, and platform-common is consumed by both services. -->
     <modules>
+        <module>platform-contract</module>
+        <module>platform-common</module>
         <module>api-gateway</module>
         <module>demo-service</module>
+        <module>req-service</module>
+        <module>deliver-service</module>
     </modules>
 
     <properties>
@@ -45,6 +51,17 @@
                 <version>${spring-cloud-alibaba.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- Internal units: declared once so no module has to repeat a version. -->
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>platform-contract</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>platform-common</artifactId>
+                <version>${project.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

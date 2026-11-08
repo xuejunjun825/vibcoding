@@ -1,0 +1,161 @@
+package com.example.platform.common.scope;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+
+import com.example.platform.contract.DataScope;
+import com.example.platform.contract.ScopeTier;
+
+/**
+ * The single source of tenant/domain/vendor/organization predicates.
+ *
+ * <p>Every read path goes through {@link ScopedJdbc}, which pastes the predicate produced here in
+ * place of a {@code /*scope:alias*}{@code /} marker. Because the predicate is generated (never
+ * hand-written), a new query cannot "forget" a dimension: it either carries a marker (and gets all
+ * applicable predicates) or it is rejected outright.</p>
+ *
+ * <p>Parameter names are prefixed with {@code __scope} so a caller-supplied parameter can never
+ * shadow the scope, and so two markers on the same statement can share one value.</p>
+ */
+public final class ScopeSql {
+
+    public static final String TENANT_PARAM = "__scopeTenant";
+    public static final String DOMAINS_PARAM = "__scopeDomains";
+    public static final String VENDOR_PARAM = "__scopeVendor";
+    public static final String ORGS_PARAM = "__scopeOrgs";
+    public static final String USER_PARAM = "__scopeUser";
+
+    /**
+     * Which columns a table actually has. {@code null} means "this table has no such dimension"
+     * (e.g. {@code deploy_order} is tenant-only, {@code release} has no vendor column) — in that
+     * case the predicate simply does not restrict that dimension rather than guessing a column.
+     */
+    private record TableSpec(String domainColumn,
+                             String vendorColumn,
+                             String vendorColumnAlt,
+                             String orgColumn,
+                             String ownerColumn) {
+
+        static final TableSpec NONE = new TableSpec(null, null, null, null, null);
+    }
+
+    private static final Map<String, TableSpec> TABLES = tables();
+
+    private ScopeSql() {
+    }
+
+    private static Map<String, TableSpec> tables() {
+        Map<String, TableSpec> map = new LinkedHashMap<>();
+        // requirement is the root object: vendor ownership is two columns (owner + assignee).
+        map.put("requirement", new TableSpec("domain_id", "owner_vendor_id", "assignee_vendor_id",
+                "origin_org_id", "owner_user_id"));
+        // release / test_plan are planned per domain; release carries no vendor column.
+        map.put("release", new TableSpec("domain_id", null, null, null, null));
+        map.put("release_requirement", TableSpec.NONE);
+        map.put("defect", new TableSpec("domain_id", "vendor_id", null, null, "reporter_id"));
+        map.put("defect_history", TableSpec.NONE);
+        map.put("task", new TableSpec("domain_id", "vendor_id", null, null, "assignee_id"));
+        map.put("sprint", new TableSpec(null, null, null, null, null));
+        map.put("test_case", new TableSpec("domain_id", "vendor_id", null, null, "created_by"));
+        map.put("test_plan", new TableSpec("domain_id", "vendor_id", null, null, "created_by"));
+        map.put("test_execution", TableSpec.NONE);
+        map.put("attachment", new TableSpec("domain_id", "vendor_id", null, null, "uploader_id"));
+        map.put("deploy_order", TableSpec.NONE);
+        map.put("milestone", TableSpec.NONE);
+        return Map.copyOf(map);
+    }
+
+    /** True when the table is known to the scope generator (unknown tables are rejected). */
+    public static boolean knows(String table) {
+        return table != null && TABLES.containsKey(normalize(table));
+    }
+
+    public static String normalize(String table) {
+        return table == null ? "" : table.trim().replace("`", "").toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Predicate for one table alias.
+     *
+     * @throws IllegalArgumentException for a table the generator has no column knowledge of —
+     *                                  guessing would be the leak this class exists to prevent
+     */
+    public static SqlPredicate forTable(String table, String alias, DataScope scope) {
+        if (scope == null) {
+            throw new IllegalArgumentException("scope is required");
+        }
+        String normalized = normalize(table);
+        TableSpec spec = TABLES.get(normalized);
+        if (spec == null) {
+            throw new IllegalArgumentException("unknown scoped table: " + table
+                    + " (add it to ScopeSql with its isolation columns)");
+        }
+        String prefix = alias == null || alias.isBlank() ? "" : alias + ".";
+        List<String> clauses = new ArrayList<>();
+        Map<String, Object> params = new LinkedHashMap<>();
+
+        clauses.add(prefix + "tenant_id = :" + TENANT_PARAM);
+        params.put(TENANT_PARAM, scope.tenantId());
+
+        if (scope.tier() == ScopeTier.TENANT) {
+            return new SqlPredicate(String.join(" AND ", clauses), params);
+        }
+
+        // ---- self: only rows the caller submitted (二级企业业务「自己提报」) ----
+        if (scope.tier() == ScopeTier.SELF) {
+            if (spec.ownerColumn() == null) {
+                // fail-closed: a table without an owner column cannot express "mine"
+                clauses.add("1 = 0");
+            } else {
+                clauses.add(prefix + spec.ownerColumn() + " = :" + USER_PARAM);
+                params.put(USER_PARAM, scope.userId());
+            }
+            return new SqlPredicate(String.join(" AND ", clauses), params);
+        }
+
+        // ---- organization subtree (requirement origin_org_id); BIZ is the business-unit form ----
+        if ((scope.tier() == ScopeTier.ORG || scope.tier() == ScopeTier.BIZ)
+                && spec.orgColumn() != null) {
+            Set<Long> orgs = scope.orgSubtreeIds();
+            if (orgs.isEmpty()) {
+                // fail-closed: an org-restricted caller without a subtree sees nothing
+                clauses.add("1 = 0");
+                return new SqlPredicate(String.join(" AND ", clauses), params);
+            }
+            clauses.add(prefix + spec.orgColumn() + " IN (:" + ORGS_PARAM + ")");
+            params.put(ORGS_PARAM, orgs);
+            return new SqlPredicate(String.join(" AND ", clauses), params);
+        }
+
+        // ---- domain ----
+        if (spec.domainColumn() != null) {
+            Set<Long> domains = scope.domainIds();
+            if (!domains.isEmpty()) {
+                clauses.add(prefix + spec.domainColumn() + " IN (:" + DOMAINS_PARAM + ")");
+                params.put(DOMAINS_PARAM, domains);
+            } else if (scope.tier() == ScopeTier.DOMAIN) {
+                clauses.add("1 = 0");
+                return new SqlPredicate(String.join(" AND ", clauses), params);
+            }
+        }
+
+        // ---- vendor ----
+        if (scope.tier() == ScopeTier.VENDOR && scope.vendorId() != null) {
+            if (spec.vendorColumn() != null && spec.vendorColumnAlt() != null) {
+                clauses.add("(" + prefix + spec.vendorColumn() + " = :" + VENDOR_PARAM
+                        + " OR " + prefix + spec.vendorColumnAlt() + " = :" + VENDOR_PARAM + ")");
+                params.put(VENDOR_PARAM, scope.vendorId());
+            } else if (spec.vendorColumn() != null) {
+                clauses.add(prefix + spec.vendorColumn() + " = :" + VENDOR_PARAM);
+                params.put(VENDOR_PARAM, scope.vendorId());
+            }
+            // no vendor column on this table: tenant (+ domain when present) already applies
+        }
+
+        return new SqlPredicate(String.join(" AND ", clauses), params);
+    }
+}

@@ -20,6 +20,20 @@ logs/
 *.log
 .env
 .env.local
+.env.*
+!.env.example
+
+# ---- Frontend build artifacts & package stores (platform layer) ----
+node_modules/
+dist/
+.vite/
+.pnpm-store/
+coverage/
+*.tsbuildinfo
+
+# ---- Local volatile state / heap dumps ----
+var/
+*.hprof
 
 # ---- IDE ----
 .idea/
