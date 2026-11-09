@@ -143,6 +143,31 @@ class PermissionRouteTableTest {
                 "report reads stay open (scope-filtered), only generation is guarded");
     }
 
+    /**
+     * M7: the integration admin surface is one function, and the two artifact writes are release
+     * actions. Before these rows existed the paths fell through to {@code null} (= any authenticated
+     * account could rewrite the Jenkins base URL or promote an artifact to the production repo).
+     */
+    @Test
+    void integrationSurface() {
+        assertEquals(List.of("integration:manage"),
+                PermissionRouteTable.requirementFor("POST", "/integration/configs").codes());
+        assertEquals(List.of("integration:manage"),
+                PermissionRouteTable.requirementFor("PATCH", "/integration/configs/7").codes());
+        assertEquals(List.of("integration:manage"),
+                PermissionRouteTable.requirementFor("POST", "/integration/configs/7/test").codes());
+        assertEquals(List.of("integration:manage"),
+                PermissionRouteTable.requirementFor("GET", "/integration/logs").codes());
+        assertEquals(List.of("integration:manage"),
+                PermissionRouteTable.requirementFor("PUT", "/integration/admission-items").codes());
+        assertEquals(List.of("deploy:create"),
+                PermissionRouteTable.requirementFor("POST", "/artifacts/9/promote").codes());
+        // Reads the deploy page needs stay open; the webhook has no JWT at all and is verified by
+        // its signature, so it must not appear in this table.
+        assertNull(PermissionRouteTable.requirementFor("GET", "/integration/artifacts/search"));
+        assertNull(PermissionRouteTable.requirementFor("POST", "/integration/webhooks/gitlab/3"));
+    }
+
     /** First match wins: an approve path must never be reachable through the edit rule. */
     @Test
     void approveIsNotShadowedByTheLifecycleRule() {

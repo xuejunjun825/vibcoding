@@ -138,7 +138,7 @@ BAD_REVISION="$(db_q "SELECT COUNT(*) FROM test_plan WHERE revision IS NULL OR r
 expect_num "test_plan.revision 默认 0 且非空" "${BAD_REVISION:-1}" eq 0
 BAD_WINDOW="$(db_q "SELECT COUNT(*) FROM \`release\` WHERE observation_hours NOT BETWEEN 1 AND 720 OR report_validity_days NOT BETWEEN 1 AND 90")"
 expect_num "release 观察窗/报告有效期落在合法区间" "${BAD_WINDOW:-1}" eq 0
-BAD_SOURCE="$(db_q "SELECT COUNT(*) FROM defect WHERE source IS NULL OR source NOT IN ('MANUAL','TEST','PROD','OPENAPI')")"
+BAD_SOURCE="$(db_q "SELECT COUNT(*) FROM defect WHERE source IS NULL OR source NOT IN ('MANUAL','TEST','PROD','OPENAPI','BUILD')")"
 expect_num "defect.source 取值在枚举内" "${BAD_SOURCE:-1}" eq 0
 expect_num "缺陷逃逸标记默认 0" "$(db_q "SELECT COUNT(*) FROM defect WHERE is_escape IS NULL")" eq 0
 

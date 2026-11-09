@@ -87,7 +87,13 @@ public final class PermissionMatrix {
             "review:manage",
             "proddefect:report",
             "qualitymetric:view",
-            "report:export");
+            "report:export",
+            // ---- M7 integration domain (append-only; PRD §6 increment matrix) ----
+            // 集成配置 / 准入项开关 / 同步日志三块管理面共用这一个码：它们是同一个
+            // 「接哪四个系统、开哪九项准入」的决策，拆成三个码只会让管理员点三次。
+            // 没有它，前端侧栏（nav.ts）与 /admin/integrations 路由的守卫恒 DENY，
+            // 集成管理页对包括 PLATFORM_ADMIN 在内的所有人都是 403。
+            "integration:manage");
 
     /**
      * Role codes, matching PRD §6.1 and {@code sys_role.code} seeded by SeedService.

@@ -146,10 +146,52 @@ curl -s -X POST http://localhost:8080/openapi/v1/test-executions \
 | `make test` | lint + 构建 + 负向用例（需环境已 up） |
 | `make test-negative` | 停 demo-service → verify 必红且指名失败项 → 重启 → 必绿 |
 | `make nacos-status` | 查看 Nacos 进程/端口/健康 |
+| `make quality-verify` | M6 质量域验收 q0..q7（需 `make platform-up`） |
+| `make integration-verify` | M7 集成对接验收 s0..s7：本地四合一桩 + ≥48 断言（需 `make platform-up`） |
 | `make clean` | 清理 Maven 产物与 `.run/`（保留 Nacos 缓存） |
 | `make distclean` | 额外删除 `.nacos/`，下次重新下载 |
 
 环境变量覆盖（写入 `.env` 即自动加载）：`GATEWAY_PORT`、`DEMO_PORT`、`NACOS_HTTP_PORT`、`NACOS_CONSOLE_PORT`、`NACOS_GRPC_PORT`、`NACOS_GRPC_TLS_PORT`、`NACOS_SERVER_ADDR`、`NACOS_HOME`、`NACOS_VERSION`、`NACOS_DOWNLOAD_URL`、`NACOS_SHA256`、`NACOS_TOKEN_SECRET`（默认值是**仅本机开发**用的固定串，共享环境请自行覆盖）。
+
+## 集成对接（M7：Jenkins / GitLab / Sonar / Nexus）
+
+四个外部系统通过**同一出站客户端**接入（SSRF 白名单、超时、指数退避重试、脱敏、每次尝试一行 `integration_sync_log`），适配器只做协议映射。**默认全部关闭**：关闭时准入后三项为 `CLOSED`、后台不产生任何外呼；测试桩只在 `make integration-verify` 里存在，产品代码不知道它的存在。
+
+### 四系统接入要点
+
+| 系统 | `baseUrl` 示例 | 最小权限 | `extra` 字段 | 回调 | 出站白名单 |
+|---|---|---|---|---|---|
+| Jenkins | `https://jenkins.example.com` | Job/Read（轮询）+ 目标 Job 的 Build（触发） | `{"jobName":"demo-job"}` | `POST /api/integration/webhooks/jenkins/{configId}`，头 `X-Jenkins-Signature: sha256=<hex>`、`X-Jenkins-Timestamp`（±300s） | `jenkins.example.com` |
+| GitLab | `https://gitlab.example.com` | `read_api`（读 MR/审批；`api` 亦可） | `{"projectPath":"group/project"}` | `POST /api/integration/webhooks/gitlab/{configId}`，头 `X-Gitlab-Token`（Webhook Secret） | `gitlab.example.com` |
+| Sonar | `https://sonar.example.com` | 项目 Browse + 质量门读取 | `{"projectKey":"demo-key"}`（可被版本的默认 key 覆盖） | 无回调，后台每 30 分钟刷新 | `sonar.example.com` |
+| Nexus | `https://nexus.example.com` | 仓库读（`nx-repository-view-*-*-read`） | `{"repository":"releases"}` | 无回调，登记/晋级时校验 sha256 | `nexus.example.com` |
+
+- 凭据**只写不读**：写入后接口只回 `hasCredential` 与末四位；空串表示“不修改”，清除需按系统名二次确认。
+- 加密密钥来自 `INTEGRATION_CREDENTIAL_KEY`（`make platform-up` 首次生成 `.run/integration.key`，已 gitignore），未设置时回落 `PLATFORM_MASTER_KEY`；两者皆空则 req-service 拒绝启动。
+- 回调路径是网关唯一匿名前缀（`/api/integration/webhooks/**`），按 configId 限流 20 req/s；验签失败 401 且不写业务行。
+- 出站白名单用逗号分隔主机（可带端口），**回环地址默认被拒绝**——本地桩必须显式登记 `127.0.0.1:19090`。
+
+### 桩与真实环境的差异（本地桩仅用于验收，不代表真实系统行为）
+
+| 维度 | 本地桩 `127.0.0.1:19090` | 真实系统 |
+|---|---|---|
+| 传输与证书 | 明文 HTTP、回环地址 | HTTPS + 证书链/企业 CA 校验 |
+| 认证 | 固定 token，服务端不校验凭据 | PAT / API Token / Jenkins crumb / Basic，权限随账号 |
+| Jenkins 构建 | 立即返回 queueId，控制面 `POST /__stub/jenkins/build` 改状态 | 真实排队、执行、日志与不稳定网络 |
+| Jenkins 回调签名 | 测试脚本用共享 secret 现算 HMAC | Jenkins 插件/共享库签名，时钟可能漂移 |
+| GitLab 审批数 | 固定 `approved_by`，不跑审批规则 | 需 approvals API 与真实审批规则/CODEOWNERS |
+| Sonar 度量 | 控制面注入固定五度量与质量门状态 | 真实扫描结果，覆盖率随提交变化 |
+| Nexus 制品 | 固定 3 条搜索结果与固定 sha256 | 真实仓库元数据、checksum 与代理缓存 |
+| 故障注入 | `mode 500/429/timeout/slow` 精确可控 | 限流、超时、5xx 由网络与对端决定 |
+
+### 本地开启步骤
+
+```bash
+make platform-up                 # 生成密钥、注入 INTEGRATION_CREDENTIAL_KEY 与回环白名单
+make integration-verify          # 起桩 → 串跑 s0..s7，末行 #SUMMARY integration pass/total/fail
+```
+
+手工验证时：`export INTEGRATION_CREDENTIAL_KEY=$(cat .run/integration.key)`、`export INTEGRATION_EGRESS_ALLOW_HOSTS=127.0.0.1:19090`，再 `POST /api/req/integration/configs` 建档、`POST /api/req/integration/configs/{id}/test` 测连通，最后在 `/admin/integrations` 打开对应系统。真实环境请把白名单改成实际主机并把凭据换成最小权限账号。
 
 ## 排障（按发生概率排序）
 

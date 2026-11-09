@@ -5,6 +5,9 @@ import com.example.req.approval.ApprovalInstance;
 import com.example.req.approval.ApprovalInstanceRepository;
 import com.example.req.integration.DeliverGateClient;
 import com.example.req.integration.DeliverQualityGateClient;
+import com.example.req.integration.admission.AdmissionItemConfigService;
+import com.example.req.integration.admission.AdmissionViews;
+import com.example.req.integration.admission.IntegrationEvidenceReader;
 import com.example.req.requirement.RequirementEntity;
 import com.example.req.requirement.RequirementRepository;
 import com.example.req.requirement.RequirementReviewCallback;
@@ -19,23 +22,35 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * 准入取数 + 快照读写（判定规则在 {@link AdmissionPolicy}，这里只负责把事实取齐）。
  *
- * <p>跨服务取数只有三处、都在 integration 包：一次批量门禁 + 一次缺陷计数（{@link DeliverGateClient}）、
- * 一次发布质量门（{@link DeliverQualityGateClient}，M6 追加的第 6 项）。任一不可用都返回 {@code null}
- * 交给策略层判 FAIL（fail-closed，绝不因为超时把门禁放过去）。
- * 时间预算 500ms：门禁 250ms + 缺陷 200ms + 质量门 500ms（质量门与整体同预算，最快路径只打一次）。</p>
+ * <p>跨服务取数只有三处：一次批量门禁 + 一次缺陷计数（{@link DeliverGateClient}）、
+ * 一次发布质量门（{@link DeliverQualityGateClient}）。7/8/9 三项<b>零外呼</b>：
+ * {@link IntegrationEvidenceReader} 只读本地事实表（构建记录 / Sonar 快照 / 制品记录），
+ * 外呼发生在"触发构建 / 刷新快照 / 登记制品"的后台动作里。</p>
+ *
+ * <p>500ms 预算（TECHNICAL §7.3）：门禁 ≤250ms、缺陷 ≤200ms、质量门 ≤400ms，⑦⑧⑨ 本地读
+ * 每项 ≤30ms；剩余预算不足 30ms 时不再发新调用，该项直接判 FAIL（fail-closed，绝不放行）。</p>
  */
 @Component
 public class AdmissionEvaluator {
+
+    /** 准入总预算（PRD AC-8.6）。 */
+    public static final long ADMISSION_BUDGET_MS = 500;
+    /** 单次调用前的最小剩余预算：低于它就不再发起，避免尾巴上的一次慢调用拖爆总预算。 */
+    private static final long MIN_SLICE_MS = 30;
 
     private final RequirementRepository requirementRepository;
     private final DeployOrderRequirementRepository orderRequirementRepository;
     private final ApprovalInstanceRepository instanceRepository;
     private final DeliverGateClient deliverGateClient;
     private final DeliverQualityGateClient qualityGateClient;
+    private final IntegrationEvidenceReader evidenceReader;
+    private final AdmissionItemConfigService itemConfigService;
     private final AdmissionPolicy policy = new AdmissionPolicy();
     private final ObjectMapper objectMapper;
 
@@ -44,42 +59,95 @@ public class AdmissionEvaluator {
                               ApprovalInstanceRepository instanceRepository,
                               DeliverGateClient deliverGateClient,
                               DeliverQualityGateClient qualityGateClient,
+                              IntegrationEvidenceReader evidenceReader,
+                              AdmissionItemConfigService itemConfigService,
                               ObjectMapper objectMapper) {
         this.requirementRepository = requirementRepository;
         this.orderRequirementRepository = orderRequirementRepository;
         this.instanceRepository = instanceRepository;
         this.deliverGateClient = deliverGateClient;
         this.qualityGateClient = qualityGateClient;
+        this.evidenceReader = evidenceReader;
+        this.itemConfigService = itemConfigService;
         this.objectMapper = objectMapper;
     }
 
     /** 重新取数并判定（不落库）。 */
     public DeployViews.AdmissionResult evaluate(DeployOrderEntity order) {
+        long deadline = System.nanoTime() + ADMISSION_BUDGET_MS * 1_000_000L;
+        long tenantId = order.getTenantId();
         List<AdmissionPolicy.ReqFact> facts = facts(order);
 
         Map<Long, GateDecision> gates = null;
         Map<Long, Integer> openHigh = null;
         if (!facts.isEmpty()) {
             List<Long> ids = facts.stream().map(AdmissionPolicy.ReqFact::id).toList();
-            try {
-                gates = deliverGateClient.evaluateAll(ids);
-            } catch (RuntimeException ex) {
-                gates = null;
+            if (budgetLeft(deadline)) {
+                try {
+                    gates = deliverGateClient.evaluateAll(ids);
+                } catch (RuntimeException ex) {
+                    gates = null;
+                }
             }
-            try {
-                openHigh = deliverGateClient.openHighDefects(ids);
-            } catch (RuntimeException ex) {
-                openHigh = null;
+            if (budgetLeft(deadline)) {
+                try {
+                    openHigh = deliverGateClient.openHighDefects(ids);
+                } catch (RuntimeException ex) {
+                    openHigh = null;
+                }
             }
         } else {
             gates = Map.of();
             openHigh = Map.of();
         }
 
-        DeployViews.GateEvidence gate = gate(order);
-        List<AdmissionItem> items = policy.evaluate(new AdmissionPolicy.Inputs(facts, gates, openHigh, gate));
-        return new DeployViews.AdmissionResult(items, LocalDateTime.now(),
-                AdmissionPolicy.signature(facts, gate == null ? null : gate.hash()), gate);
+        DeployViews.GateEvidence gate = gate(order, deadline);
+        Set<String> closed = closedCodes(tenantId);
+        AdmissionViews.Evidence build = evidence(deadline,
+                () -> evidenceReader.build(tenantId, order.getId(), order.getBuildId()));
+        AdmissionViews.Evidence sonar = evidence(deadline,
+                () -> evidenceReader.sonarAggregate(tenantId, requirementIds(order)));
+        AdmissionViews.Evidence artifact = evidence(deadline,
+                () -> evidenceReader.artifact(tenantId, order.getArtifactId()));
+
+        List<AdmissionItem> items = policy.evaluate(new AdmissionPolicy.Inputs(
+                facts, gates, openHigh, gate, closed, build, sonar, artifact));
+        String signature = AdmissionPolicy.signature(facts, gate == null ? null : gate.hash(),
+                AdmissionPolicy.integrationDigest(items, closed));
+        return new DeployViews.AdmissionResult(items, null, LocalDateTime.now(), signature, gate);
+    }
+
+    // ------------------------------------------------------------ 预算
+
+    private static boolean budgetLeft(long deadline) {
+        return (deadline - System.nanoTime()) / 1_000_000L >= MIN_SLICE_MS;
+    }
+
+    /**
+     * 本地证据读取 + 预算：剩余预算不足 = 本次不读，按 {@code ADAPTER_TIMEOUT} 判 FAIL；
+     * 读取抛异常 = {@code EVIDENCE_UNAVAILABLE}（fail-closed，绝不因为读不到就当没有要求）。
+     */
+    private AdmissionViews.Evidence evidence(long deadline, Supplier<AdmissionViews.Evidence> supplier) {
+        if (!budgetLeft(deadline)) {
+            return AdmissionViews.Evidence.fail("ADAPTER_TIMEOUT",
+                    "准入预算已用尽（剩余不足 " + MIN_SLICE_MS + "ms），该项未取数，按失败处理", null);
+        }
+        try {
+            return supplier.get();
+        } catch (RuntimeException ex) {
+            return AdmissionViews.Evidence.fail("EVIDENCE_UNAVAILABLE",
+                    "读取本地证据失败：" + ex.getClass().getSimpleName()
+                            + (ex.getMessage() == null ? "" : "：" + ex.getMessage()), null);
+        }
+    }
+
+    /** 项开关：读失败按"全部开启"处理（默认即开启，关闭是显式状态）。 */
+    private Set<String> closedCodes(long tenantId) {
+        try {
+            return itemConfigService.closedCodes(tenantId);
+        } catch (RuntimeException ex) {
+            return Set.of();
+        }
     }
 
     /**
@@ -88,7 +156,10 @@ public class AdmissionEvaluator {
      * <p>失败一律返回 {@code null}——{@link AdmissionPolicy} 会判 FAIL 且 {@code detail} 带
      * {@code GATE_UNAVAILABLE}，这样"deliver 挂了"与"门禁真的没过"在准入清单上是两种可区分的结论。</p>
      */
-    private DeployViews.GateEvidence gate(DeployOrderEntity order) {
+    private DeployViews.GateEvidence gate(DeployOrderEntity order, long deadline) {
+        if (!budgetLeft(deadline)) {
+            return null;
+        }
         try {
             DeliverQualityGateClient.Evaluation evaluation = qualityGateClient.evaluateDetailed(
                     order.getReleaseId(), order.getId(), requirementIds(order));
@@ -120,13 +191,13 @@ public class AdmissionEvaluator {
             // 不依赖 3 参构造器的派生逻辑，避免这条语义再次被"空集 ⇒ 非历史"的实现悄悄改回去（R2）。
             return new DeployViews.AdmissionSnapshot(List.of(), null, false, null, true, null);
         }
-        boolean stale = stored.signature() != null
-                && !stored.signature().equals(AdmissionPolicy.signature(facts(order),
-                        stored.gate() == null ? null : stored.gate().hash()));
+        String currentFacts = AdmissionPolicy.factsDigest(facts(order));
+        boolean stale = stored.signature() != null && !stored.signature().endsWith("|" + currentFacts);
         List<AdmissionItem> items = AdmissionPolicy.sort(AdmissionPolicy.markForced(
                 stored.items(), order.isForcedRelease()));
         return new DeployViews.AdmissionSnapshot(items, stored.checkedAt(), stale, stored.signature(),
-                DeployViews.AdmissionSnapshot.legacyOf(items), stored.gate());
+                DeployViews.AdmissionSnapshot.legacyOf(items), stored.gate(),
+                DeployViews.AdmissionCounts.of(items), 0, items.size() < AdmissionItem.ORDER.size());
     }
 
     // ------------------------------------------------------------ 取数
@@ -169,7 +240,7 @@ public class AdmissionEvaluator {
      *
      * <p>只有 BUS 有 {@code submit → APPROVING} 迁移，RD/PDR 的表里没有 APPROVING，
      * 它们本身发不起审批。如果按 RD 的 id 去查实例，正常单据永远差"提报:未发起"，
-     * 准入第 5 项（AC-12）：提报审批与评审审批都必须在同一条需求链上 APPROVED。
+     * 准入第 3 项（AC-8.1）：提报审批与评审审批都必须在同一条需求链上 APPROVED。
      * REQ_REVIEW 已有 review_start 入口（D-10），因此「未发起」本身就是阻断项，
      * 不能再退化成「只有实例存在才要求」——那会让评审缺失悄悄通过准入。</p>
      */
@@ -228,6 +299,7 @@ public class AdmissionEvaluator {
     public String toJson(DeployViews.AdmissionResult result) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("items", result.items());
+        payload.put("counts", result.counts());
         payload.put("checkedAt", result.checkedAt());
         payload.put("signature", result.signature());
         // 第 6 项的证据一起落库：提交时据此写 deploy_order.quality_gate*（AC-5.6），

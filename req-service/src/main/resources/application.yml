@@ -57,6 +57,25 @@ platform:
     secret: ${PLATFORM_JWT_SECRET:dev-only-jwt-secret-please-change-32bytes-min}
     ttl-minutes: ${PLATFORM_JWT_TTL_MINUTES:720}
   master-key: ${PLATFORM_MASTER_KEY:ZGV2LW9ubHktbWFzdGVyLWtleS0zMi1ieXRlcy1sb25nISE=}
+  # M7 集成对接（Jenkins / GitLab / Sonar / Nexus）。
+  # 默认值的作用是「什么都不配也能起、且集成全部关闭」：credential-key 故意为空，
+  # 让 IntegrationCrypto 回落到 platform.master-key；要独立密钥时导出
+  # INTEGRATION_CREDENTIAL_KEY，无需改 yml。密钥环用于轮换：v1=...,v2=...。
+  integration:
+    credential-key: ${INTEGRATION_CREDENTIAL_KEY:}
+    credential-key-version: ${INTEGRATION_CREDENTIAL_KEY_VERSION:v1}
+    credential-keys: ${INTEGRATION_CREDENTIAL_KEYS:}
+    connect-timeout-ms: ${INTEGRATION_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${INTEGRATION_READ_TIMEOUT_MS:10000}
+    admission-budget-ms: ${INTEGRATION_ADMISSION_BUDGET_MS:500}
+    build-poll-interval-seconds: ${INTEGRATION_BUILD_POLL_SECONDS:10}
+    build-timeout-minutes: ${INTEGRATION_BUILD_TIMEOUT_MINUTES:120}
+    sonar-refresh-minutes: ${INTEGRATION_SONAR_REFRESH_MINUTES:30}
+    webhook-rate-limit-per-second: ${INTEGRATION_WEBHOOK_RPS:20}
+    artifact-search-limit: ${INTEGRATION_ARTIFACT_SEARCH_LIMIT:50}
+    log-retention-days: ${INTEGRATION_LOG_RETENTION_DAYS:30}
+    # 内网/回环地址默认拒绝；本地桩（127.0.0.1:19090）必须在此显式登记才可出站。
+    egress-allow-hosts: ${INTEGRATION_EGRESS_ALLOW_HOSTS:}
   openapi:
     qps: ${PLATFORM_OPENAPI_QPS:100}
   perf:

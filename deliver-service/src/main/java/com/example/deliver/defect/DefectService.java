@@ -47,8 +47,10 @@ public class DefectService {
 
     private static final Set<String> SEVERITIES = Set.of("P0", "P1", "P2", "P3");
     /** 缺陷来源；与 {@code defect.source VARCHAR(8)} 的取值域一致。 */
-    private static final Set<String> SOURCES = Set.of("MANUAL", "TEST", "PROD");
+    private static final Set<String> SOURCES = Set.of("MANUAL", "TEST", "PROD", "BUILD");
     private static final String SOURCE_PROD = "PROD";
+    /** 构建失败转缺陷的来源；由内部端点写入，普通创建入口也接受（来源只是标签）。 */
+    private static final String SOURCE_BUILD = "BUILD";
     /** 生产缺陷提报的功能码；DENY 的角色连提报入口都不该有（服务层再判一次）。 */
     private static final String PROD_DEFECT_FUNCTION = "proddefect:report";
 
@@ -225,6 +227,59 @@ public class DefectService {
         return view(entity, true);
     }
 
+    /**
+     * 构建失败转缺陷（AC-3.6）。幂等键是 {@code job#buildNumber}，写进 description 的
+     * {@code BUILD_KEY:} 标记里——缺陷表没有外部幂等键列，而加一列只为 CI 服务不值得
+     * （缺陷的真实身份仍然是「这条需求下的一个问题」，不是「某个构建」）。
+     *
+     * <p>为什么带 {@code source=BUILD} 而不是 MANUAL：来源决定统计口径（构建失败率 vs
+     * 人工提报），而且它是这条缺陷唯一能自我解释的证据。</p>
+     */
+    @Transactional
+    public DefectView createFromBuild(DefectViews.CreateFromBuild cmd) {
+        DataScope scope = TenantContext.require();
+        if (cmd == null) {
+            throw new ApiException(400, "VALIDATION_FAILED", "请求体不能为空", null);
+        }
+        String key = trimToNull(cmd.idempotencyKey());
+        Long requirementId = cmd.requirementId();
+        if (requirementId != null && key != null) {
+            String marker = "BUILD_KEY: " + key;
+            List<DefectEntity> existing = defects
+                    .findByTenantIdAndRequirementId(scope.tenantId(), requirementId);
+            for (DefectEntity candidate : existing) {
+                if (SOURCE_BUILD.equals(candidate.getSource())
+                        && candidate.getDescription() != null
+                        && candidate.getDescription().contains(marker)) {
+                    return view(candidate, true);
+                }
+            }
+        }
+        String title = trimToNull(cmd.title());
+        if (title == null) {
+            title = "构建失败";
+        }
+        if (title.length() > 200) {
+            title = title.substring(0, 200);
+        }
+        DefectViews.CreateDefect delegate = new DefectViews.CreateDefect(
+                requirementId,
+                cmd.releaseId(),
+                null,
+                null,
+                null,
+                title,
+                cmd.description(),
+                null,
+                cmd.severity() == null || cmd.severity().isBlank() ? "P1" : cmd.severity(),
+                null,
+                null,
+                null,
+                SOURCE_BUILD,
+                SOURCE_BUILD);
+        return create(delegate);
+    }
+
     @Transactional(readOnly = true)
     public Object detail(long id) {
         DataScope scope = TenantContext.require();
@@ -320,7 +375,7 @@ public class DefectService {
         notifications.send(handler, "DEFECT", title, content, "DEFECT", entity.getId());
     }
 
-    private DefectView view(DefectEntity entity, boolean withHistory) {
+    DefectView view(DefectEntity entity, boolean withHistory) {
         RequirementSnapshot requirement = entity.getRequirementId() == null
                 ? null : readModel.get(entity.getRequirementId());
         List<HistoryView> entries = new ArrayList<>();
@@ -399,7 +454,7 @@ public class DefectService {
         String normalised = value == null || value.isBlank()
                 ? "MANUAL" : value.trim().toUpperCase(Locale.ROOT);
         if (!SOURCES.contains(normalised)) {
-            throw new ApiException(400, "VALIDATION_FAILED", "source 只能是 MANUAL / TEST / PROD",
+            throw new ApiException(400, "VALIDATION_FAILED", "source 只能是 MANUAL / TEST / PROD / BUILD",
                     Map.of("field", "source", "value", String.valueOf(value)));
         }
         return normalised;

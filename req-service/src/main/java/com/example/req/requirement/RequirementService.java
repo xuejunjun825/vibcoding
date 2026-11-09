@@ -8,6 +8,7 @@ import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
 import com.example.platform.contract.GateDecision;
 import com.example.platform.contract.GatePort;
+import com.example.req.integration.sonar.SonarProjectKeys;
 import com.example.req.requirement.RequirementDtos.AssignVendorRequest;
 import com.example.req.requirement.RequirementDtos.CreateCommand;
 import com.example.req.requirement.RequirementDtos.DeliverRequest;
@@ -139,6 +140,7 @@ public class RequirementService {
         Long oldParentId = entity.getParentId();
         applyParentChange(entity, req.extra());
         applyDaysChange(entity, req.extra());
+        applySonarKeyChange(entity, req.extra());
         Map<String, Object> before = Map.of("title", entity.getTitle(),
                 "priority", entity.getPriority(),
                 "expectedDeliveryDate", String.valueOf(entity.getExpectedDeliveryDate()));
@@ -191,6 +193,23 @@ public class RequirementService {
                 parent == null ? null : parent.getType()));
         applyRule(RequirementRules.checkAncestorCycle(entity.getId(), parentId, this::parentOf));
         entity.setParentId(parentId);
+    }
+
+    /**
+     * AC-6.1：需求级 Sonar 项目键（优先于版本默认值）。
+     *
+     * <p>这条写入路径此前缺失——{@code requirement.sonar_project_key} 有列、快照服务也读它，
+     * 但没有任何接口能写，于是「需求 &gt; 版本」的优先级只能靠改库，界面上不可达。字段放在
+     * update 的 {@code extra} 里（与 parentId/estimateDays 同一手法），因此不需要新端点、
+     * 不改变既有 PUT/PATCH 契约；`null` 或空格串表示「清掉自有键、回落到版本默认」。</p>
+     */
+    private void applySonarKeyChange(RequirementEntity entity, Map<String, Object> extra) {
+        if (extra == null || !extra.containsKey("sonarProjectKey")) {
+            return;
+        }
+        Object raw = extra.get("sonarProjectKey");
+        String next = SonarProjectKeys.normalize(raw == null ? null : raw.toString(), "sonarProjectKey");
+        entity.setSonarProjectKey(next);
     }
 
     /** AC-2：父需求人天只读；RD 走 0.5 天精度校验后才落库。 */

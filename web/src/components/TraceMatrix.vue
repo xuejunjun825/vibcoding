@@ -27,15 +27,23 @@ const props = withDefaults(
     columns: () => [
       { key: 'task', label: '任务' },
       { key: 'mr', label: 'MR' },
+      { key: 'build', label: '构建', hint: 'Jenkins 构建：无构建记录的显示「无快照」，不计入覆盖' },
       { key: 'execution', label: '执行' },
       { key: 'defect', label: '缺陷' },
+      { key: 'sonar', label: 'Sonar', hint: 'Sonar 质量门快照：无快照不计入覆盖' },
       { key: 'release', label: '发布单' },
       { key: 'version', label: '版本' },
     ],
   },
 )
 
-const emit = defineEmits<{ (event: 'open', requirementId: number): void }>()
+const emit = defineEmits<{
+  (event: 'open', requirementId: number): void
+  (event: 'node', requirementId: number, key: string): void
+}>()
+
+/** 集成类节点没有快照时是「无快照」，不能像任务/MR 那样记成缺口 */
+const OPTIONAL_SNAPSHOT_KEYS = new Set(['build', 'sonar'])
 
 const gapCount = computed(
   () => props.rows.filter((row) => (row.gaps?.length ?? 0) > 0 || !row.complete).length,
@@ -45,7 +53,12 @@ const columns = computed(() => props.columns)
 
 function cellOf(row: TraceRow, key: string) {
   const cell = row.cells?.[key]
-  if (!cell) return { state: 'GAP' as const, text: '缺口', title: '缺少对应记录' }
+  if (!cell) {
+    if (OPTIONAL_SNAPSHOT_KEYS.has(key)) {
+      return { state: 'NA' as const, text: '无快照', title: '尚未产生快照，不计入覆盖' }
+    }
+    return { state: 'GAP' as const, text: '缺口', title: '缺少对应记录' }
+  }
   if (cell.state === 'NA') return { state: 'NA' as const, text: '不适用', title: '该链路不适用' }
   if (cell.state === 'COMPLETE') {
     return { state: 'COMPLETE' as const, text: '齐备', title: cell.label ?? '链路齐备' }
@@ -119,7 +132,7 @@ function open(row: TraceRow): void {
               class="matrix__cell matrix__cell--state"
               :class="`matrix__cell--${cellOf(row, column.key).state.toLowerCase()}`"
               :title="`${row.requirementCode} · ${column.label}：${cellOf(row, column.key).title}`"
-              @click="open(row)"
+              @click="OPTIONAL_SNAPSHOT_KEYS.has(column.key) ? emit('node', row.requirementId, column.key) : open(row)"
             >
               <span class="matrix__mark" aria-hidden="true">
                 <template v-if="cellOf(row, column.key).state === 'COMPLETE'">✓</template>
@@ -137,6 +150,7 @@ function open(row: TraceRow): void {
       <span class="matrix__legend-item"><i class="matrix__swatch matrix__swatch--complete" />齐备</span>
       <span class="matrix__legend-item"><i class="matrix__swatch matrix__swatch--gap" />缺口</span>
       <span class="matrix__legend-item"><i class="matrix__swatch matrix__swatch--na" />不适用</span>
+      <span class="matrix__legend-item"><i class="matrix__swatch matrix__swatch--na" />无快照（不计覆盖）</span>
       <span class="matrix__legend-count">
         共 {{ props.rows.length }} 条需求，{{ gapCount }} 条存在缺口
       </span>

@@ -85,6 +85,14 @@ public class DeployOrderEntity {
     @Column(name = "report_id")
     private Long reportId;
 
+    /** 最近一次构建记录（build_record.id）；无构建时为空，准入第 7 项据此读取本地事实。 */
+    @Column(name = "build_id")
+    private Long buildId;
+
+    /** 绑定的制品记录（artifact_record.id）；未登记时为空，准入第 9 项据此读取。 */
+    @Column(name = "artifact_id")
+    private Long artifactId;
+
     @Column(name = "forced_release", nullable = false)
     private boolean forcedRelease;
 
@@ -289,6 +297,22 @@ public class DeployOrderEntity {
 
     public void setReportId(Long reportId) {
         this.reportId = reportId;
+    }
+
+    public Long getBuildId() {
+        return buildId;
+    }
+
+    public void setBuildId(Long buildId) {
+        this.buildId = buildId;
+    }
+
+    public Long getArtifactId() {
+        return artifactId;
+    }
+
+    public void setArtifactId(Long artifactId) {
+        this.artifactId = artifactId;
     }
 
     public boolean isForcedRelease() {

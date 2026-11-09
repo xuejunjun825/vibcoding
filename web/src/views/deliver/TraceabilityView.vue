@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { listTraceability } from '@/api/deliver'
+import { getSonar, type SonarCard } from '@/api/integration'
 import type { TraceRow } from '@/api/types'
 import { useListQuery } from '@/composables/useListQuery'
 import { usePermission } from '@/composables/usePermission'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import TraceMatrix from '@/components/TraceMatrix.vue'
+import SonarSnapshotDrawer from '@/components/req/SonarSnapshotDrawer.vue'
 import '@/views/deliver/shared.css'
 
 /**
@@ -118,6 +120,29 @@ function openRequirement(requirementId: number): void {
   }
   void router.push({ name: 'requirement-detail', params: { id: requirementId } })
 }
+
+/* ---------------- 集成节点（BUILD / SONAR_GATE） ---------------- */
+const sonarOpen = ref(false)
+const sonarCard = ref<SonarCard | null>(null)
+
+async function onNode(requirementId: number, key: string): Promise<void> {
+  if (key === 'sonar') {
+    sonarCard.value = null
+    sonarOpen.value = true
+    try {
+      // 只读本地快照（后端不因这次 GET 去访问 Sonar）
+      sonarCard.value = await getSonar(requirementId)
+      if (!sonarCard.value) ElMessage.info('该需求还没有 Sonar 快照，先在需求集成页刷新质量门')
+    } catch (err) {
+      ElMessage.warning(err instanceof Error ? err.message : '读取 Sonar 快照失败')
+    }
+    return
+  }
+  if (key === 'build') {
+    // TraceRow 目前没有 deployOrderId，只能带到发布单列表按需求定位（见 OUT-OF-SCOPE）
+    void router.push({ name: 'deploy-orders', query: { requirementId: String(requirementId) } })
+  }
+}
 </script>
 
 <template>
@@ -125,7 +150,7 @@ function openRequirement(requirementId: number): void {
     <header class="dl-head">
       <div class="dl-head__title">
         <h1 class="t-page-title">追溯矩阵</h1>
-        <span class="dl-meta">{{ total }} 条需求 · 需求 → 任务 → MR → 执行 → 缺陷 → 发布</span>
+        <span class="dl-meta">{{ total }} 条需求 · 需求 → 任务 → MR → 构建 → 执行 → 缺陷 → Sonar → 发布</span>
       </div>
       <div class="dl-head__actions">
         <el-button link :loading="loading" @click="load">刷新</el-button>
@@ -200,10 +225,11 @@ function openRequirement(requirementId: number): void {
         :loading="loading"
         highlight-gaps
         @open="openRequirement"
+        @node="onNode"
       />
       <div class="trace-foot">
         <span class="dl-hint">
-          当前页 {{ visibleRows.length }} / {{ rows.length }} 行 · 缺口行以「! 缺口」呈现，绝不显示为齐备
+          当前页 {{ visibleRows.length }} / {{ rows.length }} 行 · 缺口行以「! 缺口」呈现，绝不显示为齐备；构建 / Sonar 无快照显示「无快照」，不计入覆盖
         </span>
         <el-pagination
           layout="prev, pager, next"
@@ -216,6 +242,8 @@ function openRequirement(requirementId: number): void {
         />
       </div>
     </section>
+
+    <SonarSnapshotDrawer v-model="sonarOpen" :card="sonarCard" />
   </div>
 </template>
 

@@ -37,8 +37,18 @@ public class JwtGatewayFilter implements GlobalFilter, Ordered {
 
     private static final String TENANT_HEADER = "X-Tenant-Id";
     private static final List<String> ANONYMOUS_EXACT = List.of("/api/req/auth/login");
+
+    /**
+     * Prefixes that authenticate without a JWT.
+     *
+     * <p>{@code /api/integration/webhooks/} is the only M7 anonymous entry point: CI systems
+     * cannot carry a platform token, so they prove identity with their own webhook signature
+     * (Jenkins HMAC / GitLab secret token) inside req-service. It is a prefix rather than an
+     * exact path because the config id is a path variable. Nothing else under
+     * {@code /api/integration/} is anonymous — the config and log APIs stay behind the JWT.</p>
+     */
     private static final List<String> ANONYMOUS_PREFIXES = List.of(
-            "/openapi/", "/actuator/", "/api/demo/");
+            "/openapi/", "/actuator/", "/api/demo/", "/api/integration/webhooks/");
 
     private final JwtCodec codec;
 

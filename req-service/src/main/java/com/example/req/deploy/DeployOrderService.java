@@ -243,14 +243,21 @@ public class DeployOrderService {
         DeployOrderEntity order = requireVisible(id);
         DeployViews.AdmissionResult result = admissionEvaluator.evaluateAndStore(order);
         order.setUpdatedBy(TenantContext.require().userId());
-        return new DeployViews.AdmissionSnapshot(
-                AdmissionPolicy.sort(AdmissionPolicy.markForced(result.items(), order.isForcedRelease())),
-                result.checkedAt(), false, result.signature(),
-                DeployViews.AdmissionSnapshot.legacyOf(result.items()), result.gate());
+        List<AdmissionItem> items = AdmissionPolicy.sort(
+                AdmissionPolicy.markForced(result.items(), order.isForcedRelease()));
+        return new DeployViews.AdmissionSnapshot(items, result.checkedAt(), false, result.signature(),
+                DeployViews.AdmissionSnapshot.legacyOf(items), result.gate(),
+                DeployViews.AdmissionCounts.of(items), result.skipCount(),
+                items.size() < AdmissionItem.ORDER.size());
     }
 
     /**
-     * 提交：重新判定六项准入 → 质量门通过且其余全过（或已强制放行的历史单据）才发起需求发布审批。
+     * 提交：重新判定九项准入 → 跳过项须等值确认 → 质量门通过且没有 FAIL（或已强制放行的历史单据）
+     * 才发起需求发布审批。
+     *
+     * <p>跳过确认（{@code SKIP_NOT_ACKNOWLEDGED}）刻意排在质量门/全通过闸门之前：只要清单里有 SKIP，
+     * 用户第一眼该看到的是"你有 1 项被跳过、请确认"，而不是被质量门的 409 挡在另一条错误上
+     * （PRD AC-8.3，QA 用例 s5 的第 6 步按此顺序断言）。</p>
      *
      * <p>{@code noRollbackFor} 是刻意的：准入不通过时快照必须留下（详情页/审计要能复看失败项），
      * 只有审批流未配置这种"需要人去配置"的情况也同样保留快照。</p>
@@ -261,6 +268,7 @@ public class DeployOrderService {
 
     @Transactional(noRollbackFor = {DeployErrors.AdmissionFailedException.class,
             DeployErrors.ApprovalNotConfiguredException.class,
+            DeployErrors.SkipNotAcknowledgedException.class,
             DeployOrderService.QualityGateFailedException.class})
     public DeployViews.SubmitResult submit(long id, DeployViews.SubmitCmd cmd) {
         DataScope scope = TenantContext.require();
@@ -271,6 +279,7 @@ public class DeployOrderService {
         requireNoGoConfirmed(order, cmd);
         DeployViews.AdmissionResult result = admissionEvaluator.evaluateAndStore(order);
         DeployViews.GateEvidence gate = result.gate();
+        requireSkippedAcknowledged(result, cmd);
         // 第 6 项先判：门禁没过时前端要拿到 failedRules（哪条红线/阈值），而不是笼统的"准入未通过"。
         if (gate != null && !gate.passed()) {
             throw new QualityGateFailedException(gate, AdmissionPolicy.sort(result.items()));
@@ -291,10 +300,32 @@ public class DeployOrderService {
         detail.put("forcedRelease", order.isForcedRelease());
         detail.put("admissionCheckedAt", String.valueOf(result.checkedAt()));
         detail.put("admissionFailed", result.failedCodes());
+        detail.put("admissionSkipped", result.skipCount());
+        detail.put("admissionCounts", result.counts() == null ? Map.of() : Map.of(
+                "passed", result.counts().passed(), "failed", result.counts().failed(),
+                "skipped", result.counts().skipped(), "closed", result.counts().closed(),
+                "active", result.counts().active(), "total", result.counts().total()));
         detail.put("qualityGateSnapshotId", order.getQualityGateSnapshotId());
         detail.put("gateResult", gate == null ? null : gate.result());
         auditService.record("STATE_CHANGE", BIZ_TYPE, order.getId(), detail);
         return new DeployViews.SubmitResult(order.getStatus());
+    }
+
+    /**
+     * AC-8.3：跳过 ≠ 通过。清单里有 {@code skipCount} 个 SKIP 时，提交必须回传<b>同一个数字</b>
+     * （等值确认：多传/少传都不算，避免页面少一个勾选就把"未验证"当"已验证"）。
+     * 没有跳过项时该字段被忽略——既有调用方（前端旧版本、脚本）不传也能通过。
+     */
+    private void requireSkippedAcknowledged(DeployViews.AdmissionResult result, DeployViews.SubmitCmd cmd) {
+        int skipCount = result.skipCount();
+        if (skipCount <= 0) {
+            return;
+        }
+        Integer acknowledged = cmd == null ? null : cmd.acknowledgedSkipCount();
+        if (acknowledged != null && acknowledged == skipCount) {
+            return;
+        }
+        throw DeployErrors.skipNotAcknowledged(skipCount, acknowledged, AdmissionPolicy.sort(result.items()));
     }
 
     /**

@@ -68,6 +68,17 @@ public class ReleaseEntity {
     @Column(name = "report_validity_days", nullable = false)
     private Integer reportValidityDays = 7;
 
+    /**
+     * MR 合入后是否自动把需求推进到 MERGED（0 关 / 1 开）。
+     * 默认关闭是业务红线：合入由人确认，自动推进只动状态机允许的 RD 状态。
+     */
+    @Column(name = "mr_auto_advance", nullable = false)
+    private Integer mrAutoAdvance = 0;
+
+    /** 版本级默认 Sonar 项目 key；需求未单独指定时继承此值。 */
+    @Column(name = "sonar_project_key", length = 200)
+    private String sonarProjectKey;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -129,6 +140,10 @@ public class ReleaseEntity {
     public void setObservationHours(Integer observationHours) { this.observationHours = observationHours; }
     public Integer getReportValidityDays() { return reportValidityDays; }
     public void setReportValidityDays(Integer reportValidityDays) { this.reportValidityDays = reportValidityDays; }
+    public Integer getMrAutoAdvance() { return mrAutoAdvance; }
+    public void setMrAutoAdvance(Integer mrAutoAdvance) { this.mrAutoAdvance = mrAutoAdvance; }
+    public String getSonarProjectKey() { return sonarProjectKey; }
+    public void setSonarProjectKey(String sonarProjectKey) { this.sonarProjectKey = sonarProjectKey; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public Long getCreatedBy() { return createdBy; }

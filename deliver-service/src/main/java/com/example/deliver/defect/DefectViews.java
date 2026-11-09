@@ -37,8 +37,22 @@ public final class DefectViews {
                                String foundPhase) {
     }
 
-    /** {@code action} is accepted in either case; the service normalises before the lookup. */
-    public record TransitionCmd(String action, String comment, Long handlerId) {
+    /**
+     * 构建失败转缺陷（内部端点）。{@code idempotencyKey} 是 {@code job#buildNumber}：
+     * 同一个构建重复回调、用户重复点「转缺陷」，都必须落到同一个缺陷上。
+     *
+     * <p>这里没有 reproSteps / handlerId：构建失败没有复现步骤，也不指派给具体人——
+     * 谁接手由缺陷池的分派规则决定，而不是由 CI 猜。</p>
+     */
+    public record CreateFromBuild(Long requirementId,
+                                  Long releaseId,
+                                  String title,
+                                  String description,
+                                  String severity,
+                                  String idempotencyKey) {
+    }
+
+    /** {@code action} is accepted in either case; the service normalises before the lookup. */    public record TransitionCmd(String action, String comment, Long handlerId) {
     }
 
     public record HistoryView(long id,

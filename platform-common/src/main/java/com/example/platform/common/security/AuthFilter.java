@@ -129,6 +129,9 @@ public class AuthFilter extends OncePerRequestFilter {
         }
         return path.startsWith("/internal/") || path.startsWith("/actuator/")
                 || path.startsWith("/openapi/")
+                // GitLab/Jenkins 的 webhook 不可能带 JWT：这条路径由各 webhook 控制器
+                // 自己验签（X-Gitlab-Token / HMAC 时间戳）并按 configId 限流。
+                || path.startsWith("/integration/webhooks/")
                 // 网关把 /openapi/** 去掉一段再转发，deliver 侧看到的是 /v1/test-executions；
                 // 这条路径由 HmacAuthFilter 验签（X-App-Key/X-Signature），不能再走 JWT 分支。
                 || path.equals("/v1/test-executions");

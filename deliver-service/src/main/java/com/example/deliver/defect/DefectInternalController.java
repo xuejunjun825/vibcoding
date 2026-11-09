@@ -13,6 +13,8 @@ import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -29,15 +31,18 @@ import org.springframework.web.server.ResponseStatusException;
 public class DefectInternalController {
 
     private final ScopedJdbc jdbc;
+    private final DefectService defects;
     private final String token;
 
     @PersistenceContext
     private EntityManager em;
 
     public DefectInternalController(ScopedJdbc jdbc,
+                                    DefectService defects,
                                     @Value("${platform.internal.token:${INTERNAL_TOKEN:dev-internal-token}}")
                                     String token) {
         this.jdbc = jdbc;
+        this.defects = defects;
         this.token = token;
     }
 
@@ -118,5 +123,40 @@ public class DefectInternalController {
             TenantContext.clear();
         }
         return counts;
+    }
+
+    /**
+     * 构建失败转缺陷（AC-3.6）。由 req-service 的 Jenkins 适配层调用，<b>按
+     * {@code idempotencyKey}（{@code job#buildNumber}）幂等</b>：同一个构建重复回调、用户重复点
+     * 「转缺陷」，都返回同一条缺陷。
+     *
+     * @return {@code {id, code, status, requirementId, source}} —— code 是给 req 侧写审计用的，
+     *         重复调用时它就是上一次那条缺陷的编号
+     */
+    @PostMapping("/defects/build-failure")
+    public Map<String, Object> createFromBuild(
+            @RequestHeader(value = "X-Internal-Token", required = false) String provided,
+            @RequestHeader(value = "X-Tenant-Id", required = false) Long tenantHeader,
+            @RequestBody(required = false) DefectViews.CreateFromBuild cmd) {
+        if (provided == null || !token.equals(provided)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid internal token");
+        }
+        if (cmd == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "request body required");
+        }
+        long tenantId = tenantHeader == null ? 1L : tenantHeader;
+        TenantContext.set(DataScope.system(tenantId));
+        try {
+            DefectViews.DefectView view = defects.createFromBuild(cmd);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("id", view.id());
+            body.put("code", view.code());
+            body.put("status", view.status());
+            body.put("requirementId", view.requirementId());
+            body.put("source", view.source());
+            return body;
+        } finally {
+            TenantContext.clear();
+        }
     }
 }

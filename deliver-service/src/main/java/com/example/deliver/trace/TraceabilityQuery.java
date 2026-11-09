@@ -27,9 +27,13 @@ import org.springframework.stereotype.Component;
 @Component
 public class TraceabilityQuery {
 
-    /** Gap codes, in the order the detail tab lists them. */
-    private static final List<String> GAP_ORDER =
-            List.of("TASK", "MR", "CASE", "EXECUTION", "DEFECT", "RELEASE", "VERSION");
+    /**
+     * Gap codes, in the order the detail tab lists them. BUILD/SONAR 只在"确有失败事实"时
+     * 才算缺口：没有构建记录、没有 Sonar 快照是 NA（未纳入这条链路），不是 gap——
+     * 否则所有历史需求会凭空多出两个缺口，既有追溯页的语义被污染（AC-15 / AC-6.5）。
+     */
+    private static final List<String> GAP_ORDER = List.of("TASK", "MR", "CASE", "EXECUTION",
+            "DEFECT", "RELEASE", "VERSION", "BUILD", "SONAR");
 
     private final ScopedJdbc jdbc;
 
@@ -89,7 +93,32 @@ public class TraceabilityQuery {
                        AND df.status <> 'CLOSED' AND df.severity IN ('P0','P1')) AS open_high_count,
                    (SELECT COUNT(*) FROM deploy_order_requirement dor
                        WHERE dor.requirement_id = r.id) AS deploy_count,
-                   (SELECT COUNT(*) FROM `release` rel WHERE rel.id = r.release_id) AS release_exists
+                   (SELECT COUNT(*) FROM `release` rel WHERE rel.id = r.release_id) AS release_exists,
+                   (SELECT b.status FROM build_record b
+                       JOIN deploy_order_requirement dor2 ON dor2.deploy_order_id = b.deploy_order_id
+                      WHERE dor2.requirement_id = r.id AND b.tenant_id = r.tenant_id
+                      ORDER BY b.id DESC LIMIT 1) AS build_status,
+                   (SELECT b.build_number FROM build_record b
+                       JOIN deploy_order_requirement dor3 ON dor3.deploy_order_id = b.deploy_order_id
+                      WHERE dor3.requirement_id = r.id AND b.tenant_id = r.tenant_id
+                      ORDER BY b.id DESC LIMIT 1) AS build_number,
+                   (SELECT b.finished_at FROM build_record b
+                       JOIN deploy_order_requirement dor4 ON dor4.deploy_order_id = b.deploy_order_id
+                      WHERE dor4.requirement_id = r.id AND b.tenant_id = r.tenant_id
+                      ORDER BY b.id DESC LIMIT 1) AS build_finished_at,
+                   (SELECT s.result FROM quality_gate_snapshot s
+                      WHERE s.tenant_id = r.tenant_id AND s.source = 'SONAR'
+                        AND s.requirement_id = r.id
+                      ORDER BY s.id DESC LIMIT 1) AS sonar_result,
+                   (SELECT JSON_UNQUOTE(JSON_EXTRACT(s.metrics_json, '$.coverage'))
+                      FROM quality_gate_snapshot s
+                      WHERE s.tenant_id = r.tenant_id AND s.source = 'SONAR'
+                        AND s.requirement_id = r.id
+                      ORDER BY s.id DESC LIMIT 1) AS sonar_coverage,
+                   (SELECT s.computed_at FROM quality_gate_snapshot s
+                      WHERE s.tenant_id = r.tenant_id AND s.source = 'SONAR'
+                        AND s.requirement_id = r.id
+                      ORDER BY s.id DESC LIMIT 1) AS sonar_fetched_at
             """;
 
     private static final String FROM_WHERE = """
@@ -112,7 +141,7 @@ public class TraceabilityQuery {
 
     /**
      * The gap predicate, spelled once for SQL. It must stay in step with
-     * {@link #gapsOf(long, String, long, long, long, long, Long, Long)} — the harness asserts the
+     * {@link #gapsOf(long, String, long, long, long, long, Long, String, String)} — the harness asserts the
      * two agree on every seeded row.
      */
     private static String gapPredicate() {
@@ -128,6 +157,14 @@ public class TraceabilityQuery {
                    OR r.release_id IS NULL
                    OR (SELECT COUNT(*) FROM deploy_order_requirement dor
                        WHERE dor.requirement_id = r.id) = 0
+                   OR COALESCE((SELECT b.status FROM build_record b
+                       JOIN deploy_order_requirement dor2 ON dor2.deploy_order_id = b.deploy_order_id
+                      WHERE dor2.requirement_id = r.id AND b.tenant_id = r.tenant_id
+                      ORDER BY b.id DESC LIMIT 1), '') IN ('FAILURE', 'ABORTED')
+                   OR COALESCE((SELECT s.result FROM quality_gate_snapshot s
+                      WHERE s.tenant_id = r.tenant_id AND s.source = 'SONAR'
+                        AND s.requirement_id = r.id
+                      ORDER BY s.id DESC LIMIT 1), '') = 'ERROR'
                  )
                 """;
     }
@@ -198,18 +235,74 @@ public class TraceabilityQuery {
                 ? TraceViews.TraceCell.complete("已在版本", 1, "已纳入版本计划 " + releaseId)
                 : TraceViews.TraceCell.gap("无版本", 0, "需求未关联版本计划"));
 
+        // ---- 构建 / Sonar：这两个节点是"可选快照"，没有事实时是 NA 而不是缺口
+        // （AC-6.5：空记录不得算已覆盖，但也不得把没接入的需求判成链路断裂）。
+        String buildStatus = Rows.str(row, "build_status");
+        Integer buildNumber = Rows.object(row, "build_number") == null
+                ? null : Integer.valueOf((int) Rows.toLong(Rows.object(row, "build_number"), 0L));
+        java.time.LocalDateTime buildFinishedAt =
+                Rows.toDateTime(Rows.object(row, "build_finished_at"));
+        cells.put("build", buildCell(buildStatus, buildNumber, buildFinishedAt));
+
+        String sonarResult = Rows.str(row, "sonar_result");
+        String sonarCoverage = Rows.str(row, "sonar_coverage");
+        java.time.LocalDateTime sonarFetchedAt =
+                Rows.toDateTime(Rows.object(row, "sonar_fetched_at"));
+        cells.put("sonar", sonarCell(sonarResult, sonarCoverage, sonarFetchedAt));
+
         List<String> gaps = gapsOf(taskCount, mrUrl, caseCount, executionCount, openHigh,
-                deployCount, releaseId);
+                deployCount, releaseId, buildStatus, sonarResult);
         return new TraceViews.TraceRow(requirementId, code, Rows.str(row, "title"),
                 Rows.str(row, "type"), Rows.str(row, "status"),
                 Rows.str(row, "domain_name"), Rows.str(row, "vendor_name"),
                 cells, gaps, gaps.isEmpty());
     }
 
+    /**
+     * 构建节点（DESIGN I8）：SUCCESS 齐备、FAILURE/ABORTED 缺口、QUEUED/RUNNING 仍在途（NA，
+     * 不能把"刚开始构建"判成缺口）、无记录 NA「无构建」。detail 里的 {@code #编号 状态 · 日期}
+     * 与卡片一致，节点可跳发布单构建卡。
+     */
+    private static TraceViews.TraceCell buildCell(String status, Integer buildNumber,
+                                                  java.time.LocalDateTime finishedAt) {
+        if (status == null || status.isBlank()) {
+            return TraceViews.TraceCell.na("无构建", "该需求还没有 Jenkins 构建记录");
+        }
+        String number = buildNumber == null ? "#—" : "#" + buildNumber;
+        String when = finishedAt == null ? "" : " · " + finishedAt.toLocalDate().toString();
+        String evidence = number + " " + status + when;
+        return switch (status.trim().toUpperCase(java.util.Locale.ROOT)) {
+            case "SUCCESS" -> TraceViews.TraceCell.complete("构建成功", buildNumber, evidence);
+            case "FAILURE" -> TraceViews.TraceCell.gap("构建失败", buildNumber, evidence);
+            case "ABORTED" -> TraceViews.TraceCell.gap("构建中止", buildNumber, evidence);
+            case "QUEUED", "RUNNING" -> TraceViews.TraceCell.na("构建中", evidence);
+            default -> TraceViews.TraceCell.na("构建中", evidence);
+        };
+    }
+
+    /**
+     * Sonar 节点（DESIGN I8 / AC-6.5）：只有"存在快照"才参与覆盖判定——无快照是 NA「无快照」，
+     * 不冒充已覆盖。detail 固定带 {@code SONAR_GATE} 字面量，前端用它在节点上标出来源。
+     */
+    private static TraceViews.TraceCell sonarCell(String result, String coverage,
+                                                  java.time.LocalDateTime fetchedAt) {
+        String coverageText = coverage == null || coverage.isBlank()
+                ? "覆盖率 —" : "覆盖率 " + coverage + "%";
+        String when = fetchedAt == null ? "" : " · " + fetchedAt.toLocalDate().toString();
+        if (result == null || result.isBlank()) {
+            return TraceViews.TraceCell.na("无快照", "尚无 SONAR_GATE 快照，不计入覆盖");
+        }
+        String evidence = "SONAR_GATE " + result.toUpperCase(java.util.Locale.ROOT)
+                + " · " + coverageText + when;
+        return "OK".equalsIgnoreCase(result.trim())
+                ? TraceViews.TraceCell.complete("门禁通过", null, evidence)
+                : TraceViews.TraceCell.gap("门禁未通过", null, evidence);
+    }
+
     /** Java mirror of {@link #gapPredicate()}; keep the two in step. */
     private static List<String> gapsOf(long taskCount, String mrUrl, long caseCount,
                                        long executionCount, long openHigh, long deployCount,
-                                       Long releaseId) {
+                                       Long releaseId, String buildStatus, String sonarResult) {
         Map<String, Boolean> missing = new LinkedHashMap<>();
         missing.put("TASK", taskCount == 0);
         missing.put("MR", mrUrl == null || mrUrl.isBlank());
@@ -218,6 +311,11 @@ public class TraceabilityQuery {
         missing.put("DEFECT", openHigh > 0);
         missing.put("RELEASE", deployCount == 0);
         missing.put("VERSION", releaseId == null);
+        // 只有"确有失败事实"才算缺口：没构建过 / 没快照是 NA（见 buildCell / sonarCell）。
+        missing.put("BUILD", "FAILURE".equalsIgnoreCase(buildStatus)
+                || "ABORTED".equalsIgnoreCase(buildStatus));
+        missing.put("SONAR", sonarResult != null && !sonarResult.isBlank()
+                && !"OK".equalsIgnoreCase(sonarResult.trim()));
         List<String> gaps = new ArrayList<>();
         for (String code : GAP_ORDER) {
             if (Boolean.TRUE.equals(missing.get(code))) {

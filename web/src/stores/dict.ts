@@ -31,6 +31,14 @@ export type StatusKind =
   | 'waiver'
   | 'review'
   | 'env'
+  // M7 集成域（DESIGN §6.9：7 个新 kind；CLOSED/SKIP 的文案只在这里定义一次）
+  | 'integration'
+  | 'build'
+  | 'mr'
+  | 'sync'
+  | 'admission'
+  | 'sonar'
+  | 'artifactSource'
 
 const REQUIREMENT: Record<string, StatusMeta> = {
   // BUS
@@ -195,6 +203,59 @@ const ENV: Record<string, StatusMeta> = {
   DISABLED: { label: '已停用', tone: 'neutral' },
 }
 
+/**
+ * M7 集成域七张表（DESIGN §6.9，逐字对齐）。
+ * 这七张表的键是**服务端枚举**：`integration`/`build`/`mr`/`sync`/`sonar`/`artifactSource`
+ * 由 Java 枚举下发，`admission` 由 `AdmissionItemPolicy` 的四态下发 —— 前端不自造第三套字符串。
+ */
+const INTEGRATION: Record<string, StatusMeta> = {
+  ENABLED: { label: '已启用', tone: 'success' },
+  DISABLED: { label: '已关闭', tone: 'warning' },
+  UNCONFIGURED: { label: '未配置', tone: 'info' },
+}
+
+const BUILD: Record<string, StatusMeta> = {
+  QUEUED: { label: '排队中', tone: 'info' },
+  RUNNING: { label: '运行中', tone: 'primary' },
+  SUCCESS: { label: '成功', tone: 'success' },
+  FAILURE: { label: '失败', tone: 'danger' },
+  ABORTED: { label: '已中止', tone: 'info' },
+}
+
+const MR: Record<string, StatusMeta> = {
+  OPENED: { label: '打开', tone: 'info' },
+  MERGED: { label: '已合入', tone: 'success' },
+  CLOSED: { label: '已关闭', tone: 'info' },
+  // GitLab 有 LOCKED 态：不猜成「打开」，否则锁定的 MR 会被当成可推进
+  LOCKED: { label: '已锁定', tone: 'warning' },
+}
+
+const SYNC: Record<string, StatusMeta> = {
+  SUCCESS: { label: '成功', tone: 'success' },
+  FAILED: { label: '失败', tone: 'danger' },
+  IGNORED: { label: '已忽略', tone: 'info' },
+  RETRY_EXHAUSTED: { label: '重试耗尽', tone: 'warning' },
+}
+
+const ADMISSION: Record<string, StatusMeta> = {
+  PASS: { label: '通过', tone: 'success' },
+  FAIL: { label: '失败', tone: 'danger' },
+  SKIP: { label: '跳过', tone: 'warning' },
+  CLOSED: { label: '已关闭', tone: 'info' },
+}
+
+const SONAR: Record<string, StatusMeta> = {
+  OK: { label: '通过', tone: 'success' },
+  ERROR: { label: '未达标', tone: 'danger' },
+  UNBOUND: { label: '未绑定', tone: 'info' },
+  UNAVAILABLE: { label: '不可用', tone: 'danger' },
+}
+
+const ARTIFACT_SOURCE: Record<string, StatusMeta> = {
+  NEXUS: { label: 'Nexus', tone: 'info' },
+  MANUAL: { label: '手工', tone: 'warning' },
+}
+
 const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   requirement: REQUIREMENT,
   defect: DEFECT,
@@ -212,6 +273,13 @@ const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   waiver: WAIVER,
   review: REVIEW,
   env: ENV,
+  integration: INTEGRATION,
+  build: BUILD,
+  mr: MR,
+  sync: SYNC,
+  admission: ADMISSION,
+  sonar: SONAR,
+  artifactSource: ARTIFACT_SOURCE,
 }
 
 /** 流转动作中文标签（与 TECHNICAL §3.3 的状态表一一对应） */
@@ -267,6 +335,16 @@ export const ACTION_LABELS: Record<string, string> = {
   confirm: '二次确认',
   complete: '完成计划',
   archive: '归档',
+  // —— M7 集成域动作（服务端动作码，连字符形态；前端只取词）——
+  'trigger-build': '触发构建',
+  'refresh-build': '刷新构建',
+  'test-config': '测试连接',
+  'sync-mr': '同步 MR',
+  'refresh-sonar': '刷新质量门',
+  'confirm-merge': '确认推进',
+  'promote-artifact': '晋级',
+  'bind-artifact': '绑定制品',
+  search: '检索',
 }
 
 /**
@@ -325,6 +403,18 @@ export const useDictStore = defineStore('dict', () => {
   }
 
   /**
+   * `statusText` / `statusTone` 是 `label` / `tone` 的同一实现（M7 设计稿与蓝图用这组名字）。
+   * 两个名字指向同一张表，不存在第二份词典；新代码用 statusText，旧代码继续用 label。
+   */
+  function statusText(kind: StatusKind, value: string | null | undefined): string {
+    return meta(kind, value).label
+  }
+
+  function statusTone(kind: StatusKind, value: string | null | undefined): Tone {
+    return meta(kind, value).tone
+  }
+
+  /**
    * 动作码 → 中文。质量域的动作码是连字符（submit-review），两类分隔符都要吃，
    * 否则未登记的动作会在按钮上露出英文。
    */
@@ -345,5 +435,5 @@ export const useDictStore = defineStore('dict', () => {
     version.value += 1
   }
 
-  return { meta, label, tone, actionLabel, priority, merge, overrides, version }
+  return { meta, label, tone, statusText, statusTone, actionLabel, priority, merge, overrides, version }
 })

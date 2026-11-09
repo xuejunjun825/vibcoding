@@ -20,6 +20,7 @@
 - 认证与集成：JWT + 租户上下文（`X-Tenant-Id` 必须与 JWT 一致，缺失/不一致 403 且不落库）；开放 API 用 AppKey/Secret + HMAC-SHA256 + 时间戳 ±5min + IP 白名单 + scope，**自动化测试结果只接收上报、不自建执行器**。
 - 质量铁律：执行记录必须绑定 `case_version` 与 `round_id`/`env_id`（改用例、换轮次都不改历史结论）；计划完成、测试报告、质量门三处共用同一准出/聚合实现（数字必须可复算、界面与接口同源）；发布单准入第 6 项为质量门，P0/P1 规则不可豁免；已会签报告与门禁快照不可变（历史发布单可回放）；缺陷/测试数据与需求同受 §7 隔离。发布单写库前必须按需求校验覆盖测试计划的批准状态（唯一闸门：未批准 409 不落单，取数不可用 503 fail-closed，无计划不阻塞）。
 - 验证：新增 `make platform-up / platform-verify / platform-test-negative / platform-seed` 并纳入 `make test`；r1 的 `make dev-up / verify / test-negative / dev-down` 必须继续全绿。
+- 集成与准入（M7）：发布准入 9 项的顺序与锁定集合以 `AdmissionItemPolicy.order()/locked()` 为唯一源（①测试 ②无P0P1 ③审批 ④MR ⑤人天 ⑥质量门 ⑦构建 ⑧Sonar ⑨制品）；相对 M6 的 ③④⑤ 调换属 AC-8.1 的有意变更，前端只做展示映射、断言从常量派生，不再各写一份顺序。
 - 禁止：Docker、Gradle、Python 交付物（示例脚本用 bash/curl）、Flowable/Camunda、Redis/MQ；不替换版本矩阵而不改 README/ARCHITECTURE。
 - 仓洁新增：`node_modules/`、`dist/`、`.vite/`、`.pnpm-store/`、`coverage/`、`*.tsbuildinfo`、`.env.*`（`.env.example` 入库）必须忽略。
 

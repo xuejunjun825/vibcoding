@@ -35,6 +35,13 @@ coverage/
 var/
 *.hprof
 
+# ---- M7 integration stub runtime (make integration-verify) ----
+# 桩进程的 pid/日志与测试产物都是每次重跑可再生，入库只会制造噪音与冲突。
+scripts/tests/integration/.stub-run/
+*.pid
+test-results/
+playwright-report/
+
 # ---- IDE ----
 .idea/
 *.iml

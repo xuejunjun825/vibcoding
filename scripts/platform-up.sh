@@ -65,6 +65,25 @@ ok "构建完成"
 STAGE="4 启动 req-service (${REQ_PORT})"
 export PLATFORM_SEED_ENABLED=true
 export PLATFORM_INTERNAL_TOKEN PLATFORM_JWT_SECRET PLATFORM_MASTER_KEY
+
+# M7 集成凭据密钥（ADR-T7）：本地栈用 .run/integration.key，首次生成后复用——
+# 换 key 会让库里既有密文解不开，所以这里绝不每次随机。文件在 .run/ 下（已 gitignore）。
+INTEGRATION_KEY_FILE="$ROOT/.run/integration.key"
+if [[ ! -s "$INTEGRATION_KEY_FILE" ]]; then
+    mkdir -p "$ROOT/.run"
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -base64 32 | tr -d '\n' > "$INTEGRATION_KEY_FILE"
+    else
+        # 无 openssl 的兜底：机器相关、可复现的本地开发密钥（仅本地栈，不可用于生产）
+        printf '%s' "dev-local-$(hostname)-integration-key" > "$INTEGRATION_KEY_FILE"
+    fi
+    chmod 600 "$INTEGRATION_KEY_FILE" 2>/dev/null || true
+    log "已生成开发用集成凭据密钥 ${INTEGRATION_KEY_FILE}（gitignore 覆盖，勿提交）"
+fi
+export INTEGRATION_CREDENTIAL_KEY="$(cat "$INTEGRATION_KEY_FILE")"
+# 本地桩 127.0.0.1:19090 属于内网地址：SSRF 默认拒绝，必须显式登记才可出站。
+export INTEGRATION_EGRESS_ALLOW_HOSTS="${INTEGRATION_EGRESS_ALLOW_HOSTS:-127.0.0.1:19090}"
+
 if ! app_alive req-service; then STARTED_REQ=1; fi
 start_app req-service "$REQ_PORT" req-service
 log "等待 req-service 语义就绪（status=UP, db=up, flyway 已迁移）"

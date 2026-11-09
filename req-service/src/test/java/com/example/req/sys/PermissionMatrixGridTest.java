@@ -17,19 +17,19 @@ import org.junit.jupiter.api.Test;
 /**
  * AC-5: the matrix is asserted cell by cell, not spot-checked.
  *
- * <p>Every one of the 10 roles × 41 functions is covered, so a silently changed cell (the usual
+ * <p>Every one of the 10 roles × 42 functions is covered, so a silently changed cell (the usual
  * way a permission bug ships) fails here instead of in production. The 26 r2 codes are asserted
- * exactly as before; M6 appended 15 quality codes, which is why the expected grid size moved from
- * 260 to 410.</p>
+ * exactly as before; M6 appended 15 quality codes (grid 260 → 410) and M7 appended
+ * {@code integration:manage}, which is why the expected grid size is 420.</p>
  */
 class PermissionMatrixGridTest {
 
     @Test
-    @DisplayName("10 roles × 41 functions: every cell exists and is defined exactly once")
+    @DisplayName("10 roles × 42 functions: every cell exists and is defined exactly once")
     void everyCellIsDefined() {
         List<PermissionMatrix.Cell> cells = PermissionMatrix.cells();
         int expected = PermissionMatrix.roles().size() * PermissionMatrix.functions().size();
-        assertEquals(410, expected, "the matrix is 10 roles × 41 functions");
+        assertEquals(420, expected, "the matrix is 10 roles × 42 functions");
         assertEquals(expected, cells.size(), "cells() must enumerate the whole grid");
         Set<String> seen = new HashSet<>();
         for (PermissionMatrix.Cell cell : cells) {
@@ -43,7 +43,7 @@ class PermissionMatrixGridTest {
     }
 
     @Test
-    @DisplayName("PLATFORM_ADMIN is ALLOW on all 41 functions; no other role holds tenant:manage")
+    @DisplayName("PLATFORM_ADMIN is ALLOW on all 42 functions; no other role holds tenant:manage")
     void platformAdminIsUnrestricted() {
         for (String function : PermissionMatrix.functions()) {
             assertEquals(Access.ALLOW, PermissionMatrix.accessFor("PLATFORM_ADMIN", function),

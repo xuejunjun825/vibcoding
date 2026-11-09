@@ -14,6 +14,12 @@ import org.springframework.context.annotation.Configuration;
  * {@code /api/**} catch-all (order 0), hence negative orders. {@code /openapi/**} is
  * stripped by one segment only, so the public path {@code /openapi/v1/test-executions}
  * reaches deliver-service as {@code /v1/test-executions}.</p>
+ *
+ * <p>{@code /api/integration/**} (order -95) strips exactly the {@code /api} segment and goes
+ * to req-service as {@code /integration/**}. It sits between the req route and the deliver
+ * route so a future {@code /api/req/integration/**} alias cannot shadow it; CI webhooks must
+ * enter through the same edge as everything else (one place to observe, one place to rate
+ * limit), even though that one prefix is anonymous — see {@link JwtGatewayFilter}.</p>
  */
 @Configuration
 public class PlatformRoutes {
@@ -23,6 +29,9 @@ public class PlatformRoutes {
         return builder.routes()
                 .route("req-service", r -> r.order(-100).path("/api/req/**")
                         .filters(f -> f.stripPrefix(2))
+                        .uri("lb://req-service"))
+                .route("req-integration", r -> r.order(-95).path("/api/integration/**")
+                        .filters(f -> f.stripPrefix(1))
                         .uri("lb://req-service"))
                 .route("deliver-service", r -> r.order(-90).path("/api/deliver/**")
                         .filters(f -> f.stripPrefix(2))

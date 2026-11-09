@@ -3,6 +3,8 @@ package com.example.req.deploy;
 import com.example.req.approval.ApprovalInstanceRepository;
 import com.example.req.integration.DeliverGateClient;
 import com.example.req.integration.DeliverQualityGateClient;
+import com.example.req.integration.admission.AdmissionItemConfigService;
+import com.example.req.integration.admission.IntegrationEvidenceReader;
 import com.example.req.requirement.RequirementRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,8 @@ class AdmissionLegacySemanticsTest {
             mock(ApprovalInstanceRepository.class),
             mock(DeliverGateClient.class),
             mock(DeliverQualityGateClient.class),
+            mock(IntegrationEvidenceReader.class),
+            mock(AdmissionItemConfigService.class),
             new ObjectMapper());
 
     @Test

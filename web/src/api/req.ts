@@ -346,13 +346,19 @@ export function getAdmission(id: number | string): Promise<AdmissionSnapshot> {
 /**
  * 提交发布单：服务端把门禁快照固化到单据上（AC-5/AC-7），此后回放只看快照。
  * NO-GO 评审结论未二次确认 → 409 `NO_GO_CONFIRM_REQUIRED`，页面据 code 弹确认而不吞错。
+ *
+ * `acknowledgedSkipCount`（M7）：9 项准入里有 SKIP 时，提交必须回传与 `skipCount` 等值的
+ * 数字（SKIP 永不计 PASS，用户要显式确认放过了几项），否则 400 `SKIP_NOT_ACKNOWLEDGED`，
+ * 错误 detail 里带服务端算出的 `skipCount`。跳过 0 项时不传等价于传 0。
  */
 export function submitDeployOrder(
   id: number | string,
   confirmNoGo = false,
+  acknowledgedSkipCount = 0,
 ): Promise<DeploySubmitResult> {
   return http.post<DeploySubmitResult>(`${REQ}/deploy-orders/${id}/submit`, {
     confirmNoGo,
+    acknowledgedSkipCount,
   })
 }
 

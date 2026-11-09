@@ -66,17 +66,71 @@ public final class DeployViews {
     }
 
     /**
+     * 四态计数（PRD AC-8.4）：{@code active = total - closed}，{@code passed}/{@code active} 才是通过率；
+     * SKIP 永远不进 {@code passed}。{@code active = 0} 时通过率按 0 处理，不除零。
+     */
+    public record AdmissionCounts(int passed, int failed, int skipped, int closed, int active, int total) {
+
+        public static AdmissionCounts of(List<AdmissionItem> items) {
+            List<AdmissionItem> list = items == null ? List.of() : items;
+            int passed = 0;
+            int failed = 0;
+            int skipped = 0;
+            int closed = 0;
+            for (AdmissionItem item : list) {
+                switch (item.status() == null ? AdmissionItem.FAIL : item.status()) {
+                    case AdmissionItem.PASS -> passed++;
+                    case AdmissionItem.SKIP -> skipped++;
+                    case AdmissionItem.CLOSED -> closed++;
+                    default -> failed++;
+                }
+            }
+            return new AdmissionCounts(passed, failed, skipped, closed, list.size() - closed, list.size());
+        }
+
+        /** 通过率（0–1）：分母只算参与判定的项。 */
+        public BigDecimal percentage() {
+            if (active <= 0) {
+                return BigDecimal.ZERO;
+            }
+            return BigDecimal.valueOf(passed)
+                    .divide(BigDecimal.valueOf(active), 4, java.math.RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
      * 准入快照对外形态；{@code stale=true} 表示需求集合/状态已变，页面必须提示重新校验。
      *
      * <p>{@code legacy=true} = 没有质量门结论的历史单据：M6 之前生成的五项快照，以及从未评估过
      * （{@code admission_result_json} 为 NULL、{@code items} 为空）的旧单。页面只展示历史结论，
      * 不伪造质量门 PASS；{@code gate} 是该次判定的质量门证据（legacy 单据为 {@code null}）。</p>
+     *
+     * <p>{@code partial=true} = 快照项数不足九项（M6 的 6 项 / M5 的 5 项历史快照），
+     * 页面据此提供"重新校验"把历史结论升级为当前口径。</p>
      */
     public record AdmissionSnapshot(List<AdmissionItem> items, LocalDateTime checkedAt, boolean stale,
-                                    String signature, boolean legacy, GateEvidence gate) {
+                                    String signature, boolean legacy, GateEvidence gate,
+                                    AdmissionCounts counts, int skipCount, boolean partial) {
+
+        public AdmissionSnapshot {
+            items = items == null ? List.of() : items;
+            if (counts == null) {
+                counts = AdmissionCounts.of(items);
+            }
+            if (skipCount <= 0) {
+                skipCount = counts.skipped();
+            }
+            partial = partial || items.size() < AdmissionItem.ORDER.size();
+        }
+
+        /** 六组件版：历史调用点（服务层在落库后回捞）。 */
+        public AdmissionSnapshot(List<AdmissionItem> items, LocalDateTime checkedAt, boolean stale,
+                                 String signature, boolean legacy, GateEvidence gate) {
+            this(items, checkedAt, stale, signature, legacy, gate, null, 0, false);
+        }
 
         public AdmissionSnapshot(List<AdmissionItem> items, LocalDateTime checkedAt, boolean stale) {
-            this(items, checkedAt, stale, null, legacyOf(items), null);
+            this(items, checkedAt, stale, null, legacyOf(items), null, null, 0, false);
         }
 
         /**
@@ -105,10 +159,16 @@ public final class DeployViews {
     }
 
     /**
-     * 提交参数（TECHNICAL §5.7）。{@code confirmNoGo=true} 表示 PMO 已知悉最新 NO-GO 评审风险、
-     * 二次确认后继续提交；缺省/空体按"未确认"处理，由服务端返回 409 NO_GO_CONFIRM_REQUIRED。
+     * 提交参数（TECHNICAL §5.7 / §7.5）。
+     *
+     * <p>{@code confirmNoGo=true} 表示 PMO 已知悉最新 NO-GO 评审风险、二次确认后继续提交；
+     * 缺省/空体按"未确认"处理，由服务端返回 409 NO_GO_CONFIRM_REQUIRED。</p>
+     *
+     * <p>{@code acknowledgedSkipCount} 是"跳过项等值确认"：清单里有 {@code skipCount} 个 SKIP 时，
+     * 提交必须把同一个数字回传（少传、多传、不传都 400 SKIP_NOT_ACKNOWLEDGED），
+     * 防止跳过在用户不知情的情况下被当成通过（PRD AC-8.3）。</p>
      */
-    public record SubmitCmd(Boolean confirmNoGo) {
+    public record SubmitCmd(Boolean confirmNoGo, Integer acknowledgedSkipCount) {
     }
 
     /** 提交结果：正常路径只回状态（审批实例 id 属实现细节，前端不需要）。 */
@@ -128,20 +188,50 @@ public final class DeployViews {
     }
 
     /**
-     * 准入判定结果（带快照指纹，用于判断详情页展示的结论是否已过期）。
+     * 准入判定结果（带四态计数与快照指纹，用于判断详情页展示的结论是否已过期）。
      *
      * <p>第 6 项质量门的证据随结果一起落 {@code admission_result_json}，
      * 提交时据此写 {@code deploy_order.quality_gate*} 三列（AC-5.6）。</p>
      */
-    public record AdmissionResult(List<AdmissionItem> items, LocalDateTime checkedAt, String signature,
-                                  GateEvidence gate) {
+    public record AdmissionResult(List<AdmissionItem> items, AdmissionCounts counts, LocalDateTime checkedAt,
+                                  String signature, GateEvidence gate) {
 
-        public AdmissionResult(List<AdmissionItem> items, LocalDateTime checkedAt, String signature) {
-            this(items, checkedAt, signature, null);
+        public AdmissionResult {
+            items = items == null ? List.of() : items;
+            if (counts == null) {
+                counts = AdmissionCounts.of(items);
+            }
         }
 
+        public AdmissionResult(List<AdmissionItem> items, LocalDateTime checkedAt, String signature,
+                               GateEvidence gate) {
+            this(items, null, checkedAt, signature, gate);
+        }
+
+        public AdmissionResult(List<AdmissionItem> items, LocalDateTime checkedAt, String signature) {
+            this(items, null, checkedAt, signature, null);
+        }
+
+        /**
+         * 提交闸门（PRD AC-8.5）：<b>没有 FAIL 即可提交</b>——CLOSED 不阻断，SKIP 不阻断
+         * （但要在提交时显式确认跳过数，见 {@link SubmitCmd#acknowledgedSkipCount()}）。
+         */
         public boolean allPassed() {
-            return items != null && !items.isEmpty() && items.stream().allMatch(AdmissionItem::passed);
+            return items != null && !items.isEmpty()
+                    && items.stream().noneMatch(item -> AdmissionItem.FAIL.equals(item.status()));
+        }
+
+        public boolean hasBlocking() {
+            return items != null && items.stream().anyMatch(item -> AdmissionItem.FAIL.equals(item.status()));
+        }
+
+        public int skipCount() {
+            return counts == null ? 0 : counts.skipped();
+        }
+
+        /** 九项之外的旧快照（6 项 / 5 项）需要"重新校验"才能升级到当前口径。 */
+        public boolean partial() {
+            return items == null || items.size() < AdmissionItem.ORDER.size();
         }
 
         public List<String> failedCodes() {
