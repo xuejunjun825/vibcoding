@@ -1,5 +1,6 @@
 package com.example.req.requirement;
 
+import com.example.platform.common.audit.ActualPeriodRecorder;
 import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.code.CodeGenerator;
 import com.example.platform.common.error.ApiException;
@@ -339,6 +340,9 @@ public class RequirementService {
         }
         entity.setUpdatedBy(scope.userId());
         repository.save(entity);
+
+        // 实际期与状态流转同源：进入 IN_DEV 开实际起点、交付类终态收实际终点（V9 回填同口径）。
+        ActualPeriodRecorder.record(BIZ_TYPE, entity.getId(), from, target);
 
         auditService.record("STATE_CHANGE", BIZ_TYPE, entity.getId(), Map.of(
                 "from", from, "to", target, "action", action, "source", source,

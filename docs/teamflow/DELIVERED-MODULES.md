@@ -11,6 +11,9 @@
 | r2 | M1–M5 需求平台 | 组织权限·需求池·审批·版本发布·缺陷任务·用例执行·指标报表·开放 API | 20/20 AC · `platform-verify` 167/167 | `5f1bb66` |
 | r3+r4 | M6 质量闭环 | 计划生命周期·轮次·报告三签·质量门与豁免·生产回流·Go/No-Go | 10/10 AC · `quality-verify` 347/347 | `5640227` |
 | r5 | M7 集成对接 | Jenkins/GitLab/Sonar/Nexus 适配层·准入扩到 9 项 | 进行中 | 未合入 |
+| r6 | M8 九项 P0（本轮） | CTeam 甘特/Wiki/价值流·CCode 分支策略/CR 行级评论/代码质量·CTest 用例评审/测试数据/执行器 | `make collab-verify` s0–s8（≥60 断言） | 分支 `feat/ccode-cteam-ctest-p0`，未合入 |
+
+> r6 任务夹：[docs/teamflow/20261109-r6-ccode-cteam-ctest-p0/](20261109-r6-ccode-cteam-ctest-p0/)（PRD 20 条 AC · DESIGN · TECHNICAL · QA-REPORT · ACCEPTANCE）。
 
 **规模**：已交付 REST 映射 **196** 个（req-service 81 / deliver-service 115），前端 **54** 个页面/组件，数据库 **53** 张业务表（V1 39 + V5 14，另有 5 次增列/字典迁移）。
 
@@ -110,5 +113,6 @@
 ## 12. 进行中 / 明确不做
 
 - **进行中（M7，r5）**：Jenkins 构建、GitLab MR 与 webhook、Sonar 质量门禁、Nexus 制品检索与晋级；带来准入 9 项、`integration_config`/`integration_sync_log`/`build_record`/`mr_sync`/`artifact_record` 等表与 3 个管理页；本地桩验收（`make integration-verify`）。
-- **明确不做（本期非目标）**：CPack/CCode/CAgent/CTest/CWiki/CTeam/CMeas/CCI/CFlow 其余九平台、CPack 制品平台本体、自建 CI 执行器、移动端、AI 辅助、表单自定义引擎、金额折算、多级会签、SSO、多语言、ES、甘特 FS/SS 依赖。
+- **本轮（M8，r6，分支未合入）**：任务夹 [20261109-r6-ccode-cteam-ctest-p0/](20261109-r6-ccode-cteam-ctest-p0/)，20 条 AC，新增 11 张表（`wiki_space`/`wiki_page`/`wiki_page_version`/`wiki_comment`/`wiki_page_link`/`stage_definition`/`branch_policy`/`branch_policy_check`/`mr_comment`/`test_case_review`/`test_executor`）与 `mr_sync` 4 列、四主体 `actual_*`、`test_plan.data_note`；权限矩阵 42→56 格（14 个新码）；五个单点 `WikiVisibility`/`GanttWarnings`/`GanttConfirmTokens`/`FlowMetricFormulas`/`ExecutorHealth`。证据：`make collab-verify`（s0–s8，本地 GitLab 桩 127.0.0.1:19091）与 `make collab-perf`（AC-20 五项 P95）。
+- **明确不做（本期非目标）**：CPack/CAgent/CWiki/CMeas/CCI/CFlow 其余六平台、CPack 制品平台本体、自建 CI 执行器、移动端、AI 辅助、表单自定义引擎、金额折算、多级会签、SSO、多语言、ES、甘特 FS/SS 依赖与关键路径、仓库托管。
 - **遗留 P3（不阻塞）**：`PlanLifecycleService.java:165` 状态字面量收敛、`QualityGateService` 规则证据 upsert 需补文档、q4 脚本过时注释、横幅样式与键盘可达性人工补测。

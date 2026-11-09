@@ -16,6 +16,12 @@ import {
 } from '@/api/req'
 import { listUsers } from '@/api/admin'
 import type { UserRow } from '@/api/admin'
+import {
+  CASE_REVIEW_CONCLUSION_LABEL,
+  CASE_REVIEW_STATUS_LABEL,
+  fetchCaseReviewList,
+} from '@/api/deliver'
+import type { CaseReviewRow, CaseReviewStatus } from '@/api/deliver'
 import type {
   ApprovalInstanceDetail,
   ApprovalTaskRow,
@@ -36,11 +42,12 @@ import { messageOf, normalizeTimeline, summaryText, usePlatformDict } from '@/vi
  * P3 审批中心：我的待办 / 已办 / 我发起。
  * 左 360 列表、右详情（时间线 + 被审单据摘要裁剪），底部动作条按「我的待处理任务 + 权限」渲染。
  */
-type Tab = 'todo' | 'done' | 'mine'
+type Tab = 'todo' | 'done' | 'mine' | 'case-reviews'
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'todo', label: '我的待办' },
   { key: 'done', label: '已办' },
   { key: 'mine', label: '我发起' },
+  { key: 'case-reviews', label: '用例评审' },
 ]
 const BIZ_LABELS: Record<string, string> = {
   REQUIREMENT: '需求',
@@ -59,9 +66,18 @@ const dict = usePlatformDict()
 
 const me = computed(() => auth.user?.id ?? null)
 const canReview = computed(() => can('req:review'))
+const canCaseReview = computed(() => can('CASE_REVIEW_VIEW'))
+
+/**
+ * 用例评审是**只读**台账：它有自己的状态机（SUBMITTED→DONE/INVALIDATED），
+ * 从不进通用审批引擎，所以这里没有待办、没有动作条、没有 SLA 计时。
+ */
+const visibleTabs = computed(() => TABS.filter((item) => item.key !== 'case-reviews' || canCaseReview.value))
 
 function normalizeTab(value: unknown): Tab {
-  return value === 'done' || value === 'mine' ? value : 'todo'
+  if (value === 'done' || value === 'mine') return value
+  if (value === 'case-reviews' && canCaseReview.value) return 'case-reviews'
+  return 'todo'
 }
 
 const tab = ref<Tab>(normalizeTab(route.query.tab))
@@ -72,6 +88,13 @@ const page = ref(1)
 const size = 20
 const loading = ref(false)
 const listError = ref('')
+
+/* 用例评审只读台账（独立分页与筛选，不与审批列表混用） */
+const caseReviews = ref<CaseReviewRow[]>([])
+const caseReviewTotal = ref(0)
+const caseReviewLoading = ref(false)
+const caseReviewError = ref('')
+const caseStatus = ref<'' | CaseReviewStatus>('')
 
 const selected = ref<ApprovalTodoRow | null>(null)
 const detail = ref<ApprovalInstanceDetail | null>(null)
@@ -130,6 +153,10 @@ function rowTime(row: ApprovalTodoRow): string {
 }
 
 async function load(): Promise<void> {
+  if (tab.value === 'case-reviews') {
+    await loadCaseReviews()
+    return
+  }
   loading.value = true
   listError.value = ''
   try {
@@ -154,6 +181,47 @@ async function load(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+async function loadCaseReviews(): Promise<void> {
+  caseReviewLoading.value = true
+  caseReviewError.value = ''
+  try {
+    const response = await fetchCaseReviewList({
+      status: caseStatus.value || undefined,
+      page: page.value,
+      size,
+    })
+    caseReviews.value = response.items ?? []
+    caseReviewTotal.value = response.total ?? caseReviews.value.length
+  } catch (error) {
+    caseReviewError.value = messageOf(error)
+    caseReviews.value = []
+    caseReviewTotal.value = 0
+  } finally {
+    caseReviewLoading.value = false
+  }
+}
+
+function caseStatusLabel(value?: string | null): string {
+  if (!value) return '—'
+  return CASE_REVIEW_STATUS_LABEL[value as CaseReviewStatus] ?? value
+}
+
+function caseConclusionLabel(value?: string | null): string {
+  if (!value) return '—'
+  return CASE_REVIEW_CONCLUSION_LABEL[value as keyof typeof CASE_REVIEW_CONCLUSION_LABEL] ?? value
+}
+
+function caseStatusTone(value?: string | null): string {
+  if (value === 'DONE') return 'cr-tag cr-tag--done'
+  if (value === 'INVALIDATED') return 'cr-tag cr-tag--stale'
+  return 'cr-tag cr-tag--open'
+}
+
+function onCaseStatusChange(): void {
+  page.value = 1
+  void load()
 }
 
 async function loadDetail(instanceId: number | null): Promise<void> {
@@ -464,7 +532,14 @@ function goRequirements(): void {
         <span v-if="tab === 'todo'" class="count-badge count-badge--danger">{{ total }}</span>
       </div>
       <div class="page-head__actions">
-        <el-select v-model="bizType" size="small" placeholder="全部单据类型" clearable style="width: 150px">
+        <el-select
+          v-if="tab !== 'case-reviews'"
+          v-model="bizType"
+          size="small"
+          placeholder="全部单据类型"
+          clearable
+          style="width: 150px"
+        >
           <el-option label="需求" value="REQUIREMENT" />
           <el-option label="版本" value="RELEASE" />
           <el-option label="发布单" value="DEPLOY" />
@@ -475,7 +550,7 @@ function goRequirements(): void {
 
     <div class="tabs" role="tablist">
       <button
-        v-for="item in TABS"
+        v-for="item in visibleTabs"
         :key="item.key"
         type="button"
         role="tab"
@@ -489,7 +564,7 @@ function goRequirements(): void {
       </button>
     </div>
 
-    <div class="layout">
+    <div v-if="tab !== 'case-reviews'" class="layout">
       <section class="surface list-pane">
         <div v-if="loading" class="skeleton-list">
           <div v-for="index in 5" :key="index" class="skeleton skeleton__row" />
@@ -609,6 +684,79 @@ function goRequirements(): void {
         </template>
       </section>
     </div>
+
+    <section v-else class="surface case-review-pane">
+      <header class="case-review-head">
+        <div>
+          <h2 class="case-review-title">用例评审</h2>
+          <p class="case-review-sub">只读台账 · 评审结论不产生待办，也不进通用审批流程</p>
+        </div>
+        <div class="case-review-filters">
+          <el-select v-model="caseStatus" size="small" clearable placeholder="全部状态" style="width: 140px" @change="onCaseStatusChange">
+            <el-option label="评审中" value="SUBMITTED" />
+            <el-option label="已完成" value="DONE" />
+            <el-option label="已过期" value="INVALIDATED" />
+          </el-select>
+        </div>
+      </header>
+
+      <ErrorState
+        v-if="caseReviewError"
+        title="用例评审加载失败"
+        :message="caseReviewError"
+        compact
+        @retry="loadCaseReviews"
+      />
+      <div v-else-if="caseReviewLoading" class="skeleton-list">
+        <div v-for="index in 5" :key="index" class="skeleton skeleton__row" />
+      </div>
+      <EmptyState
+        v-else-if="!caseReviews.length"
+        variant="empty"
+        title="用例评审不进审批流程"
+        description="这里只是只读台账；发起评审与提交结论都在用例库的评审抽屉里完成。"
+        icon="file"
+        compact
+      />
+      <div v-else class="cr-table-wrap">
+        <table class="cr-table">
+          <thead>
+            <tr>
+              <th class="cr-col-case">用例</th>
+              <th class="cr-col-version">版本</th>
+              <th class="cr-col-conclusion">结论</th>
+              <th class="cr-col-reviewer">评审人</th>
+              <th class="cr-col-time">时间</th>
+              <th class="cr-col-status">状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in caseReviews" :key="row.id" :class="{ 'is-stale': row.status === 'INVALIDATED' }">
+              <td class="cr-col-case">
+                <span class="cr-case-title">{{ row.caseTitle || row.caseCode || `用例 #${row.caseId}` }}</span>
+                <span v-if="row.caseCode" class="cr-case-code">{{ row.caseCode }}</span>
+              </td>
+              <td class="cr-col-version"><span class="mono">v{{ row.caseVersion }}</span></td>
+              <td class="cr-col-conclusion">{{ caseConclusionLabel(row.conclusion) }}</td>
+              <td class="cr-col-reviewer">{{ row.reviewerName || `用户 #${row.reviewerId}` }}</td>
+              <td class="cr-col-time">{{ formatDateTime(row.decidedAt || row.createdAt) }}</td>
+              <td class="cr-col-status">
+                <span :class="caseStatusTone(row.status)">{{ caseStatusLabel(row.status) }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="caseReviewTotal > size" class="pager">
+          <el-pagination
+            layout="prev, pager, next"
+            :current-page="page"
+            :page-size="size"
+            :total="caseReviewTotal"
+            @current-change="(value: number) => ((page = value), load())"
+          />
+        </div>
+      </div>
+    </section>
 
     <el-dialog v-model="decisionOpen" :title="decisionKind === 'APPROVE' ? '同意审批' : '驳回审批'" width="460px" append-to-body>
       <p v-if="decisionKind === 'REJECT'" class="dialog-impact">
@@ -1009,5 +1157,144 @@ function goRequirements(): void {
   .detail-columns {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* 用例评审：只读台账，无待办语义 */
+.case-review-pane {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 420px;
+}
+
+.case-review-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--divider);
+  padding-bottom: 10px;
+}
+
+.case-review-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-title);
+}
+
+.case-review-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+
+.cr-table-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.cr-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+  background: var(--bg-table-head);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cr-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--divider);
+  color: var(--text-body);
+  vertical-align: top;
+}
+
+.cr-table tbody tr {
+  transition: background var(--t-color) ease;
+}
+
+.cr-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.cr-table tbody tr.is-stale {
+  background: #fffdf8;
+  box-shadow: inset 3px 0 0 var(--color-warning);
+}
+
+.cr-col-case {
+  width: 34%;
+}
+
+.cr-col-version {
+  width: 72px;
+}
+
+.cr-col-conclusion {
+  width: 96px;
+}
+
+.cr-col-reviewer {
+  width: 140px;
+}
+
+.cr-col-time {
+  width: 150px;
+}
+
+.cr-col-status {
+  width: 96px;
+}
+
+.cr-case-title {
+  display: block;
+  color: var(--text-title);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cr-case-code {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+
+.cr-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.cr-tag--open {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.cr-tag--done {
+  background: var(--color-success-bg);
+  color: var(--success-ink);
+}
+
+.cr-tag--stale {
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
 }
 </style>

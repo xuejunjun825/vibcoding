@@ -1,5 +1,6 @@
 package com.example.req.release;
 
+import com.example.platform.common.audit.ActualPeriodRecorder;
 import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.code.CodeGenerator;
 import com.example.platform.common.scope.ScopedJdbc;
@@ -292,6 +293,10 @@ public class ReleaseService {
         release.setReleasedAt(LocalDateTime.now());
         release.setUpdatedBy(scope.userId());
         releaseRepository.save(release);
+        // 实际期由单一写入点维护（与 V9 回填同口径）：发布是 RELEASE 唯一会开启实际期的流转，
+        // 漏掉这一步，甘特发布视图的浅色实际条就永远缺失（D-01）。write-once 由 SQL 的
+        // actual_start_date IS NULL 保证，审批回调重放不会覆盖首个日期。
+        ActualPeriodRecorder.record(ActualPeriodRecorder.RELEASE, id, STATUS_LOCKED, STATUS_PUBLISHED);
 
         ReleasePublishCascade.Result result = publishCascade.cascade(release);
         auditService.record("RELEASE_PUBLISH", BIZ_TYPE, id, Map.of(

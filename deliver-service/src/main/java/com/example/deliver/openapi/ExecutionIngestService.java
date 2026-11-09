@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.example.deliver.executor.TestExecutorService;
 import com.example.deliver.testcase.TestCaseEntity;
 import com.example.deliver.testcase.TestCaseRepository;
 import com.example.deliver.testcase.TestCaseVersionRepository;
@@ -43,17 +44,20 @@ public class ExecutionIngestService {
     private final TestPlanRepository plans;
     private final TestPlanCaseRepository planCases;
     private final ExecutionWriter writer;
+    private final TestExecutorService executors;
 
     public ExecutionIngestService(TestCaseRepository cases,
                                   TestCaseVersionRepository versions,
                                   TestPlanRepository plans,
                                   TestPlanCaseRepository planCases,
-                                  ExecutionWriter writer) {
+                                  ExecutionWriter writer,
+                                  TestExecutorService executors) {
         this.cases = cases;
         this.versions = versions;
         this.plans = plans;
         this.planCases = planCases;
         this.writer = writer;
+        this.executors = executors;
     }
 
     @Transactional
@@ -95,11 +99,20 @@ public class ExecutionIngestService {
                             "用例不在该测试计划内", Map.of("planId", planId, "caseId", testCase.getId())));
         }
 
+        // AC-16：执行器编码只决定"谁上报"，不参与幂等键（幂等键仍是 run_id+case_id）。
+        Long executorId = executors.resolve(tenantId, cmd.executorCode(), clientId);
+
         ExecutionWriter.Inserted inserted = writer.insert(tenantId, clientId, cmd.runId().trim(),
                 testCase.getId(), version, testCase.getRequirementId(), planId, result,
                 cmd.durationMs(), cmd.logUrl(), executedAt, ip);
-        if (!inserted.idempotent() && planId != null) {
-            mergePlanResult(planId, testCase.getId(), result, executedAt, inserted.id());
+        if (!inserted.idempotent()) {
+            executors.markExecution(tenantId, inserted.id(), executorId);
+            if (executorId != null) {
+                executors.touch(tenantId, executorId, executedAt);
+            }
+            if (planId != null) {
+                mergePlanResult(planId, testCase.getId(), result, executedAt, inserted.id());
+            }
         }
         return new OpenApiViews.IngestResult(inserted.id(), inserted.idempotent());
     }

@@ -150,8 +150,22 @@ platform_routes_preserve_demo() {
 #                                            (3) 幂等 upsert / 单调写（mr_sync 的 last_event_at 比较、build_record
 #                                                的唯一键冲突重试），ScopedJdbc 只有读入口。
 #                                            所有语句一律 `AND tenant_id = ?` 绑定，不放宽为拼接。
+#   collab/                                   M8 CTeam/CCode 协作域：ScopedJdbc 只有读入口，而下列写路径必须
+#                                            在同一事务里「锁行 → 校验版本/父窗口/唯一性 → 写 → 产版/审计」：
+#                                            甘特改期乐观锁与确认码消费（GanttRescheduleService）、Wiki 建改移删
+#                                            与产版/回滚（WikiPageService/WikiVersionService）、空间 CRUD、
+#                                            回收站 purge 后台任务（按 tenant 遍历，请求里没有 TenantContext）、
+#                                            分支策略 upsert 与核验记录（BranchPolicyService）。
+#                                            读路径（甘特三视图取数、Wiki 树/详情/检索/版本/回收站/关联）
+#                                            一律走 ScopedJdbc + `/*scope:*/` + WikiVisibility；直连语句
+#                                            显式 `tenant_id = :tenantId`，进入前先 assertVisible* 校验。
+#   flow/ review/ executor/                   M8 交付域：阶段配置、用例评审裁决（失效与用例升版同事务）、
+#                                            执行器台账（code 唯一冲突重试）都需要同事务读改写；
+#                                            列表读走 ScopedJdbc，直连语句同样显式绑定 tenant_id。
+#   testplan/TestPlanService.java            测试数据说明：COMPLETED 锁定与 revision 乐观锁必须在同一事务里
+#                                            `SELECT ... FOR UPDATE` 后 UPDATE；读路径仍走 ScopedJdbc（jdbcRead）。
 scoped_jdbc_single_source() {
-    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/|integration/'
+    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/|integration/|collab/|flow/|review/|executor/|testplan/TestPlanService\.java'
     local hits
     hits="$(grep -rl 'JdbcTemplate' "$ROOT/req-service/src/main/java" "$ROOT/deliver-service/src/main/java" 2>/dev/null \
         | grep -v '/seed/' | grep -Ev "$allow_re" || true)"

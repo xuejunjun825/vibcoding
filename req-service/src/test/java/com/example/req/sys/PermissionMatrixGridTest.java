@@ -17,19 +17,20 @@ import org.junit.jupiter.api.Test;
 /**
  * AC-5: the matrix is asserted cell by cell, not spot-checked.
  *
- * <p>Every one of the 10 roles × 42 functions is covered, so a silently changed cell (the usual
+ * <p>Every one of the 10 roles × 56 functions is covered, so a silently changed cell (the usual
  * way a permission bug ships) fails here instead of in production. The 26 r2 codes are asserted
- * exactly as before; M6 appended 15 quality codes (grid 260 → 410) and M7 appended
- * {@code integration:manage}, which is why the expected grid size is 420.</p>
+ * exactly as before; M6 appended 15 quality codes (grid 260 → 410), M7 appended
+ * {@code integration:manage} (420), and M8 appended 14 collaboration/code/test codes, which is
+ * why the expected grid size is 560.</p>
  */
 class PermissionMatrixGridTest {
 
     @Test
-    @DisplayName("10 roles × 42 functions: every cell exists and is defined exactly once")
+    @DisplayName("10 roles × 56 functions: every cell exists and is defined exactly once")
     void everyCellIsDefined() {
         List<PermissionMatrix.Cell> cells = PermissionMatrix.cells();
         int expected = PermissionMatrix.roles().size() * PermissionMatrix.functions().size();
-        assertEquals(420, expected, "the matrix is 10 roles × 42 functions");
+        assertEquals(560, expected, "the matrix is 10 roles × 56 functions");
         assertEquals(expected, cells.size(), "cells() must enumerate the whole grid");
         Set<String> seen = new HashSet<>();
         for (PermissionMatrix.Cell cell : cells) {
@@ -43,7 +44,7 @@ class PermissionMatrixGridTest {
     }
 
     @Test
-    @DisplayName("PLATFORM_ADMIN is ALLOW on all 42 functions; no other role holds tenant:manage")
+    @DisplayName("PLATFORM_ADMIN is ALLOW on all 56 functions; no other role holds tenant:manage")
     void platformAdminIsUnrestricted() {
         for (String function : PermissionMatrix.functions()) {
             assertEquals(Access.ALLOW, PermissionMatrix.accessFor("PLATFORM_ADMIN", function),
@@ -111,6 +112,49 @@ class PermissionMatrixGridTest {
                 "proddefect:report", "qualitymetric:view", "report:export")) {
             assertTrue(PermissionMatrix.functions().contains(function), "missing code " + function);
             assertNotNull(PermissionMatrix.accessFor("QA", function));
+        }
+    }
+
+    @Test
+    @DisplayName("M8: wiki/gantt/flow/policy are PMO-owned, review+executor QA-owned, reads are broad")
+    void collaborationCells() {
+        List<String> m8 = List.of("WIKI_VIEW", "WIKI_EDIT", "WIKI_ADMIN", "GANTT_VIEW",
+                "GANTT_EDIT", "FLOW_VIEW", "FLOW_CONFIG", "CCODE_POLICY_VIEW",
+                "CCODE_POLICY_EDIT", "CASE_REVIEW_VIEW", "CASE_REVIEW_SUBMIT",
+                "CASE_REVIEW_DECIDE", "TEST_EXECUTOR_VIEW", "TEST_EXECUTOR_MANAGE");
+        for (String function : m8) {
+            assertTrue(PermissionMatrix.functions().contains(function), "missing code " + function);
+            assertEquals(Access.ALLOW,
+                    PermissionMatrix.accessFor("PLATFORM_ADMIN", function),
+                    "PLATFORM_ADMIN must allow " + function);
+            assertNotNull(PermissionMatrix.accessFor("DEV", function));
+        }
+        // Editing a space's visibility is administration, not authoring: DEV writes pages but must
+        // not be able to widen who can read them.
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("PMO", "WIKI_ADMIN"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("DEV", "WIKI_ADMIN"));
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("DEV", "WIKI_EDIT"));
+        // Re-dating a gantt row is delivery work (AC-2 audits it to a person), so both roles have it.
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("DEV", "GANTT_EDIT"));
+        // Stage configuration decides the metric caliber: PMO defines it, and the flow board is a
+        // delivery-governance read (PMO/PRODUCT/MGMT), so QA keeps the test surfaces instead.
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("PMO", "FLOW_CONFIG"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("QA", "FLOW_CONFIG"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("QA", "FLOW_VIEW"));
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("PMO", "FLOW_VIEW"));
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("PRODUCT", "FLOW_VIEW"));
+        // The review loop belongs to QA; the reviewer decision is a QA cell, not a PMO one.
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("QA", "CASE_REVIEW_DECIDE"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("DEV", "CASE_REVIEW_DECIDE"));
+        // Registering a policy is PMO-only; devs read which branches they must protect.
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("DEV", "CCODE_POLICY_EDIT"));
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("DEV", "CCODE_POLICY_VIEW"));
+        // Every M8 code is defined for every role (no holes in the projected admin page).
+        for (String role : PermissionMatrix.roles()) {
+            for (String function : m8) {
+                assertNotNull(PermissionMatrix.accessFor(role, function),
+                        "hole at " + role + " × " + function);
+            }
         }
     }
 }

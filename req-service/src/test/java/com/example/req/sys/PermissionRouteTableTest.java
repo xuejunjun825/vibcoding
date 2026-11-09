@@ -65,7 +65,15 @@ class PermissionRouteTableTest {
         assertNull(PermissionRouteTable.requirementFor("GET", "/requirements"),
                 "listing is filtered by scope, not denied by function");
         assertNull(PermissionRouteTable.requirementFor("GET", "/auth/me"));
-        assertNull(PermissionRouteTable.requirementFor("GET", "/admin/permissions"));
+    }
+
+    @Test
+    void permissionMatrixIsAdminOnly() {
+        // The matrix is a read-only projection, but it exposes the whole role × function model, so
+        // "management page" means guarded like the rest of /admin (AC-17). The web nav uses the
+        // same code to hide the entry instead of letting a non-admin click into a 403.
+        assertEquals(List.of("org:manage"),
+                PermissionRouteTable.requirementFor("GET", "/admin/permissions").codes());
     }
 
     @Test
@@ -166,6 +174,85 @@ class PermissionRouteTableTest {
         // its signature, so it must not appear in this table.
         assertNull(PermissionRouteTable.requirementFor("GET", "/integration/artifacts/search"));
         assertNull(PermissionRouteTable.requirementFor("POST", "/integration/webhooks/gitlab/3"));
+    }
+
+    /**
+     * M8: each collaboration/code/test surface is pinned above its own broad read rule. A rule
+     * appended at the bottom of the table would be shadowed by {@code ^/wiki}, {@code ^/gantt},
+     * {@code ^/flow} or the {@code ^/(testcases|test-modules)} fallback, and a write would be
+     * charged only the read code — the classic "the button is visible, so the action must be
+     * allowed" bug.
+     */
+    @Test
+    void collaborationSurfacesHitTheirOwnCode() {
+        // Gantt: one write entry point (PATCH rows), everything else reads the board.
+        assertEquals(List.of("GANTT_EDIT"),
+                PermissionRouteTable.requirementFor("PATCH", "/gantt/rows/12").codes());
+        assertEquals(List.of("GANTT_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/gantt").codes());
+        assertEquals(List.of("GANTT_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/gantt/rows/12").codes());
+
+        // Wiki: structure writes are WIKI_ADMIN, page writes WIKI_EDIT, reads WIKI_VIEW.
+        assertEquals(List.of("WIKI_ADMIN"),
+                PermissionRouteTable.requirementFor("POST", "/wiki/spaces").codes());
+        assertEquals(List.of("WIKI_ADMIN"),
+                PermissionRouteTable.requirementFor("PUT", "/wiki/spaces/3").codes());
+        assertEquals(List.of("WIKI_ADMIN"),
+                PermissionRouteTable.requirementFor("DELETE", "/wiki/pages/9/purge").codes());
+        assertEquals(List.of("WIKI_EDIT"),
+                PermissionRouteTable.requirementFor("POST", "/wiki/pages").codes());
+        assertEquals(List.of("WIKI_EDIT"),
+                PermissionRouteTable.requirementFor("PUT", "/wiki/pages/9").codes());
+        assertEquals(List.of("WIKI_EDIT"),
+                PermissionRouteTable.requirementFor("DELETE", "/wiki/pages/9").codes());
+        assertEquals(List.of("WIKI_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/wiki/pages/9").codes());
+        assertEquals(List.of("WIKI_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/wiki/search").codes());
+
+        // Value stream: configuring the stages changes every metric's caliber.
+        assertEquals(List.of("FLOW_CONFIG"),
+                PermissionRouteTable.requirementFor("PUT", "/flow/stages").codes());
+        assertEquals(List.of("FLOW_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/flow/board").codes());
+        assertEquals(List.of("FLOW_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/flow/stages").codes());
+        // The dictionary preview of a FLOW_* code must not need metric:manage.
+        assertEquals(List.of("FLOW_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/metrics/FLOW_WIP/preview").codes());
+
+        // Branch policy: registering/verifying is an edit, listing is a read.
+        assertEquals(List.of("CCODE_POLICY_EDIT"),
+                PermissionRouteTable.requirementFor("POST", "/code/policies").codes());
+        assertEquals(List.of("CCODE_POLICY_EDIT"),
+                PermissionRouteTable.requirementFor("POST", "/code/policies/3/check").codes());
+        assertEquals(List.of("CCODE_POLICY_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/code/policies").codes());
+        assertEquals(List.of("CCODE_POLICY_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/code/policies/3/checks").codes());
+
+        // Case reviews: both entry points are gated by the read code, and neither falls through to
+        // the case:manage fallback (which would let any case editor decide a review).
+        assertEquals(List.of("CASE_REVIEW_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/testcase-reviews").codes());
+        assertEquals(List.of("CASE_REVIEW_VIEW"),
+                PermissionRouteTable.requirementFor("POST", "/testcase-reviews/3/decide").codes());
+        assertEquals(List.of("CASE_REVIEW_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/testcases/7/reviews").codes());
+        assertEquals(List.of("CASE_REVIEW_VIEW"),
+                PermissionRouteTable.requirementFor("POST", "/testcases/7/reviews").codes());
+        // The pre-existing case surface is unchanged.
+        assertEquals(List.of("case:manage"),
+                PermissionRouteTable.requirementFor("GET", "/testcases").codes());
+
+        // Executors: the ledger is managed, the health board is read.
+        assertEquals(List.of("TEST_EXECUTOR_MANAGE"),
+                PermissionRouteTable.requirementFor("POST", "/test-executors").codes());
+        assertEquals(List.of("TEST_EXECUTOR_MANAGE"),
+                PermissionRouteTable.requirementFor("PUT", "/test-executors/2").codes());
+        assertEquals(List.of("TEST_EXECUTOR_VIEW"),
+                PermissionRouteTable.requirementFor("GET", "/test-executors").codes());
     }
 
     /** First match wins: an approve path must never be reachable through the edit rule. */

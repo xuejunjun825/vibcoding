@@ -4,6 +4,7 @@
  */
 import { download, http } from './client'
 import type { RequestOptions } from './client'
+import type { MrCard, SonarCard } from './integration'
 import type {
   ActionPayload,
   ActionResponse,
@@ -434,6 +435,166 @@ export function deployStats(params: {
   failReasons: Array<{ reason: string; count: number }>
 }> {
   return http.get(`${REQ}/deploy-orders/stats`, params)
+}
+
+/* ---------------- CCode：MR 评审卡与行级评论（TECHNICAL §2.6） ---------------- */
+
+export type MrReviewState = 'PENDING' | 'APPROVED' | 'CHANGES_REQUESTED'
+
+export interface MrReviewer {
+  id?: number | null
+  name: string
+  state?: MrReviewState | string | null
+}
+
+/** MrCard 的 M8 增列；服务端未下发时保持可缺省，页面渲染「未取到」而不是猜 */
+export interface MrReviewFields {
+  reviewers?: MrReviewer[] | null
+  reviewState?: MrReviewState | string | null
+  changedFiles?: number | null
+  commentsCount?: number | null
+}
+
+/** 评审状态文案与 tone 的唯一映射（dict 的 StatusKind 未含该枚举，组件自包含） */
+export const MR_REVIEW_STATE_LABEL: Record<string, string> = {
+  PENDING: '待评审',
+  APPROVED: '已批准',
+  CHANGES_REQUESTED: '已要求修改',
+}
+
+export interface MrCommentRow {
+  id: number
+  gitlabNoteId?: number | null
+  author?: string | null
+  body: string
+  filePath?: string | null
+  lineNo?: number | null
+  resolved?: boolean | null
+  createdAt?: string | null
+}
+
+export interface MrCommentPage {
+  items: MrCommentRow[]
+  total?: number
+  nextCursor?: string | null
+}
+
+export interface MrRefreshResult {
+  card?: (MrCard & MrReviewFields) | null
+  added?: number
+  updated?: number
+  commentsCount?: number | null
+}
+
+/** 刷新是前端唯一触发 GitLab 外呼的入口；其余读取都走本地快照 */
+export function refreshMr(requirementId: number | string): Promise<MrRefreshResult> {
+  return http.post<MrRefreshResult>(`${REQ}/requirements/${requirementId}/integration/mr/refresh`)
+}
+
+export async function fetchMrComments(
+  requirementId: number | string,
+  cursor?: string | null,
+  limit = 50,
+): Promise<MrCommentPage> {
+  const raw = await http.get<MrCommentPage | MrCommentRow[]>(
+    `${REQ}/requirements/${requirementId}/integration/mr-comments`,
+    { cursor: cursor || undefined, limit },
+  )
+  if (Array.isArray(raw)) return { items: raw }
+  return { items: raw?.items ?? [], total: raw?.total, nextCursor: raw?.nextCursor ?? null }
+}
+
+/* ---------------- CCode：代码质量只读快照（TECHNICAL §2.7） ---------------- */
+
+export interface CodeQualityPayload {
+  /** 无快照时严格为 null（服务端不补 0，页面也不许显示 0/100%/绿） */
+  card: SonarCard | null
+  emptyReason?: 'NO_SNAPSHOT' | 'INTEGRATION_DISABLED' | string | null
+}
+
+export interface ReleaseCodeQualityProject {
+  projectKey: string
+  requirementId?: number | null
+  requirementCode?: string | null
+  card: SonarCard | null
+}
+
+export interface ReleaseCodeQualityPayload {
+  projects: ReleaseCodeQualityProject[]
+  emptyReason?: 'NO_SNAPSHOT' | 'INTEGRATION_DISABLED' | string | null
+}
+
+export function fetchCodeQuality(requirementId: number | string): Promise<CodeQualityPayload> {
+  return http.get<CodeQualityPayload>(`${REQ}/requirements/${requirementId}/code-quality`)
+}
+
+export function fetchReleaseCodeQuality(releaseId: number | string): Promise<ReleaseCodeQualityPayload> {
+  return http.get<ReleaseCodeQualityPayload>(`${REQ}/releases/${releaseId}/code-quality`)
+}
+
+/* ---------------- Wiki 双向关联（TECHNICAL §2.3，文档 tab 使用） ---------------- */
+
+export interface WikiLinkRow {
+  pageId: number
+  title: string
+  spaceId?: number | null
+  spaceName?: string | null
+  visibility?: string | null
+  updatedAt?: string | null
+}
+
+export interface WikiSearchItem {
+  pageId: number
+  title: string
+  snippet?: string | null
+  spaceName?: string | null
+  updatedAt?: string | null
+}
+
+export async function fetchWikiLinks(bizType: string, bizId: number | string): Promise<WikiLinkRow[]> {
+  const raw = await http.get<WikiLinkRow[] | { items?: WikiLinkRow[] }>(`${REQ}/wiki/links`, {
+    bizType,
+    bizId,
+  })
+  return Array.isArray(raw) ? raw : raw?.items ?? []
+}
+
+export function linkWikiPage(
+  pageId: number,
+  bizType: string,
+  bizId: number | string,
+): Promise<void> {
+  return http.post<void>(`${REQ}/wiki/pages/${pageId}/links`, { bizType, bizId })
+}
+
+export function unlinkWikiPage(
+  pageId: number,
+  bizType: string,
+  bizId: number | string,
+): Promise<void> {
+  return http.del<void>(`${REQ}/wiki/pages/${pageId}/links`, { params: { bizType, bizId } })
+}
+
+/** 关联抽屉的候选页搜索：只返回调用者可见的页（服务端先过滤再计数） */
+export async function searchWikiPages(
+  q: string,
+  page = 1,
+  size = 20,
+): Promise<{ items: WikiSearchItem[]; total: number; degraded?: boolean }> {
+  const raw = await http.get<{
+    items?: WikiSearchItem[]
+    total?: number
+    degraded?: boolean
+  }>(`${REQ}/wiki/search`, { q, page, size })
+  return { items: raw?.items ?? [], total: raw?.total ?? 0, degraded: raw?.degraded }
+}
+
+export function deleteAttachment(id: number): Promise<void> {
+  return http.del<void>(`${REQ}/attachments/${id}`)
+}
+
+export function downloadAttachment(id: number, fileName?: string): Promise<void> {
+  return download(`${REQ}/attachments/${id}`, undefined, fileName)
 }
 
 export type { GateDecision, GateItem }

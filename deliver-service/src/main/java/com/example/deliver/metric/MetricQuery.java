@@ -1,6 +1,7 @@
 package com.example.deliver.metric;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -10,6 +11,8 @@ import java.util.Map;
 import com.example.deliver.defect.DefectBoardQuery;
 import com.example.deliver.defect.DefectViews.BoardMetrics;
 import com.example.deliver.defect.DefectViews.DefectFilter;
+import com.example.deliver.flow.FlowMetricService;
+import com.example.deliver.flow.FlowViews;
 import com.example.deliver.metric.MetricViews.DefinitionCmd;
 import com.example.deliver.metric.MetricViews.DefinitionView;
 import com.example.deliver.metric.MetricViews.DefectMetrics;
@@ -46,11 +49,14 @@ public class MetricQuery {
     private final DefectBoardQuery board;
     private final ScopedJdbc jdbc;
     private final MetricDefinitionRepository definitions;
+    private final FlowMetricService flow;
 
-    public MetricQuery(DefectBoardQuery board, ScopedJdbc jdbc, MetricDefinitionRepository definitions) {
+    public MetricQuery(DefectBoardQuery board, ScopedJdbc jdbc, MetricDefinitionRepository definitions,
+                       FlowMetricService flow) {
         this.board = board;
         this.jdbc = jdbc;
         this.definitions = definitions;
+        this.flow = flow;
     }
 
     /** The defect topic: same predicate as the cards and their drill-down. */
@@ -174,5 +180,80 @@ public class MetricQuery {
 
     static BigDecimal scale(BigDecimal value) {
         return value == null ? null : value.setScale(MetricFormulas.SCALE, java.math.RoundingMode.HALF_UP);
+    }
+
+    // ------------------------------------------------------------------ dictionary preview
+
+    /**
+     * Dictionary preview (AC-9 同源). A {@code FLOW_*} code is answered by
+     * {@link FlowMetricService#values} — the very call the board makes — so the dictionary page
+     * and the board cannot display two different numbers for one window. Other topics keep their
+     * board-driven values and only echo the registered definition here.
+     */
+    public Map<String, Object> preview(String code, Map<String, String> params) {
+        if (code == null || code.isBlank()) {
+            throw new ApiException(400, "VALIDATION_FAILED", "指标编码不能为空", null);
+        }
+        String metric = code.trim();
+        Map<String, String> query = params == null ? Map.of() : params;
+        if (metric.startsWith("FLOW_")) {
+            FlowViews.Query window = flow.window(new FlowViews.Query(
+                    longParam(query, "domainId"), longParam(query, "vendorId"),
+                    dateParam(query, "from"), dateParam(query, "to"), query.get("reqType")));
+            Map<String, Double> values = flow.values(window);
+            if (!values.containsKey(metric)) {
+                throw new ApiException(404, "METRIC_NOT_FOUND", "未知价值流指标: " + metric,
+                        Map.of("code", metric));
+            }
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("code", metric);
+            out.put("value", values.get(metric));
+            out.put("unit", FlowMetricService.unit(metric));
+            out.put("available", values.get(metric) != null);
+            out.put("window", Map.of("from", window.from(), "to", window.to()));
+            out.put("params", query);
+            out.put("decomposed", values);
+            return out;
+        }
+        DefinitionView definition = definitions(false).stream()
+                .filter(view -> view.code().equals(metric))
+                .findFirst()
+                .orElseThrow(() -> new ApiException(404, "METRIC_NOT_FOUND", "未知指标: " + metric,
+                        Map.of("code", metric)));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("code", definition.code());
+        out.put("name", definition.name());
+        out.put("formula", definition.formula());
+        out.put("version", definition.version());
+        out.put("value", null);
+        out.put("available", false);
+        out.put("note", "该指标按看板筛选实时计算：缺陷类见 /metrics/defects，测试类见 /metrics/test-pass?planId=");
+        return out;
+    }
+
+    private static Long longParam(Map<String, String> params, String name) {
+        String value = params.get(name);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(value.trim());
+        } catch (NumberFormatException invalid) {
+            throw new ApiException(400, "VALIDATION_FAILED", name + " 必须是数字",
+                    Map.of("param", name, "value", value));
+        }
+    }
+
+    private static LocalDate dateParam(Map<String, String> params, String name) {
+        String value = params.get(name);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value.trim());
+        } catch (java.time.format.DateTimeParseException invalid) {
+            throw new ApiException(400, "VALIDATION_FAILED", name + " 必须是 yyyy-MM-dd",
+                    Map.of("param", name, "value", value));
+        }
     }
 }

@@ -3,7 +3,8 @@ SHELL := /bin/bash
 
 .PHONY: help dev-up dev-down verify build lint test test-negative nacos-status clean distclean \
         platform-up platform-down platform-web platform-verify platform-test-negative \
-        platform-seed platform-unit platform-perf quality-verify quality-e2e integration-verify
+        platform-seed platform-unit platform-perf quality-verify quality-e2e integration-verify \
+        collab-verify collab-perf
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
@@ -24,8 +25,13 @@ build: ## 构建全部模块（跳过测试）
 lint: ## 静态门禁：脚本语法/插值/单点实现/错误提示/文档一致性（不启动服务）
 	@./scripts/tests/lint.sh
 
-test: ## 全量门禁：lint + 单测 + r1 四步 + 平台栈 AC-1..AC-20 + 种子 + 负向
+test: ## 全量门禁：lint + 单测 + r1 四步 + 平台栈 AC-1..AC-20 + 种子 + 负向 + 协作域 s0..s8
 	@./scripts/test-all.sh
+	@echo ""
+	@echo "== 协作域验收（M8）：test-all 结束时已 platform-down，这里重新拉起平台栈 =="
+	@./scripts/platform-up.sh
+	@./scripts/collab-verify.sh
+	@./scripts/platform-down.sh
 
 test-negative: ## 仅运行 r1 负向用例：停服务 -> verify 必红 -> 恢复 -> 全绿
 	@./scripts/tests/verify-negative.sh
@@ -69,6 +75,12 @@ quality-e2e: ## M6 质量域浏览器 E2E（Playwright/Node；服务未起则 SK
 
 integration-verify: ## M7 集成对接验收 s0..s7（本地四合一桩 127.0.0.1:19090；PASS==TOTAL 守卫；先 make platform-up）
 	@./scripts/integration-verify.sh
+
+collab-verify: ## M8 协作域验收 s0..s8（本地 GitLab 桩 127.0.0.1:19091；九组各 ≥6、总计 ≥60 断言）
+	@./scripts/collab-verify.sh
+
+collab-perf: ## AC-20 五项 P95 性能基线（甘特 300 条 / Wiki 检索 / 页面树 / 价值流 / 列表首屏）
+	@./scripts/collab-perf.sh
 
 clean: ## 清理 Maven 产物与运行态 pid（请先 make dev-down；保留 .nacos 缓存）
 	@bash -c 'source ./scripts/lib.sh; \

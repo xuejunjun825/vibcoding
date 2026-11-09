@@ -21,6 +21,8 @@ import com.example.platform.common.scope.ScopeGuard;
 import com.example.platform.common.scope.ScopedJdbc;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -29,18 +31,30 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * Attachment upload/list/download.
+ * Attachment upload/list/download/delete.
  *
  * <p>This is the fifth of the eight isolation entries in AC-4, and it was missing entirely: the
  * table and the frontend call existed, the endpoint did not (404). The business object is the
- * scope anchor — {@code domain_id}/{@code vendor_id} are read from the requirement or defect in
- * the same scoped query the list uses, so a forged form field cannot move a file across tenants,
- * domains or vendors.</p>
+ * scope anchor — {@code domain_id}/{@code vendor_id} are read from the requirement, defect, test
+ * plan or wiki page in the same scoped query the list uses, so a forged form field cannot move a
+ * file across tenants, domains or vendors.</p>
+ *
+ * <p>M8 extends the whitelist with {@code TEST_PLAN} (2.9 test data) and {@code WIKI_PAGE}
+ * (2.1 wiki). Both anchors are resolved through the scoped read as well: a wiki page has no
+ * isolation column of its own, so its space is the anchor — which is exactly the rule the six
+ * visibility exits share. Test-plan attachments also inherit the plan's data lock
+ * ({@code COMPLETED} → 409 {@code PLAN_DATA_LOCKED}), because "locked" must not depend on which
+ * endpoint the caller happens to use.</p>
  */
 @Service
 public class AttachmentService {
 
+    public static final String BIZ_TEST_PLAN = "TEST_PLAN";
+    public static final String BIZ_WIKI_PAGE = "WIKI_PAGE";
+
     static final long MAX_BYTES = 20L * 1024 * 1024;
+
+    private static final Logger log = LoggerFactory.getLogger(AttachmentService.class);
 
     private final AttachmentRepository attachments;
     private final ScopedJdbc jdbc;
@@ -111,6 +125,10 @@ public class AttachmentService {
             throw new ApiException(404, "BIZ_NOT_FOUND", "附件所属对象不存在或不在你的数据范围内",
                     Map.of("bizType", type, "bizId", bizId));
         }
+        if (biz.locked()) {
+            throw new ApiException(409, "PLAN_DATA_LOCKED",
+                    "测试计划已完成，测试数据与附件只读", Map.of("planId", bizId));
+        }
 
         byte[] bytes;
         try {
@@ -169,8 +187,53 @@ public class AttachmentService {
         return new Download(resource, entity.getFileName(), entity.getContentType());
     }
 
+    /**
+     * Deletes an attachment row and its file.
+     *
+     * <p>Scope comes from {@link ScopeGuard#requireVisible} (the row's own domain/vendor), so a
+     * caller outside the anchor cannot delete by guessing an id; a test-plan attachment inherits
+     * the plan's data lock for the same reason as upload. The file is removed <b>after</b> the row:
+     * a leftover file is harmless, a row pointing at nothing is a broken download.</p>
+     */
+    @Transactional
+    public void delete(long id) {
+        TenantContext.require();
+        AttachmentEntity entity = attachments.findById(id)
+                .orElseThrow(() -> new ApiException(404, "ATTACHMENT_NOT_FOUND",
+                        "附件不存在或不在你的数据范围内", Map.of("attachmentId", id)));
+        guard.requireVisible(entity);
+        if (BIZ_TEST_PLAN.equalsIgnoreCase(entity.getBizType()) && entity.getBizId() != null) {
+            Scoped anchor = resolveBiz(BIZ_TEST_PLAN, entity.getBizId());
+            if (anchor != null && anchor.locked()) {
+                throw new ApiException(409, "PLAN_DATA_LOCKED",
+                        "测试计划已完成，测试数据与附件只读",
+                        Map.of("planId", entity.getBizId()));
+            }
+        }
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("bizType", entity.getBizType());
+        detail.put("bizId", entity.getBizId());
+        detail.put("fileName", entity.getFileName());
+        detail.put("size", entity.getSize());
+        attachments.delete(entity);
+        Path path = root.resolve(entity.getPath()).normalize();
+        if (path.startsWith(root)) {
+            try {
+                Files.deleteIfExists(path);
+            } catch (IOException ex) {
+                log.warn("attachment file left on disk after row delete: id={} path={} ({})",
+                        id, path, ex.getMessage());
+            }
+        }
+        audit.record("ATTACH_DELETE", "attachment", id, detail);
+    }
+
     /** Resolved business object: the scope anchor for the attachment row. */
-    private record Scoped(Object domainId, Object vendorId) {
+    private record Scoped(Object domainId, Object vendorId, boolean locked) {
+
+        Scoped(Object domainId, Object vendorId) {
+            this(domainId, vendorId, false);
+        }
     }
 
     public record Download(Resource resource, String fileName, String contentType) {
@@ -178,27 +241,44 @@ public class AttachmentService {
 
     private Scoped resolveBiz(String type, long bizId) {
         Map<String, Object> row;
-        if ("REQ".equals(type)) {
-            row = jdbc.one("""
+        switch (type) {
+            case "REQ" -> row = jdbc.one("""
                     SELECT r.domain_id AS domain_id,
                            COALESCE(r.assignee_vendor_id, r.owner_vendor_id) AS vendor_id
                       FROM requirement r
                      WHERE r.id = :id AND /*scope:r*/
                     """, Map.of("id", bizId));
-        } else {
-            row = jdbc.one("""
+            case BIZ_TEST_PLAN -> row = jdbc.one("""
+                    SELECT tp.domain_id AS domain_id, tp.vendor_id AS vendor_id, tp.status AS status
+                      FROM test_plan tp
+                     WHERE tp.id = :id AND /*scope:tp*/
+                    """, Map.of("id", bizId));
+            // A wiki page carries no isolation column: the space is the anchor, and it is the same
+            // scoped read the page detail uses (WikiVisibility projects from this very join).
+            case BIZ_WIKI_PAGE -> row = jdbc.one("""
+                    SELECT s.domain_id AS domain_id, s.vendor_id AS vendor_id
+                      FROM wiki_page p
+                      JOIN wiki_space s ON s.id = p.space_id
+                     WHERE p.id = :id AND p.status <> 'DELETED' AND /*scope:s*/
+                    """, Map.of("id", bizId));
+            default -> row = jdbc.one("""
                     SELECT df.domain_id AS domain_id, df.vendor_id AS vendor_id
                       FROM defect df
                      WHERE df.id = :id AND /*scope:df*/
                     """, Map.of("id", bizId));
         }
-        return row == null ? null : new Scoped(row.get("domain_id"), row.get("vendor_id"));
+        if (row == null) {
+            return null;
+        }
+        boolean locked = BIZ_TEST_PLAN.equals(type) && "COMPLETED".equalsIgnoreCase(
+                row.get("status") == null ? "" : String.valueOf(row.get("status")));
+        return new Scoped(row.get("domain_id"), row.get("vendor_id"), locked);
     }
 
     private static String normalizeType(String bizType, boolean required) {
         if (bizType == null || bizType.isBlank()) {
             if (required) {
-                throw new ApiException(400, "BIZ_TYPE_REQUIRED", "bizType 必填（REQ 或 DEFECT）", null);
+                throw new ApiException(400, "BIZ_TYPE_REQUIRED", "bizType 必填（REQ / DEFECT / TEST_PLAN / WIKI_PAGE）", null);
             }
             return null;
         }
@@ -206,8 +286,10 @@ public class AttachmentService {
         return switch (type) {
             case "REQ", "REQUIREMENT" -> "REQ";
             case "DEFECT", "BUG" -> "DEFECT";
+            case "TEST_PLAN", "TESTPLAN" -> BIZ_TEST_PLAN;
+            case "WIKI_PAGE", "WIKIPAGE" -> BIZ_WIKI_PAGE;
             default -> throw new ApiException(400, "BIZ_TYPE_UNSUPPORTED",
-                    "不支持的 bizType：" + bizType + "（仅 REQ / DEFECT）", null);
+                    "不支持的 bizType：" + bizType + "（仅 REQ / DEFECT / TEST_PLAN / WIKI_PAGE）", null);
         };
     }
 

@@ -76,6 +76,36 @@ public final class ScopeSql {
         map.put("plan_change_log", TableSpec.NONE);
         map.put("test_report", new TableSpec("domain_id", "vendor_id", null, null, "created_by"));
         map.put("test_report_version", TableSpec.NONE);
+
+        // ---- M8 CTeam collaboration: wiki + stage configuration ----
+        // audit_log is read by the flow metrics (it is the source of truth for dwell time) and by
+        // every audit surface; it carries no domain/vendor column, so a caller only ever gets the
+        // tenant predicate here. Registering it is what lets the flow queries keep their marker.
+        map.put("audit_log", TableSpec.NONE);
+        // A space owns the visibility (INHERIT/DOMAIN/VENDOR); its domain/vendor columns are the
+        // ones WikiVisibility projects onto pages. Pages and their children are reached *through*
+        // the space, so they must be registered (a marker on an unknown table throws) while
+        // carrying no dimension of their own - the space alias keeps the actual restriction.
+        map.put("wiki_space", new TableSpec("domain_id", "vendor_id", null, null, "owner_id"));
+        map.put("wiki_page", TableSpec.NONE);
+        map.put("wiki_page_version", TableSpec.NONE);
+        map.put("wiki_comment", TableSpec.NONE);
+        map.put("wiki_page_link", TableSpec.NONE);
+        // Stage definitions are one dictionary per tenant (they define the flow, not the data).
+        map.put("stage_definition", TableSpec.NONE);
+
+        // ---- M8 CCode: branch policy registry ----
+        // A policy is registered per domain; its checks hang off it and carry no column.
+        map.put("branch_policy", new TableSpec("domain_id", null, null, null, "created_by"));
+        map.put("branch_policy_check", TableSpec.NONE);
+        map.put("mr_comment", TableSpec.NONE);
+
+        // ---- M8 CTest: reviews + executor ledger ----
+        map.put("test_case_review", TableSpec.NONE);
+        // Executors are tenant-wide test infrastructure: domain_id is an ownership hint (NULL means
+        // "platform level"), not an isolation column - restricting on it would hide the platform
+        // executors from every domain caller. Writes are gated by TEST_EXECUTOR_MANAGE instead.
+        map.put("test_executor", TableSpec.NONE);
         return Map.copyOf(map);
     }
 

@@ -17,7 +17,8 @@ public final class OpenApiViews {
             @JsonProperty("duration_ms") @JsonAlias("durationMs") Integer durationMs,
             @JsonProperty("log_url") @JsonAlias("logUrl") String logUrl,
             @JsonProperty("executed_at") @JsonAlias("executedAt") String executedAt,
-            @JsonProperty("plan_id") @JsonAlias("planId") Long planId) {
+            @JsonProperty("plan_id") @JsonAlias("planId") Long planId,
+            @JsonProperty("executor_code") @JsonAlias("executorCode") String executorCode) {
     }
 
     public record IngestResult(long id, boolean idempotent) {

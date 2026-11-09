@@ -1,5 +1,6 @@
 package com.example.req.release;
 
+import com.example.platform.common.audit.ActualPeriodRecorder;
 import com.example.platform.common.audit.AuditService;
 import com.example.req.requirement.RequirementEntity;
 import com.example.req.requirement.RequirementRepository;
@@ -90,6 +91,7 @@ public class ReleasePublishCascade {
 
     private void auditTransition(RequirementEntity entity, String action, String from, String to,
                                  long releaseId) {
+        ActualPeriodRecorder.record("REQUIREMENT", entity.getId(), from, to);
         auditService.record("STATE_CHANGE", "REQUIREMENT", entity.getId(), Map.of(
                 "from", Objects.requireNonNullElse(from, ""),
                 "to", to,
