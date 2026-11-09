@@ -14,10 +14,15 @@ public record AdmissionItem(String code, String name, boolean passed, String det
     public static final String MR_FILLED = "MR_FILLED";
     public static final String MAN_DAYS_FILLED = "MAN_DAYS_FILLED";
     public static final String REQ_APPROVALS_DONE = "REQ_APPROVALS_DONE";
+    /** M6 追加的第 6 项：发布质量门（deliver 侧求值，req 只透传结论，不重算规则）。 */
+    public static final String QUALITY_GATE = "QUALITY_GATE";
 
-    /** 固定顺序：与 PRD §4.9 的五项一一对应，增删都要同步前端与验证脚本。 */
+    /**
+     * 固定顺序：前五项与 PRD §4.9 一一对应，第 6 项质量门追加在末尾（PRD §4.15 AC-5）。
+     * 增删都要同步前端与验证脚本（{@code scripts/tests/quality/q4-gate-admission.sh} 断言这 6 个 code 的顺序）。
+     */
     public static final java.util.List<String> ORDER = java.util.List.of(
-            REQ_TEST_PASSED, NO_OPEN_HIGH_DEFECT, MR_FILLED, MAN_DAYS_FILLED, REQ_APPROVALS_DONE);
+            REQ_TEST_PASSED, NO_OPEN_HIGH_DEFECT, MR_FILLED, MAN_DAYS_FILLED, REQ_APPROVALS_DONE, QUALITY_GATE);
 
     public static AdmissionItem pass(String code, String name, String detail) {
         return new AdmissionItem(code, name, true, detail, null, false);
@@ -38,6 +43,7 @@ public record AdmissionItem(String code, String name, boolean passed, String det
             case MR_FILLED -> "研发需求已填 MR 链接";
             case MAN_DAYS_FILLED -> "预估/实际人天已填写";
             case REQ_APPROVALS_DONE -> "需求级审批已通过";
+            case QUALITY_GATE -> "发布质量门通过";
             default -> code;
         };
     }

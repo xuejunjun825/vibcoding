@@ -140,13 +140,16 @@ platform_routes_preserve_demo() {
 #   gate/GateController.java                 内部门禁端点只凭 X-Internal-Token 调用，请求里没有租户；
 #                                            必须先按 requirement_id 反查 tenant_id 才能建 DataScope。
 #                                            这正是 D-01 的根因（ScopedJdbc 的所有入口都要求 TenantContext）
+#   quality/                                  M6 质量域：ScopedJdbc 只读，快速路径聚合（计划/轮次/报告版本/
+#                                            门禁快照）需要在同一事务里读改写；与 deliver 既有的
+#                                            NamedParameterJdbcTemplate 写路径约定一致，故整体放行
 scoped_jdbc_single_source() {
-    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java'
+    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/'
     local hits
     hits="$(grep -rl 'JdbcTemplate' "$ROOT/req-service/src/main/java" "$ROOT/deliver-service/src/main/java" 2>/dev/null \
         | grep -v '/seed/' | grep -Ev "$allow_re" || true)"
     if [[ -n "$hits" ]]; then
-        echo "JdbcTemplate 只允许出现在 ScopedJdbc（platform-common）、SeedService 与上面注释里的四条白名单，实际:"
+        echo "JdbcTemplate 只允许出现在 ScopedJdbc（platform-common）、SeedService 与上面注释里的白名单，实际:"
         printf '%s\n' "$hits"
         return 1
     fi
@@ -212,6 +215,24 @@ gitignore_covers_artifacts() {
     fi
 }
 
+# ---- L14 报告取数单点：报告总数/通过数只允许经 QualityAggregator（D-06 的类） ----
+report_aggregation_single_source() {
+    local f="$ROOT/deliver-service/src/main/java/com/example/deliver/quality/report/ReportService.java"
+    local p="$ROOT/deliver-service/src/main/java/com/example/deliver/testplan/TestPlanQuery.java"
+    [[ -f "$f" && -f "$p" ]] || { echo "缺少 ReportService/TestPlanQuery"; return 1; }
+    grep -q 'QualityAggregator' "$f" \
+        || { echo "ReportService 未引用 QualityAggregator：报告统计会与计划/门禁各算一套"; return 1; }
+    grep -q 'QualityAggregator' "$p" \
+        || { echo "TestPlanQuery 未引用 QualityAggregator：计划进度会与报告/门禁各算一套"; return 1; }
+    local hits
+    hits="$(grep -rn "SUM(pc.result" "$ROOT/deliver-service/src/main/java" 2>/dev/null || true)"
+    if [[ -n "$hits" ]]; then
+        echo "发现自算用例统计 SQL；总数/通过数必须经 QualityAggregator（唯一聚合实现）:"
+        printf '%s\n' "$hits"
+        return 1
+    fi
+}
+
 log "静态门禁：脚本语法 / 变量插值 / 单点实现 / 错误提示 / 文档一致性"
 run_check "L1 所有脚本 bash -n 语法通过" syntax_ok
 run_check "L2 无 \$VAR 紧跟全角标点（防 set -u 吞变量名）" no_bare_var_before_wide_char
@@ -228,6 +249,7 @@ run_check "L10 db/migration 只增不改、版本号唯一" migrations_append_on
 run_check "L11 deliver 不写 req 侧表（只走 ReqReadModel）" deliver_does_not_write_req_tables
 run_check "L12 前端 views 不复制状态中文文案" frontend_has_no_status_literals
 run_check "L13 .gitignore 覆盖前端产物与运行态" gitignore_covers_artifacts
+run_check "L14 报告取数只经 QualityAggregator（禁止 SUM(pc.result=...)）" report_aggregation_single_source
 
 if (( FAILED > 0 )); then
     err "lint 失败 ${FAILED}/${TOTAL} 项：按上面的行号修正后重跑 make lint"

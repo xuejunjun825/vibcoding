@@ -66,6 +66,16 @@ public final class ScopeSql {
         map.put("attachment", new TableSpec("domain_id", "vendor_id", null, null, "uploader_id"));
         map.put("deploy_order", TableSpec.NONE);
         map.put("milestone", TableSpec.NONE);
+        // M6 quality domain: strategy/env are planned per domain and (optionally) per vendor;
+        // rounds/assignments/changes/report versions hang off a plan or report and carry no
+        // isolation column of their own (they are reached through their parent).
+        map.put("test_strategy", new TableSpec("domain_id", "vendor_id", null, null, "owner_id"));
+        map.put("test_env", new TableSpec("domain_id", "vendor_id", null, null, "owner_id"));
+        map.put("test_plan_round", TableSpec.NONE);
+        map.put("plan_assignment", TableSpec.NONE);
+        map.put("plan_change_log", TableSpec.NONE);
+        map.put("test_report", new TableSpec("domain_id", "vendor_id", null, null, "created_by"));
+        map.put("test_report_version", TableSpec.NONE);
         return Map.copyOf(map);
     }
 

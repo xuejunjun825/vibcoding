@@ -66,9 +66,24 @@ public class DeployOrderEntity {
     @Column(name = "status", nullable = false, length = 20)
     private String status;
 
-    /** 准入快照：{@code {items:[],checkedAt:"",signature:""}}。 */
+    /** 准入快照：{@code {items:[],checkedAt:"",signature:"",gate:{...}}}（M6 起含第 6 项质量门证据）。 */
     @Column(name = "admission_result_json")
     private String admissionResultJson;
+
+    /**
+     * M6 追加的三列（V5 迁移，只增不改）：提交通过时固化的质量门定位信息。
+     *
+     * <p>{@code qualityGateSnapshotId} 指向不可变快照（AC-7 回放用），{@code qualityGateId}/{@code reportId}
+     * 是当时那一份门禁配置与报告；M6 之前的历史单据三列恒为 NULL，视图按 legacy 展示，绝不伪造 PASS。</p>
+     */
+    @Column(name = "quality_gate_id")
+    private Long qualityGateId;
+
+    @Column(name = "quality_gate_snapshot_id")
+    private Long qualityGateSnapshotId;
+
+    @Column(name = "report_id")
+    private Long reportId;
 
     @Column(name = "forced_release", nullable = false)
     private boolean forcedRelease;
@@ -250,6 +265,30 @@ public class DeployOrderEntity {
 
     public void setAdmissionResultJson(String admissionResultJson) {
         this.admissionResultJson = admissionResultJson;
+    }
+
+    public Long getQualityGateId() {
+        return qualityGateId;
+    }
+
+    public void setQualityGateId(Long qualityGateId) {
+        this.qualityGateId = qualityGateId;
+    }
+
+    public Long getQualityGateSnapshotId() {
+        return qualityGateSnapshotId;
+    }
+
+    public void setQualityGateSnapshotId(Long qualityGateSnapshotId) {
+        this.qualityGateSnapshotId = qualityGateSnapshotId;
+    }
+
+    public Long getReportId() {
+        return reportId;
+    }
+
+    public void setReportId(Long reportId) {
+        this.reportId = reportId;
     }
 
     public boolean isForcedRelease() {

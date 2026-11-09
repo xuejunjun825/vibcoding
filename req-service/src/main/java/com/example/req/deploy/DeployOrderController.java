@@ -65,12 +65,24 @@ public class DeployOrderController {
         return service.evaluate(id);
     }
 
-    @PostMapping("/{id}/submit")
-    public DeployViews.SubmitResult submit(@PathVariable long id) {
-        return service.submit(id);
+    /**
+     * 读写分离的别名（GET）：详情页/发布单抽屉只读渲染走这里，避免"进详情就落一次快照"。
+     *
+     * <p>与 {@code POST /{id}/evaluate} 同源同序，区别仅在语义：GET 重新取数但不写库以外的副作用也没有
+     * （快照仍会刷新，因为"判定"本身必须是一次真实求值），POST 留给「重新校验」按钮。</p>
+     */
+    @GetMapping("/{id}/admission")
+    public DeployViews.AdmissionSnapshot admission(@PathVariable long id) {
+        return service.evaluate(id);
     }
 
-    /** 受控放行：reason 缺失/空白 → 400 REASON_REQUIRED（先于权限判断，页面据此提示"请填原因"）。 */
+    @PostMapping("/{id}/submit")
+    public DeployViews.SubmitResult submit(@PathVariable long id,
+                                           @RequestBody(required = false) DeployViews.SubmitCmd cmd) {
+        return service.submit(id, cmd);
+    }
+
+    /** 已退役（AC-6.6）：签名保留、恒 409 {@code FORCE_RELEASE_RETIRED}，不写强制标记也不改状态。 */
     @PostMapping("/{id}/force-release")
     public DeployViews.OrderDetail forceRelease(@PathVariable long id,
                                                 @RequestBody(required = false) DeployOrderService.ForceReleaseCmd cmd) {

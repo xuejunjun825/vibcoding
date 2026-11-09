@@ -4,6 +4,7 @@ import com.example.platform.contract.GateDecision;
 import com.example.req.approval.ApprovalInstance;
 import com.example.req.approval.ApprovalInstanceRepository;
 import com.example.req.integration.DeliverGateClient;
+import com.example.req.integration.DeliverQualityGateClient;
 import com.example.req.requirement.RequirementEntity;
 import com.example.req.requirement.RequirementRepository;
 import com.example.req.requirement.RequirementReviewCallback;
@@ -22,9 +23,10 @@ import java.util.Map;
 /**
  * 准入取数 + 快照读写（判定规则在 {@link AdmissionPolicy}，这里只负责把事实取齐）。
  *
- * <p>跨服务取数只有两处、都在 {@link DeliverGateClient}：一次批量门禁 + 一次缺陷计数，
- * 两者任一不可用都返回 {@code null} 交给策略层判 FAIL（fail-closed，绝不因为超时把门禁放过去）。
- * 时间预算 500ms：门禁 300ms + 缺陷 200ms 超时，超时即"不可用"。</p>
+ * <p>跨服务取数只有三处、都在 integration 包：一次批量门禁 + 一次缺陷计数（{@link DeliverGateClient}）、
+ * 一次发布质量门（{@link DeliverQualityGateClient}，M6 追加的第 6 项）。任一不可用都返回 {@code null}
+ * 交给策略层判 FAIL（fail-closed，绝不因为超时把门禁放过去）。
+ * 时间预算 500ms：门禁 250ms + 缺陷 200ms + 质量门 500ms（质量门与整体同预算，最快路径只打一次）。</p>
  */
 @Component
 public class AdmissionEvaluator {
@@ -33,6 +35,7 @@ public class AdmissionEvaluator {
     private final DeployOrderRequirementRepository orderRequirementRepository;
     private final ApprovalInstanceRepository instanceRepository;
     private final DeliverGateClient deliverGateClient;
+    private final DeliverQualityGateClient qualityGateClient;
     private final AdmissionPolicy policy = new AdmissionPolicy();
     private final ObjectMapper objectMapper;
 
@@ -40,11 +43,13 @@ public class AdmissionEvaluator {
                               DeployOrderRequirementRepository orderRequirementRepository,
                               ApprovalInstanceRepository instanceRepository,
                               DeliverGateClient deliverGateClient,
+                              DeliverQualityGateClient qualityGateClient,
                               ObjectMapper objectMapper) {
         this.requirementRepository = requirementRepository;
         this.orderRequirementRepository = orderRequirementRepository;
         this.instanceRepository = instanceRepository;
         this.deliverGateClient = deliverGateClient;
+        this.qualityGateClient = qualityGateClient;
         this.objectMapper = objectMapper;
     }
 
@@ -71,8 +76,26 @@ public class AdmissionEvaluator {
             openHigh = Map.of();
         }
 
-        List<AdmissionItem> items = policy.evaluate(new AdmissionPolicy.Inputs(facts, gates, openHigh));
-        return new DeployViews.AdmissionResult(items, LocalDateTime.now(), AdmissionPolicy.signature(facts));
+        DeployViews.GateEvidence gate = gate(order);
+        List<AdmissionItem> items = policy.evaluate(new AdmissionPolicy.Inputs(facts, gates, openHigh, gate));
+        return new DeployViews.AdmissionResult(items, LocalDateTime.now(),
+                AdmissionPolicy.signature(facts, gate == null ? null : gate.hash()), gate);
+    }
+
+    /**
+     * 第 6 项取数：一次求值（交付侧按 {@code deployOrderId + result_digest} 幂等复用快照）。
+     *
+     * <p>失败一律返回 {@code null}——{@link AdmissionPolicy} 会判 FAIL 且 {@code detail} 带
+     * {@code GATE_UNAVAILABLE}，这样"deliver 挂了"与"门禁真的没过"在准入清单上是两种可区分的结论。</p>
+     */
+    private DeployViews.GateEvidence gate(DeployOrderEntity order) {
+        try {
+            DeliverQualityGateClient.Evaluation evaluation = qualityGateClient.evaluateDetailed(
+                    order.getReleaseId(), order.getId(), requirementIds(order));
+            return DeployViews.GateEvidence.of(evaluation.snapshot(), evaluation.gateId(), evaluation.reportId());
+        } catch (RuntimeException ex) {
+            return null;
+        }
     }
 
     public boolean allPassed(DeployViews.AdmissionResult result) {
@@ -96,10 +119,12 @@ public class AdmissionEvaluator {
             return new DeployViews.AdmissionSnapshot(List.of(), null, false);
         }
         boolean stale = stored.signature() != null
-                && !stored.signature().equals(AdmissionPolicy.signature(facts(order)));
+                && !stored.signature().equals(AdmissionPolicy.signature(facts(order),
+                        stored.gate() == null ? null : stored.gate().hash()));
         List<AdmissionItem> items = AdmissionPolicy.sort(AdmissionPolicy.markForced(
                 stored.items(), order.isForcedRelease()));
-        return new DeployViews.AdmissionSnapshot(items, stored.checkedAt(), stale);
+        return new DeployViews.AdmissionSnapshot(items, stored.checkedAt(), stale, stored.signature(),
+                DeployViews.AdmissionSnapshot.legacyOf(items), stored.gate());
     }
 
     // ------------------------------------------------------------ 取数
@@ -203,6 +228,9 @@ public class AdmissionEvaluator {
         payload.put("items", result.items());
         payload.put("checkedAt", result.checkedAt());
         payload.put("signature", result.signature());
+        // 第 6 项的证据一起落库：提交时据此写 deploy_order.quality_gate*（AC-5.6），
+        // 详情页也能在 deliver 暂时不可用时展示"当时判定的是哪一份快照"。
+        payload.put("gate", result.gate());
         return objectMapper.writeValueAsString(payload);
     }
 

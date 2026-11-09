@@ -276,7 +276,15 @@ export function removeCaseFromPlan(id: number | string, caseId: number | string)
 
 export function executeCase(
   planId: number | string,
-  payload: { caseId: number; result: string; note?: string; evidence?: string },
+  payload: {
+    caseId: number
+    result: string
+    note?: string
+    evidence?: string
+    /** TECH §5.2: 执行上下文（服务端在缺省时回落到 active round 与计划环境） */
+    roundId?: number | null
+    envId?: number | null
+  },
 ): Promise<{ executionId: number }> {
   return http.post(`${DELIVER}/test-plans/${planId}/execute`, payload)
 }

@@ -16,6 +16,7 @@ public final class DeployErrors {
     public static final String ADMISSION_FAILED = "ADMISSION_FAILED";
     public static final String APPROVAL_NOT_CONFIGURED = "APPROVAL_NOT_CONFIGURED";
     public static final String BIZ_NOT_FOUND = "BIZ_NOT_FOUND";
+    public static final String NO_GO_CONFIRM_REQUIRED = "NO_GO_CONFIRM_REQUIRED";
 
     private DeployErrors() {
     }
@@ -51,6 +52,16 @@ public final class DeployErrors {
 
     public static AdmissionFailedException admissionFailed(List<AdmissionItem> items) {
         return new AdmissionFailedException(items, AdmissionPolicy.failedCodes(items));
+    }
+
+    /**
+     * 最新发布评审为 NO-GO 且未二次确认（AC-10.5）：409 + 机器码，前端据此弹"知悉风险并继续"。
+     * 确认后仍要过第 6 项质量门，NO-GO 不是放行开关，只是把决策责任显式落到 PMO 身上。
+     */
+    public static ApiException noGoConfirmRequired(long reviewId) {
+        return new ApiException(409, NO_GO_CONFIRM_REQUIRED,
+                "最新发布评审为 NO-GO，需 PMO 二次确认后才能提交",
+                Map.of("reviewId", reviewId));
     }
 
     public static ApprovalNotConfiguredException approvalNotConfigured() {

@@ -5,24 +5,23 @@ import { ElMessage } from 'element-plus'
 import {
   deployStats,
   evaluateAdmission,
-  forceRelease,
   getDeployOrder,
   recordExecution,
   submitDeployOrder,
 } from '@/api/req'
 import { ApiError } from '@/api/client'
 import type { AdmissionSnapshot, DeployOrderDetail, GateItem } from '@/api/types'
-import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ErrorState from '@/components/ErrorState.vue'
-import GateChecklist from '@/components/GateChecklist.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import ConclusionBar from '@/components/quality/ConclusionBar.vue'
+import QualityGatePanel from '@/components/quality/QualityGatePanel.vue'
 import { usePermission } from '@/composables/usePermission'
 import { formatDateTime, formatDuration, formatPercent } from '@/utils/format'
 import { messageOf } from '@/views/req/platform'
 
 /**
- * P4 发布单详情：5 项准入常驻清单（不折叠、不用 toast），
- * 409 原地展示在清单顶部；强制放行是独立受控入口，执行结果单独登记。
+ * P4 发布单详情：6 项准入常驻清单（不折叠、不用 toast），第 6 项质量门可展开规则卡；
+ * 409 原地展示逐条规则差额；强制放行入口已退役，历史记录只读展示，执行结果单独登记。
  */
 const ENVS: Record<string, string> = { DEV: '开发', TEST: '测试', STAGING: '预发', PROD: '生产' }
 const RESULTS = [
@@ -109,6 +108,7 @@ async function submit(): Promise<void> {
       await evaluate(true)
       rejected.value = true
       rejectedText.value = err.message || '准入校验未通过，提交被拒绝'
+      gateFailedRules.value = failedRulesOf(err)
     } else {
       actionError.value = messageOf(err)
     }
@@ -117,22 +117,20 @@ async function submit(): Promise<void> {
   }
 }
 
-const forceOpen = ref(false)
-const forceBusy = ref(false)
+interface FailedRuleDetail {
+  code: string
+  name?: string
+  actual?: string
+  threshold?: string
+  fixHint?: string
+}
 
-async function confirmForce(payload: { reason: string }): Promise<void> {
-  forceBusy.value = true
-  try {
-    await forceRelease(id.value, payload.reason)
-    forceOpen.value = false
-    ElMessage.success('已强制放行，已通知域负责人')
-    await load()
-  } catch (err) {
-    forceOpen.value = false
-    actionError.value = messageOf(err)
-  } finally {
-    forceBusy.value = false
-  }
+const gateFailedRules = ref<FailedRuleDetail[]>([])
+
+function failedRulesOf(err: ApiError): FailedRuleDetail[] {
+  const detail = err.detail as { failedRules?: FailedRuleDetail[]; rules?: FailedRuleDetail[] } | undefined
+  const list = detail?.failedRules ?? detail?.rules ?? []
+  return list.map((rule) => ({ ...rule, code: rule.code ?? 'QG' }))
 }
 
 const executionOpen = ref(false)
@@ -222,16 +220,30 @@ function stepsText(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function onForce(): void {
-  if (!can('deploy:force') || allPassed.value) return
-  forceOpen.value = true
-}
-
 function goBack(): void {
   void router.push({ name: 'deploy-orders' })
 }
 
-const forceImpact = computed(() => failedItems.value.map((item) => `${item.name}：${item.detail || '未通过'}`))
+const goNoGoTone = computed<'success' | 'warning' | 'danger' | 'neutral'>(() => {
+  const decision = detail.value?.review?.decision
+  if (decision === 'GO') return 'success'
+  if (decision === 'CONDITIONAL') return 'warning'
+  if (decision === 'NO_GO') return 'danger'
+  return 'neutral'
+})
+const goNoGoLabel = computed(() => {
+  const decision = detail.value?.review?.decision
+  if (decision === 'GO') return 'GO · 允许发布'
+  if (decision === 'CONDITIONAL') return 'CONDITIONAL · 附条件发布'
+  if (decision === 'NO_GO') return 'NO-GO · 禁止发布'
+  return '尚未生成 Go/No-Go 评审'
+})
+const goNoGoHint = computed(() => {
+  const review = detail.value?.review
+  if (!review) return '质量门通过后由 PMO 在发布评审页生成决策记录'
+  return `评审时间 ${formatDateTime(review.meetingAt)}${review.conditions ? ` · ${review.conditions}` : ''}`
+})
+const legacyAdmission = computed(() => Boolean(admission.value?.legacy))
 </script>
 
 <template>
@@ -271,18 +283,6 @@ const forceImpact = computed(() => failedItems.value.map((item) => `${item.name}
             登记执行结果
           </el-button>
           <el-button
-            size="small"
-            type="danger"
-            plain
-            :disabled="!can('deploy:force') || allPassed"
-            :title="
-              !can('deploy:force') ? '需要权限：deploy:force（仅 PMO）' : allPassed ? '5 项全部通过，无需强制放行' : '强制放行需填写原因并确认影响'
-            "
-            @click="onForce"
-          >
-            强制放行
-          </el-button>
-          <el-button
             type="primary"
             size="small"
             :loading="submitting"
@@ -295,12 +295,29 @@ const forceImpact = computed(() => failedItems.value.map((item) => `${item.name}
         </div>
       </header>
 
-      <div v-if="detail.forcedRelease" class="forced-banner" role="status">
-        <strong>强制放行</strong>
-        <span>{{ detail.forcedRelease.reason }}</span>
-        <span>· {{ detail.forcedRelease.by }}</span>
-        <span>· {{ formatDateTime(detail.forcedRelease.at) }}</span>
-      </div>
+      <el-tooltip
+        v-if="detail.forcedRelease"
+        content="历史强制放行，规则级豁免已替代"
+        placement="bottom"
+      >
+        <div class="legacy-force" role="status">
+          <span class="legacy-force__badge">历史强制放行</span>
+          <span class="legacy-force__reason">{{ detail.forcedRelease.reason }}</span>
+          <span class="muted small">
+            {{ detail.forcedRelease.by }} · {{ formatDateTime(detail.forcedRelease.at) }}
+          </span>
+        </div>
+      </el-tooltip>
+
+      <ConclusionBar :tone="goNoGoTone" :title="goNoGoLabel" :hint="goNoGoHint" dense>
+        <el-button
+          v-if="detail.releaseId"
+          size="small"
+          @click="router.push({ name: 'release-go-no-go', params: { id: detail.releaseId } })"
+        >
+          查看发布评审
+        </el-button>
+      </ConclusionBar>
 
       <div v-if="actionError" class="action-banner" role="alert">
         <span>{{ actionError }}</span>
@@ -309,21 +326,46 @@ const forceImpact = computed(() => failedItems.value.map((item) => `${item.name}
 
       <div class="columns">
         <section class="surface surface--flush column-main">
-          <GateChecklist
-            :items="items"
+          <div v-if="rejected && gateFailedRules.length > 0" class="gate-conflict" role="alert">
+            <header class="gate-conflict__head">
+              <strong>质量门未通过，发布申请被拒绝</strong>
+              <span class="muted small">{{ rejectedText }}</span>
+            </header>
+            <ul class="gate-conflict__list">
+              <li v-for="rule in gateFailedRules" :key="rule.code" class="gate-conflict__row">
+                <span class="mono gate-conflict__code">{{ rule.code }}</span>
+                <span class="gate-conflict__name">{{ rule.name || '门禁规则' }}</span>
+                <span class="gate-conflict__diff">
+                  <span class="ink-danger">{{ rule.actual || '未通过' }}</span>
+                  <span class="muted"> / 要求 {{ rule.threshold || '—' }}</span>
+                </span>
+                <span v-if="rule.fixHint" class="muted small gate-conflict__fix">{{ rule.fixHint }}</span>
+                <el-button
+                  v-if="detail.releaseId"
+                  link
+                  type="primary"
+                  size="small"
+                  @click="router.push({ name: 'quality-gate-detail', params: { releaseId: detail.releaseId } })"
+                >
+                  去修复
+                </el-button>
+              </li>
+            </ul>
+          </div>
+
+          <QualityGatePanel
             mode="admission"
-            title="发布准入检查（5 项）"
+            title="发布准入检查（6 项）"
+            :items="items"
             :rejected="rejected"
             :rejected-text="rejectedText"
             :checked-at="admission?.checkedAt ?? null"
             :stale="Boolean(admission?.stale)"
-            :allow-force="can('deploy:force')"
-            :force-disabled-reason="allPassed ? '5 项全部通过，无需强制放行' : '需要权限：deploy:force（仅 PMO）'"
-            @force="onForce"
+            :legacy="legacyAdmission"
           />
           <div class="checklist-foot">
             <span class="muted small">
-              准入由服务端按当前数据实时计算；客户端提交的 PASS/FAIL 一律无效。
+              准入由服务端按当前数据实时计算；第 6 项质量门只透传 deliver 的规则结果，客户端提交的 PASS/FAIL 一律无效。
             </span>
             <span v-if="missingChecklist" class="muted small">尚未拿到校验结果，请点「重新校验」。</span>
           </div>
@@ -416,21 +458,6 @@ const forceImpact = computed(() => failedItems.value.map((item) => `${item.name}
         <el-button type="primary" :loading="execSaving" @click="submitExecution">保存</el-button>
       </template>
     </el-dialog>
-
-    <ConfirmDialog
-      v-model="forceOpen"
-      title="强制放行发布单"
-      description="强制放行会跳过未通过的准入项，风险由放行人承担。"
-      :impact="[...forceImpact.slice(0, 3), '将通知域负责人，并在单据顶部常驻显示强制放行记录']"
-      reason-label="强制放行原因"
-      :require-ack="true"
-      ack-label="已知悉将通知域负责人并承担放行风险"
-      confirm-text="确认强制放行"
-      tone="danger"
-      :loading="forceBusy"
-      @confirm="(payload: { reason: string }) => confirmForce(payload)"
-      @cancel="forceOpen = false"
-    />
   </div>
 </template>
 
@@ -516,6 +543,89 @@ const forceImpact = computed(() => failedItems.value.map((item) => `${item.name}
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--text-muted-aa);
+}
+.legacy-force {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #e9c989;
+  border-left: 3px solid var(--color-warning);
+  border-radius: var(--r-ctl);
+  background: repeating-linear-gradient(
+    45deg,
+    #ffefc9,
+    #ffefc9 8px,
+    #fff7e6 8px,
+    #fff7e6 16px
+  );
+  color: var(--warning-ink);
+  font-size: 12px;
+}
+.legacy-force__badge {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid #e9c989;
+  border-radius: var(--r-pill);
+  background: #fff;
+  font-weight: 600;
+}
+.legacy-force__reason {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gate-conflict {
+  margin: 12px;
+  border: 1px solid var(--color-danger);
+  border-left: 3px solid var(--color-danger);
+  border-radius: var(--r-ctl);
+  background: var(--color-danger-bg);
+}
+.gate-conflict__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(217, 54, 62, 0.18);
+  color: var(--danger-ink);
+  font-size: 13px;
+}
+.gate-conflict__list {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+.gate-conflict__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-body);
+}
+.gate-conflict__code {
+  flex: none;
+  width: 64px;
+  color: var(--danger-ink);
+  font-weight: 600;
+}
+.gate-conflict__name {
+  flex: none;
+  min-width: 120px;
+  color: var(--text-title);
+}
+.gate-conflict__diff {
+  flex: none;
+}
+.gate-conflict__fix {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .forced-banner {
   display: flex;

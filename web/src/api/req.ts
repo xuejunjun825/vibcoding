@@ -15,6 +15,7 @@ import type {
   CreateRequirementPayload,
   DeployOrderDetail,
   DeployOrderRow,
+  DeploySubmitResult,
   GateDecision,
   GateItem,
   LoginPayload,
@@ -23,10 +24,14 @@ import type {
   NotificationRow,
   PageResponse,
   ReleaseDetail,
+  ReleaseQualitySettings,
   ReleaseRow,
   RequirementCreated,
   RequirementDetailResponse,
   RequirementRow,
+  ReviewCreatePayload,
+  ReviewDetail,
+  ReviewRow,
 } from './types'
 
 const REQ = '/api/req'
@@ -333,12 +338,70 @@ export function evaluateAdmission(id: number | string): Promise<AdmissionSnapsho
   return http.post<AdmissionSnapshot>(`${REQ}/deploy-orders/${id}/evaluate`)
 }
 
-export function submitDeployOrder(id: number | string): Promise<{ status: string }> {
-  return http.post(`${REQ}/deploy-orders/${id}/submit`)
+/** 只读取上次求值结果（不重算）：提交页刷新时不能悄悄改变结论 */
+export function getAdmission(id: number | string): Promise<AdmissionSnapshot> {
+  return http.get<AdmissionSnapshot>(`${REQ}/deploy-orders/${id}/admission`)
 }
 
+/**
+ * 提交发布单：服务端把门禁快照固化到单据上（AC-5/AC-7），此后回放只看快照。
+ * NO-GO 评审结论未二次确认 → 409 `NO_GO_CONFIRM_REQUIRED`，页面据 code 弹确认而不吞错。
+ */
+export function submitDeployOrder(
+  id: number | string,
+  confirmNoGo = false,
+): Promise<DeploySubmitResult> {
+  return http.post<DeploySubmitResult>(`${REQ}/deploy-orders/${id}/submit`, {
+    confirmNoGo,
+  })
+}
+
+/** 强制放行已退役（AC-12）：路由保留是为了让旧脚本拿到 409 FORCE_RELEASE_RETIRED 而不是 404 */
 export function forceRelease(id: number | string, reason: string): Promise<void> {
   return http.post<void>(`${REQ}/deploy-orders/${id}/force-release`, { reason })
+}
+
+/* ---------------- Go/No-Go 评审（发布决策域，数据只经摘要读取） ---------------- */
+
+/** 评审列表（服务端分页；TECHNICAL §5.3 返回 Page<ReviewRow>） */
+export function listReviews(
+  releaseId: number | string,
+  params: { page?: number; size?: number; decision?: string } = {},
+): Promise<PageResponse<ReviewRow>> {
+  return http.get<PageResponse<ReviewRow>>(`${REQ}/releases/${releaseId}/reviews`, params)
+}
+
+export function createReview(
+  releaseId: number | string,
+  payload: ReviewCreatePayload,
+): Promise<ReviewDetail> {
+  return http.post<ReviewDetail>(`${REQ}/releases/${releaseId}/reviews`, payload)
+}
+
+export function getReview(
+  releaseId: number | string,
+  reviewId: number | string,
+): Promise<ReviewDetail> {
+  return http.get<ReviewDetail>(`${REQ}/releases/${releaseId}/reviews/${reviewId}`)
+}
+
+/** NO-GO 必须二次确认后才允许提交发布单；重复确认幂等 */
+export function confirmReview(
+  releaseId: number | string,
+  reviewId: number | string,
+  note?: string,
+): Promise<ReviewDetail> {
+  return http.post<ReviewDetail>(`${REQ}/releases/${releaseId}/reviews/${reviewId}/confirm`, {
+    note,
+  })
+}
+
+/** 版本质量设置：观察窗小时数（默认 72）与报告有效期天数（默认 7）；返回整张版本详情 */
+export function updateQualitySettings(
+  releaseId: number | string,
+  payload: ReleaseQualitySettings,
+): Promise<ReleaseDetail> {
+  return http.patch<ReleaseDetail>(`${REQ}/releases/${releaseId}/quality-settings`, payload)
 }
 
 export function recordExecution(

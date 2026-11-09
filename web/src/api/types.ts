@@ -47,6 +47,22 @@ export type FunctionCode =
   | 'task:manage'
   | 'case:manage'
   | 'plan:manage'
+  // M6 质量域（PermissionMatrix 41 码；与服务端同一个码，前端不另起别名）
+  | 'strategy:manage'
+  | 'plan:edit'
+  | 'plan:approve'
+  | 'plan:execute'
+  | 'plan:assign'
+  | 'env:manage'
+  | 'report:generate'
+  | 'report:sign'
+  | 'report:export'
+  | 'gate:view'
+  | 'waiver:apply'
+  | 'waiver:approve'
+  | 'review:manage'
+  | 'proddefect:report'
+  | 'qualitymetric:view'
   | 'trace:view'
   | 'metric:manage'
   | 'workflow:manage'
@@ -329,6 +345,11 @@ export interface AdmissionSnapshot {
   items: GateItem[]
   checkedAt?: string | null
   stale?: boolean
+  /** 6 项事实的签名：第 6 项加入后必须变化，否则旧结果会被误判为最新 */
+  signature?: string | null
+  /** M6 之前生成的 5 项单据：视图补 legacy 标记，不伪造 PASS */
+  legacy?: boolean
+  passed?: boolean
 }
 
 export interface DeployOrderRow {
@@ -352,6 +373,12 @@ export interface DeployOrderDetail extends DeployOrderRow {
   impact?: string
   admission?: AdmissionSnapshot
   forcedRelease?: { reason: string; by: string; at: string } | null
+  /** 提交时固化的门禁快照（AC-5/AC-7）：回放只看它，不重算 */
+  qualityGateSnapshotId?: number | null
+  gateResult?: GateStatus | string | null
+  /** NO-GO 已二次确认（AC-10）：再次提交不再重复要确认 */
+  noGoConfirmed?: boolean
+  review?: ReviewRow | null
   execution?: {
     result: 'SUCCESS' | 'FAILED' | 'ROLLED_BACK'
     startedAt?: string
@@ -359,6 +386,24 @@ export interface DeployOrderDetail extends DeployOrderRow {
     note?: string
     defectId?: number | null
   } | null
+}
+
+/** POST `/deploy-orders/{id}/submit` 的返回；NO-GO 未确认时抛 409 NO_GO_CONFIRM_REQUIRED */
+export interface DeploySubmitResult {
+  status: DeployOrderStatus | string
+  snapshotId?: number | null
+  gateResult?: GateStatus | string | null
+}
+
+/** 409 明细里 `failedRules` 的元素：受理门禁失败时逐条给出修复指引 */
+export interface AdmissionConflictDetail {
+  failedRules?: GateRuleResult[]
+  failedCodes?: string[]
+  snapshotId?: number | null
+  allowedNext?: string[]
+  unmet?: Array<{ key: string; label?: string; actual?: string; expected?: string; fixHint?: string }>
+  unexecutedCaseIds?: number[]
+  reason?: string
 }
 
 /* ---------------- 门禁 / 准入 ---------------- */
@@ -370,6 +415,12 @@ export interface GateItem {
   detail?: string | null
   fixHint?: string | null
   forced?: boolean
+  /** 第 6 项（QUALITY_GATE）展开的 5 条规则结果，形状与 deliver 侧 GateSnapshot 一致 */
+  rules?: GateRuleResult[]
+  /** 第 6 项引用的快照 id；缺失表示门禁从未求值（fail-closed） */
+  snapshotId?: number | null
+  /** 该条是否属于阻塞项（历史 5 项为 true） */
+  required?: boolean
 }
 
 export interface GateBlocker {
@@ -630,4 +681,697 @@ export interface ApiClientRow {
   rateLimitQps?: number
   status: string
   createdAt?: string
+}
+
+/* ================= 质量管理（M6 · TECHNICAL §5.2 / §7.3） =================
+ * 唯一口径约定：
+ * - 通过率/覆盖率/FPY 等比率由服务端 `MetricFormulas` 算好下发，前端**不再除一次**；
+ *   分母为 0 时服务端给 null，页面渲染“—”而不是 0%（AC-8 边界）。
+ * - 计划状态机只有 `StateTables.PLAN` 一份，页面渲染动作按钮只读 `allowedNext`
+ *   （本文件不复制任何 stepper 顺序）。
+ * - 门禁规则结果沿用 platform-contract 的 GateSnapshot 结构（code/status/required/
+ *   actual/threshold/fixHint），req 与 deliver 两侧同形，避免两套字段名。
+ */
+
+/* ---------------- 测试策略（版本级，可多版本） ---------------- */
+
+export type StrategyStatus = 'DRAFT' | 'ACTIVE' | 'RETIRED'
+
+export interface StrategyScope {
+  requirementIds?: number[]
+  moduleIds?: number[]
+  caseIds?: number[]
+  note?: string
+}
+
+export interface StrategyRiskRow {
+  key: string
+  level?: 'HIGH' | 'MEDIUM' | 'LOW' | string
+  description?: string
+  mitigation?: string
+}
+
+export interface StrategyRoundPlan {
+  roundNo?: number
+  roundType?: string
+  name?: string
+  scopeMode?: string
+  plannedStart?: string
+  plannedEnd?: string
+  executorIds?: number[]
+  note?: string
+}
+
+export interface StrategyRow {
+  id: number
+  releaseId: number
+  versionNo: number
+  status: StrategyStatus | string
+  ownerId?: number | null
+  ownerName?: string | null
+  resourceNote?: string | null
+  updatedAt?: string | null
+  updatedBy?: number | null
+}
+
+export interface StrategyDetail extends StrategyRow {
+  scope?: StrategyScope | null
+  risk?: StrategyRiskRow[] | null
+  envIds?: number[]
+  roundPlan?: StrategyRoundPlan[] | null
+  /** 策略引用的环境台账快照（服务端顺带返回，省一次请求） */
+  envs?: EnvRow[]
+}
+
+/** POST/PUT `/test-strategies` 的请求体 */
+export interface StrategyPayload {
+  releaseId?: number
+  scope?: StrategyScope
+  risk?: StrategyRiskRow[]
+  envIds?: number[]
+  roundPlan?: StrategyRoundPlan[]
+  resourceNote?: string
+  ownerId?: number
+}
+
+/* ---------------- 测试计划生命周期（与 PlanViews.PlanDetail 逐字段对齐） ---------------- */
+
+export interface PlanStrategyRef {
+  id: number
+  versionNo: number
+  status: StrategyStatus | string
+}
+
+export interface PlanEnvRef {
+  id: number
+  name: string
+  status: EnvStatus | string
+}
+
+export interface PlanCriterionItem {
+  key: string
+  op: string
+  value: number | string
+}
+
+export interface PlanCriteria {
+  entryCriteriaJson?: string | null
+  exitCriteriaJson?: string | null
+  entryItems?: PlanCriterionItem[]
+  exitItems?: PlanCriterionItem[]
+}
+
+export interface PlanRoundsSummary {
+  total: number
+  activeRoundId?: number | null
+  activeRoundNo?: number | null
+  conclusion?: string | null
+}
+
+export interface PlanAssignmentSummary {
+  rows: number
+  plannedTotal: number
+  caseTotal: number
+  /** 计划量与用例总数的差额（服务端算，前端不四舍五入） */
+  diff: number
+  unassignedCases: number
+}
+
+/** PlanViews.Summary：计划、轮次、工作台共用同一组计数 */
+export interface PlanCounts {
+  total: number
+  executed: number
+  passed: number
+  failed: number
+  blocked: number
+  notRun: number
+  passRate: number | null
+  coverage: number | null
+}
+
+export interface PlanDetail {
+  id: number
+  code: string
+  name: string
+  releaseId: number
+  status: PlanStatus | string
+  /** 合法动作由服务端状态表给出，stepper 与按钮只读它 */
+  allowedNext: string[]
+  revision: number
+  gateMode: 'STRICT' | 'LOOSE' | string
+  windowStart?: string | null
+  windowEnd?: string | null
+  ownerId?: number | null
+  ownerName?: string | null
+  strategy?: PlanStrategyRef | null
+  env?: PlanEnvRef | null
+  criteria?: PlanCriteria | null
+  rounds?: PlanRoundsSummary | null
+  assignment?: PlanAssignmentSummary | null
+  summary?: PlanCounts | null
+}
+
+export type PlanStatus =
+  | 'DRAFT'
+  | 'PENDING_REVIEW'
+  | 'APPROVED'
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
+  | 'CLOSED'
+  | 'ARCHIVED'
+
+/** PATCH `/test-plans/{id}`（APPROVED 之后必带 reason，服务端校验） */
+export interface PlanUpdatePayload {
+  name?: string
+  windowStart?: string
+  windowEnd?: string
+  envId?: number | null
+  entryCriteria?: unknown
+  exitCriteria?: unknown
+  approverId?: number | null
+  reason?: string
+}
+
+/** 提交/批准/驳回/开始/完成/关闭/归档共用的动作体，字段全可选 */
+export interface PlanActionPayload {
+  reason?: string
+  comment?: string
+  approverId?: number | null
+}
+
+export interface PlanProgressByPerson {
+  executorId: number
+  executorName: string
+  planned: number
+  executed: number
+  passed: number
+  failed: number
+  blocked: number
+  passRate: number | null
+}
+
+export interface PlanProgressByModule {
+  moduleId?: number | null
+  moduleName?: string | null
+  planned: number
+  executed: number
+  passed: number
+  failed: number
+  blocked: number
+}
+
+export interface PlanOverdueRow {
+  caseId: number
+  caseCode: string
+  title?: string
+  executorId: number
+  executorName?: string
+  dueDate?: string | null
+  result?: string | null
+}
+
+export interface PlanProgress {
+  byPerson: PlanProgressByPerson[]
+  byModule: PlanProgressByModule[]
+  overdue: PlanOverdueRow[]
+  totals: PlanCounts
+}
+
+export interface PlanChangeLogRow {
+  id: number
+  revision: number
+  changeType: string
+  reason?: string | null
+  operatorId?: number | null
+  operatorName?: string | null
+  approverId?: number | null
+  approverName?: string | null
+  createdAt?: string | null
+  beforeJson?: string | null
+  afterJson?: string | null
+}
+
+/* ---------------- 轮次 ---------------- */
+
+export type RoundStatus = 'PLANNING' | 'RUNNING' | 'CLOSED'
+export type RoundConclusion = 'PASS' | 'FAIL' | 'CONDITIONAL' | 'CANCELLED'
+
+export interface RoundView {
+  id: number
+  planId: number
+  roundNo: number
+  roundType: string
+  name?: string | null
+  status: RoundStatus | string
+  conclusion?: RoundConclusion | string | null
+  startAt?: string | null
+  endAt?: string | null
+  caseTotal: number
+  executed: number
+  passed: number
+  failed: number
+  blocked: number
+  passRate: number | null
+  coverage: number | null
+  active: boolean
+  executorIds?: number[]
+  note?: string | null
+}
+
+export interface RoundCaseRow {
+  caseId: number
+  caseCode: string
+  title?: string | null
+  result?: ExecutionResult | string | null
+  executedAt?: string | null
+  executorId?: number | null
+  note?: string | null
+}
+
+export interface RoundDetail {
+  round: RoundView
+  cases: RoundCaseRow[]
+  counts: PlanCounts
+}
+
+/** POST `/test-plans/{id}/rounds` */
+export interface OpenRoundPayload {
+  roundType: string
+  name?: string
+  /** ALL / RISK / CUSTOM：作用域在开轮时固化 */
+  scopeMode?: string
+  caseIds?: number[]
+  executorIds?: number[]
+  note?: string
+}
+
+/** POST `/test-plans/{id}/rounds/{roundId}/close`：结论只能下调，服务端判定 */
+export interface CloseRoundPayload {
+  conclusion: RoundConclusion | string
+  note?: string
+}
+
+/* ---------------- 执行分配 ---------------- */
+
+export interface AssignmentView {
+  id: number
+  planId: number
+  roundId?: number | null
+  executorId: number
+  executorName?: string
+  moduleId?: number | null
+  moduleName?: string | null
+  plannedCount: number
+  dueDate?: string | null
+  executedCount: number
+  overdue: boolean
+}
+
+export interface AssignmentRow {
+  executorId: number
+  moduleId?: number | null
+  plannedCount: number
+  dueDate?: string | null
+}
+
+export interface AssignmentReplacePayload {
+  roundId?: number | null
+  rows: AssignmentRow[]
+}
+
+/* ---------------- 测试环境 ---------------- */
+
+export type EnvStatus = 'AVAILABLE' | 'MAINTENANCE' | 'DISABLED'
+
+export interface EnvRow {
+  id: number
+  name: string
+  envType?: string | null
+  baseUrl?: string | null
+  status: EnvStatus | string
+  ownerId?: number | null
+  ownerName?: string | null
+  note?: string | null
+  /** 被进行中计划引用时返回引用计划 id（删除 409 的明细） */
+  planIds?: number[]
+  createdAt?: string | null
+}
+
+export interface EnvPayload {
+  name: string
+  envType?: string
+  baseUrl?: string
+  ownerId?: number | null
+  note?: string
+  status?: EnvStatus | string
+}
+
+/* ---------------- 测试报告（不可变版本 + 三级会签） ---------------- */
+
+export type ReportStatus = 'SIGNING' | 'SIGNED' | 'REJECTED' | 'SUPERSEDED'
+export type ReportConclusion = 'PASS' | 'FAIL' | 'CONDITIONAL'
+export type SignRole = 'TEST_LEAD' | 'PRODUCT' | 'PMO'
+
+export interface ReportRow {
+  id: number
+  code: string
+  scope: 'PLAN' | 'RELEASE' | string
+  planId?: number | null
+  releaseId?: number | null
+  status: ReportStatus | string
+  currentVersion: number
+  conclusion?: ReportConclusion | string | null
+  passRate?: number | null
+  coverage?: number | null
+  dataCutoff?: string | null
+  createdAt?: string | null
+}
+
+export interface ReportVersionRow {
+  reportId?: number
+  versionNo: number
+  conclusion: ReportConclusion | string
+  passRate: number | null
+  coverage: number | null
+  status: ReportStatus | string
+  resultDigest?: string
+  hash?: string
+  generatedBy?: number | null
+  generatedByName?: string | null
+  generatedAt?: string | null
+  signedAt?: string | null
+}
+
+/** 8 段快照：段名固定，页面按段渲染，未落地的段为 null */
+export interface ReportSnapshot {
+  conclusion?: ReportConclusion | string
+  passRate?: number | null
+  coverage?: number | null
+  planRevision?: number | null
+  resultDigest?: string | null
+  sections?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface ReportVersionDetail extends ReportVersionRow {
+  snapshot?: ReportSnapshot | null
+}
+
+export interface ReportSignoffRow {
+  signRole: SignRole | string
+  signerId?: number | null
+  signerName?: string | null
+  decision?: 'APPROVE' | 'REJECT' | string
+  comment?: string | null
+  signedAt?: string | null
+  orderNo?: number
+}
+
+export interface SignoffStep {
+  signRole: SignRole | string
+  roleName?: string
+  status: 'PENDING' | 'SIGNED' | 'REJECTED' | string
+  signerName?: string | null
+  signedAt?: string | null
+  comment?: string | null
+  /** 当前轮到谁签（严格顺序，仅一步为 true） */
+  current?: boolean
+  /** 当前登录人是否有权签这一步 */
+  canSign?: boolean
+}
+
+export interface SignoffProgress {
+  reportId?: number
+  versionNo?: number
+  status: ReportStatus | string
+  conclusion?: ReportConclusion | string | null
+  steps: SignoffStep[]
+}
+
+export interface ReportDetail {
+  report: ReportRow
+  currentVersion: ReportVersionDetail
+  versions: ReportVersionRow[]
+  signoffProgress: SignoffProgress
+  /** RELEASE 范围下未被任何已批准计划覆盖的需求（QG-01 的证据） */
+  uncoveredRequirements?: Array<{ requirementId: number; code?: string; title?: string }>
+  includedPlans?: Array<{ planId: number; code?: string; name?: string }>
+}
+
+export interface ReportGeneratePayload {
+  scope: 'PLAN' | 'RELEASE'
+  planId?: number | null
+  releaseId?: number | null
+  note?: string
+}
+
+export interface ReportSignoffPayload {
+  decision: 'APPROVE' | 'REJECT'
+  comment?: string
+}
+
+export interface ReportDiff {
+  from?: number
+  to?: number
+  passRate?: { before: number | null; after: number | null }
+  coverage?: { before: number | null; after: number | null }
+  conclusion?: { before: string | null; after: string | null }
+  addedFails?: Array<{ caseId?: number; caseCode?: string; title?: string }>
+  closedDefects?: Array<{ defectId?: number; code?: string; title?: string }>
+}
+
+/* ---------------- 质量门 / 豁免 ---------------- */
+
+export type GateStatus = 'PASS' | 'PASS_WITH_WAIVER' | 'FAIL' | 'NOT_EVALUATED'
+export type GateRuleStatus = 'PASS' | 'WAIVED' | 'FAIL' | 'SKIPPED'
+
+/** 与 platform-contract `GateSnapshot.GateRuleResult` 同形（req 准入第 6 项复用） */
+export interface GateRuleResult {
+  code: string
+  status: GateRuleStatus | string
+  required: boolean
+  /** 实测值，服务端已格式化（“92.1%” / “3”），前端不再换算 */
+  actual: string
+  threshold: string
+  /** 一条可执行的修复指引，页面直接展示 */
+  fixHint: string
+  /** 规则中文名（规则卡标题），缺省回退到 code */
+  name?: string
+}
+
+/** 与 platform-contract `GateSnapshot` 同形 */
+export interface GateSnapshot {
+  snapshotId: number
+  releaseId: number
+  deployOrderId: number
+  reportVersionId?: number | null
+  result: GateStatus | string
+  /** result_digest：同单同 hash 复用快照（幂等） */
+  hash: string
+  computedAt?: string | null
+  rules: GateRuleResult[]
+  openP0P1: number[]
+}
+
+export interface GateReplay extends GateSnapshot {
+  diff?: { changedRules: GateRuleResult[] }
+}
+
+export interface GateRow {
+  releaseId: number
+  releaseName?: string | null
+  gateId?: number | null
+  status: GateStatus | string
+  evaluatedAt?: string | null
+  activeWaiverCount?: number
+  reportId?: number | null
+  reportVersionId?: number | null
+  failedRules?: string[]
+}
+
+export interface GateRuleConfig {
+  code: string
+  enabled: boolean
+  threshold?: number | string | null
+}
+
+export interface GateRule extends GateRuleConfig {
+  name?: string
+  /** QG-04 不可豁免（服务端硬判，前端只用于隐藏“申请豁免”） */
+  waivable?: boolean
+  status?: GateRuleStatus | string
+  actual?: string
+  thresholdText?: string
+  fixHint?: string
+  lastEvaluatedAt?: string | null
+}
+
+export interface GateDetail {
+  releaseId: number
+  releaseName?: string | null
+  status: GateStatus | string
+  rulesetVersion?: number
+  evaluatedAt?: string | null
+  rules: GateRule[]
+  snapshots: GateSnapshot[]
+  waivers: WaiverRow[]
+}
+
+export type WaiverStatus = 'PENDING' | 'ACTIVE' | 'APPROVED' | 'REJECTED' | 'EXPIRED' | 'REVOKED'
+
+export interface WaiverRow {
+  id: number
+  gateId?: number | null
+  releaseId: number
+  ruleCode: string
+  ruleName?: string
+  reason: string
+  impactScope: string
+  expiryAt?: string | null
+  applicantId?: number | null
+  applicantName?: string | null
+  approverId?: number | null
+  approverName?: string | null
+  approvedAt?: string | null
+  status: WaiverStatus | string
+  revokedBy?: number | null
+  revokedAt?: string | null
+  revokeReason?: string | null
+  createdAt?: string | null
+}
+
+export interface WaiverApplyPayload {
+  ruleCode: string
+  releaseId: number
+  reason: string
+  impactScope: string
+  /** 1–30 天，服务端校验（AC-6 边界） */
+  expiryDays: number
+}
+
+/* ---------------- 5 项质量指标 ---------------- */
+
+export interface QualityMetricValue {
+  code: string
+  name: string
+  /** 分母为 0 时为 null，页面显示“—” */
+  value: number | null
+  unit?: string | null
+  version?: number | null
+  formula?: string | null
+  caliberNote?: string | null
+  drillQuery?: Record<string, unknown> | null
+}
+
+export interface QualityMetrics {
+  metrics: QualityMetricValue[]
+  fpy?: number | null
+  regressionPassRate?: number | null
+  escapeRate?: number | null
+  postReleaseDefects72h?: number | null
+  rollbackRate?: number | null
+}
+
+/* ---------------- 工作台 ---------------- */
+
+export interface MyCaseRow {
+  caseId: number
+  caseCode: string
+  title?: string | null
+  planId: number
+  planCode?: string
+  planName?: string
+  roundId?: number | null
+  roundNo?: number | null
+  moduleId?: number | null
+  moduleName?: string | null
+  executorId?: number | null
+  executorName?: string | null
+  dueDate?: string | null
+  result?: ExecutionResult | string | null
+  overdue?: boolean
+  /** 未分配给我但我负责的计划里的用例（AC-9.5） */
+  unassigned?: boolean
+}
+
+/* ---------------- 版本质量 ---------------- */
+
+export interface ReleaseQualityCounts {
+  fpy?: number | null
+  escape?: number | null
+  postRelease?: number | null
+  rollback?: number | null
+}
+
+export interface ReleaseQuality {
+  releaseId: number
+  gateHistory: GateSnapshot[]
+  reports: ReportRow[]
+  openP0P1: Array<{
+    defectId?: number
+    id?: number
+    code?: string
+    title?: string
+    severity?: string
+    status?: string
+  }>
+  escapeDefects: Array<{
+    defectId?: number
+    id?: number
+    code?: string
+    title?: string
+    severity?: string
+    foundAt?: string | null
+  }>
+  counts: ReleaseQualityCounts
+}
+
+/* ---------------- Go/No-Go 评审（req 域，TECHNICAL §5.3） ---------------- */
+
+export type ReviewDecision = 'GO' | 'CONDITIONAL' | 'NO_GO'
+export type ReviewStatus = 'RECORDED' | 'CONFIRMED'
+
+export interface ReviewRow {
+  id: number
+  releaseId: number
+  deployOrderId?: number | null
+  gateSnapshotId?: number | null
+  reportId?: number | null
+  reportVersionNo?: number | null
+  meetingAt: string
+  decision: ReviewDecision | string
+  conditions?: string | null
+  gateEvaluated?: boolean
+  status: ReviewStatus | string
+  createdBy?: number | null
+  createdAt?: string | null
+  confirmedBy?: number | null
+  confirmedAt?: string | null
+}
+
+export interface ReviewDetail extends ReviewRow {
+  participants?: Array<{ userId?: number; name?: string; role?: string }>
+  risks?: Array<{ key?: string; level?: string; note?: string }>
+  openDefects?: Array<{ id?: number; code?: string; severity?: string; title?: string }>
+  docPath?: string | null
+  gateSnapshot?: GateSnapshot | null
+}
+
+export interface ReviewCreatePayload {
+  meetingAt: string
+  decision: ReviewDecision
+  deployOrderId?: number | null
+  reportId?: number | null
+  reportVersionNo?: number | null
+  conditions?: string
+  participants?: Array<{ userId?: number; name?: string; role?: string }>
+  risks?: Array<{ key?: string; level?: string; note?: string }>
+  openDefects?: Array<{ id?: number; code?: string; severity?: string; title?: string }>
+  docPath?: string
+}
+
+/** PATCH `/releases/{id}/quality-settings`：只改未来，不改历史统计 */
+export interface ReleaseQualitySettings {
+  observationHours?: number
+  reportValidityDays?: number
 }

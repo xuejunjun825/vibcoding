@@ -69,6 +69,17 @@
   --h-topnav: 48px;
   --h-side-item: 40px;
 
+  /* ---- M6 质量域（DESIGN §7.2，只增不改） ---- */
+  --paper-max: 820px; /* 报告纸屏显宽 */
+  --paper-pad: 50px; /* 报告纸内边距（内容 720） */
+  --h-conclusion: 56px; /* 结论条固定高 */
+  --w-rule-code: 64px; /* 规则码列宽 */
+  --w-gate-pill: 72px; /* 规则状态 pill 宽 */
+  --waiver-stripe: #ffefc9; /* 豁免条纹第二色（主色 #fff7e6） */
+  --signoff-current: rgba(43, 111, 229, 0.18); /* 当前会签节点外环 */
+  --paper-edge: #e5e6eb; /* 报告纸边 */
+  --t-status: 600ms; /* 状态推进高亮渐隐 */
+
   /* ---- 字体 ---- */
   --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

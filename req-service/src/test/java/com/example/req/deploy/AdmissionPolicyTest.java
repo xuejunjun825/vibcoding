@@ -45,21 +45,82 @@ class AdmissionPolicyTest {
         return Map.of(REQ, 0);
     }
 
+    /** 第 6 项的证据：一份"通过"的质量门快照（5 条规则全 PASS）。 */
+    private static DeployViews.GateEvidence gatePass(String result) {
+        List<com.example.platform.contract.quality.GateSnapshot.GateRuleResult> rules = List.of(
+                new com.example.platform.contract.quality.GateSnapshot.GateRuleResult(
+                        "QG-01", "PASS", true, "100%", "≥95%", null),
+                new com.example.platform.contract.quality.GateSnapshot.GateRuleResult(
+                        "QG-02", "PASS", true, "0", "0", null),
+                new com.example.platform.contract.quality.GateSnapshot.GateRuleResult(
+                        "QG-03", "PASS", true, "0", "0", null),
+                new com.example.platform.contract.quality.GateSnapshot.GateRuleResult(
+                        "QG-04", "PASS", true, "0", "0", null),
+                new com.example.platform.contract.quality.GateSnapshot.GateRuleResult(
+                        "QG-05", "PASS", true, "会签完成", "三级会签", null));
+        return new DeployViews.GateEvidence(9001L, 7001L, 501L, result, "digest-abc",
+                java.time.Instant.parse("2026-11-09T02:00:00Z"), rules);
+    }
+
+    /** 第 6 项的证据：QG-01 通过率不达标（FAIL）。 */
+    private static DeployViews.GateEvidence gateFail() {
+        return new DeployViews.GateEvidence(9002L, 7001L, 501L, "FAIL", "digest-def",
+                java.time.Instant.parse("2026-11-09T02:00:00Z"),
+                List.of(new com.example.platform.contract.quality.GateSnapshot.GateRuleResult(
+                        "QG-01", "FAIL", true, "88.0%", "≥95%", "补齐失败用例后重新生成报告")));
+    }
+
     private static AdmissionItem find(List<AdmissionItem> items, String code) {
         return items.stream().filter(item -> code.equals(item.code())).findFirst()
                 .orElseThrow(() -> new AssertionError("准入项缺失：" + code));
     }
 
     @Test
-    @DisplayName("全部满足：5 项按固定顺序全 PASS")
+    @DisplayName("全部满足：6 项按固定顺序全 PASS（第 6 项为发布质量门）")
     void allPassedInFixedOrder() {
         List<AdmissionItem> items = new AdmissionPolicy().evaluate(
-                new AdmissionPolicy.Inputs(List.of(complete()), gatePassed(), noDefects()));
+                new AdmissionPolicy.Inputs(List.of(complete()), gatePassed(), noDefects(), gatePass("PASS")));
 
         assertEquals(AdmissionItem.ORDER, items.stream().map(AdmissionItem::code).toList());
-        assertEquals(5, items.size());
+        assertEquals(6, items.size());
+        assertEquals(AdmissionItem.QUALITY_GATE, items.get(5).code());
         assertTrue(items.stream().allMatch(AdmissionItem::passed));
         assertTrue(AdmissionPolicy.failedCodes(items).isEmpty());
+    }
+
+    @Test
+    @DisplayName("质量门带回 PASS_WITH_WAIVER：第 6 项仍算通过（豁免已在门禁侧生效）")
+    void qualityGateWaivedStillPasses() {
+        List<AdmissionItem> items = new AdmissionPolicy().evaluate(new AdmissionPolicy.Inputs(
+                List.of(complete()), gatePassed(), noDefects(), gatePass("PASS_WITH_WAIVER")));
+
+        assertTrue(find(items, AdmissionItem.QUALITY_GATE).passed());
+    }
+
+    @Test
+    @DisplayName("质量门 FAIL：第 6 项失败并列出规则与实际值，签名随门禁 hash 变化")
+    void qualityGateFailed() {
+        List<AdmissionItem> items = new AdmissionPolicy().evaluate(new AdmissionPolicy.Inputs(
+                List.of(complete()), gatePassed(), noDefects(), gateFail()));
+
+        AdmissionItem gate = find(items, AdmissionItem.QUALITY_GATE);
+        assertFalse(gate.passed());
+        assertTrue(gate.detail().contains("QG-01"), gate.detail());
+        assertTrue(gate.detail().contains("88.0%"), gate.detail());
+        assertEquals("补齐失败用例后重新生成报告", gate.fixHint());
+        assertTrue(AdmissionPolicy.failedCodes(items).contains(AdmissionItem.QUALITY_GATE));
+    }
+
+    @Test
+    @DisplayName("质量门不可用：第 6 项 FAIL 且 detail 带 GATE_UNAVAILABLE（fail-closed）")
+    void qualityGateUnavailableFailsClosed() {
+        List<AdmissionItem> items = new AdmissionPolicy().evaluate(new AdmissionPolicy.Inputs(
+                List.of(complete()), gatePassed(), noDefects(), null));
+
+        AdmissionItem gate = find(items, AdmissionItem.QUALITY_GATE);
+        assertFalse(gate.passed());
+        assertTrue(gate.detail().contains(AdmissionPolicy.GATE_UNAVAILABLE), gate.detail());
+        assertEquals(AdmissionPolicy.FIX_GATE_UNAVAILABLE, gate.fixHint());
     }
 
     @Test
@@ -170,12 +231,24 @@ class AdmissionPolicyTest {
     }
 
     @Test
-    @DisplayName("没有关联研发需求 → 5 项都 FAIL（发布单不能空转）")
+    @DisplayName("没有关联研发需求 → 6 项都 FAIL（发布单不能空转）")
     void emptyRequirementsNeverPass() {
         List<AdmissionItem> items = new AdmissionPolicy().evaluate(
                 new AdmissionPolicy.Inputs(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>()));
 
-        assertEquals(5, items.size());
+        assertEquals(6, items.size());
         assertTrue(items.stream().noneMatch(AdmissionItem::passed));
+    }
+
+    @Test
+    @DisplayName("第 6 项纳入指纹：门禁 hash 变则指纹变（旧 5 项快照必然过期）")
+    void signatureIncludesQualityGateHash() {
+        String noGate = AdmissionPolicy.signature(List.of(complete()));
+        String pass = AdmissionPolicy.signature(List.of(complete()), "digest-abc");
+        String fail = AdmissionPolicy.signature(List.of(complete()), "digest-def");
+
+        assertNotEquals(noGate, pass);
+        assertNotEquals(pass, fail);
+        assertTrue(pass.startsWith("v6|"), pass);
     }
 }

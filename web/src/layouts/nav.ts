@@ -11,6 +11,10 @@ import type { NavGroup } from '@/router/types'
  * iterations, testcases, test-plans, test-plan-execute, traceability,
  * admin-orgs, admin-users, admin-vendors, admin-permissions, admin-workflows,
  * admin-api-clients, admin-metrics, admin-audit
+ *
+ * M6（T9）新增：workbench, test-plan-detail, test-strategies, test-reports,
+ * test-report-detail, test-envs, quality-gates, quality-gate-detail,
+ * quality-metrics, release-go-no-go
  */
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -28,6 +32,13 @@ export const NAV_GROUPS: NavGroup[] = [
         to: '/requirements?ownerId=me',
         icon: 'list',
         routeName: 'requirements',
+      },
+      {
+        label: '工作台',
+        to: '/workbench',
+        icon: 'workbench',
+        routeName: 'workbench',
+        functionCode: ['plan:execute', 'case:manage'],
       },
       {
         label: '通知',
@@ -60,6 +71,21 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: '用例库', to: '/testcases', icon: 'library', routeName: 'testcases' },
       { label: '测试计划', to: '/test-plans', icon: 'clipboard', routeName: 'test-plans' },
       {
+        label: '测试策略',
+        to: '/test-strategies',
+        icon: 'compass',
+        routeName: 'test-strategies',
+        functionCode: 'strategy:manage',
+      },
+      { label: '测试报告', to: '/test-reports', icon: 'document', routeName: 'test-reports' },
+      {
+        label: '环境台账',
+        to: '/test-envs',
+        icon: 'server',
+        routeName: 'test-envs',
+        functionCode: 'env:manage',
+      },
+      {
         label: '发布单',
         to: '/deploy-orders',
         icon: 'rocket',
@@ -77,6 +103,20 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'matrix',
         routeName: 'traceability',
         functionCode: 'trace:view',
+      },
+      {
+        label: '质量门总览',
+        to: '/quality-gates',
+        icon: 'gate',
+        routeName: 'quality-gates',
+        functionCode: 'gate:view',
+      },
+      {
+        label: '质量指标',
+        to: '/quality-metrics',
+        icon: 'gauge',
+        routeName: 'quality-metrics',
+        functionCode: 'qualitymetric:view',
       },
       {
         label: '质量看板',
@@ -170,7 +210,7 @@ export const TOP_NAV: TopNavItem[] = [
     label: '测试',
     to: '/test-plans',
     routeName: 'test-plans',
-    match: ['/test-plans', '/testcases'],
+    match: ['/test-plans', '/testcases', '/test-strategies', '/test-reports', '/test-envs'],
   },
   { key: 'trace', label: '追溯', to: '/traceability', routeName: 'traceability', match: ['/traceability'] },
   { key: 'admin', label: '设置', to: '/admin/orgs', routeName: 'admin-orgs', match: ['/admin'] },
@@ -202,4 +242,11 @@ export const NAV_ICONS: Record<string, string> = {
   search: 'M7.2 12.4a5.2 5.2 0 1 0 0-10.4 5.2 5.2 0 0 0 0 10.4ZM13.5 13.5l-2.9-2.9',
   logout: 'M6.4 13.2H3.6V2.8h2.8M9.6 5.2 12.4 8l-2.8 2.8M6.2 8h6',
   chevron: 'M5.4 6.4 8 9l2.6-2.6',
+  // —— M6 质量域 ——
+  workbench: 'M2.5 13V3.4M2.5 8h11M13.5 13V3.4M2.5 13h11',
+  compass: 'M8 13.6a5.6 5.6 0 1 0 0-11.2 5.6 5.6 0 0 0 0 11.2ZM10.2 5.8 8.8 9 6 10.2 7.4 7Z',
+  document: 'M4 2.6h4.6l3.4 3.4v7.4H4V2.6ZM8.6 2.6v3.4H12M6 8.6h4M6 10.8h4',
+  server: 'M2.8 3.2h10.4V6.6H2.8V3.2ZM2.8 9.4h10.4v3.4H2.8V9.4ZM5 4.9h.01M5 11.1h.01',
+  gate: 'M2.4 5h11.2M2.4 11h11.2M5 2.6V5M11 2.6V5M5 11v3M11 11v3M8 5v6',
+  gauge: 'M3 11.4a5 5 0 1 1 10 0M8 11.2l2.6-3.8M2.6 11.4h10.8',
 }

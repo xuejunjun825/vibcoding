@@ -10,7 +10,13 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The single definition of "who may do what": 10 roles × 26 function codes.
+ * The single definition of "who may do what": 10 roles × 41 function codes.
+ *
+ * <p>The 26 r2 codes cover requirement/defect/delivery operations; M6 appended 15 quality codes
+ * (strategy, plan lifecycle, report, gate, waiver, review, metrics) at the end so existing
+ * offsets never move. Nothing else may add a code: server-side interception and the frontend
+ * entry check both read {@link #functions()} / {@link #accessOf}, and the admin page is a
+ * projection of this matrix (AC-5 of r2, PRD §6 of r3).</p>
  *
  * <p>Why in code rather than in a table: AC-5 is verified cell by cell, and a database-stored
  * matrix can drift between environments without any code change. Keeping it compiled means
@@ -65,7 +71,23 @@ public final class PermissionMatrix {
             "apiclient:manage",
             "export:detail",
             "audit:view",
-            "notification:read");
+            "notification:read",
+            // ---- M6 quality domain (append-only; PRD §6 increment matrix) ----
+            "strategy:manage",
+            "plan:edit",
+            "plan:approve",
+            "plan:execute",
+            "plan:assign",
+            "env:manage",
+            "report:generate",
+            "report:sign",
+            "gate:view",
+            "waiver:apply",
+            "waiver:approve",
+            "review:manage",
+            "proddefect:report",
+            "qualitymetric:view",
+            "report:export");
 
     /**
      * Role codes, matching PRD §6.1 and {@code sys_role.code} seeded by SeedService.
@@ -223,6 +245,44 @@ public final class PermissionMatrix {
         allow(matrix, "MGMT", "defect:board", "trace:view", "metric:manage", "audit:view",
                 "export:detail", "notification:read");
         restrict(matrix, "MGMT", "release:plan", "deploy:force");
+
+        // ---- M6 quality domain (PRD §6 increment matrix; every row also grants PLATFORM_ADMIN
+        // through the catch-all above). Grouped by role so one role's quality surface is read in
+        // one place; DENY is the default for any role not named here.
+
+        // Business side reads quality metrics only, and only vendor-wide (RESTRICTED).
+        restrict(matrix, "BUSINESS", "qualitymetric:view");
+        restrict(matrix, "SUB_BUSINESS_LEADER", "qualitymetric:view");
+
+        // Product: owns the Go/No-Go record and signs reports; strategy is read-only for them.
+        restrict(matrix, "PRODUCT", "strategy:manage", "review:manage");
+        allow(matrix, "PRODUCT", "report:sign", "gate:view", "waiver:apply", "proddefect:report",
+                "qualitymetric:view", "report:export");
+
+        // PMO: reads gates and metrics, exports and co-signs reports, approves waivers (PRD §3.6
+        // "PMO 或平台管理员审批"), hosts Go/No-Go (PRD §3.5), proposes strategy/env changes.
+        restrict(matrix, "PMO", "strategy:manage", "env:manage");
+        allow(matrix, "PMO", "gate:view", "qualitymetric:view", "report:export", "report:sign",
+                "waiver:approve", "review:manage");
+
+        // QA owns the whole quality loop: plan lifecycle, execution, reports, gates, waivers.
+        allow(matrix, "QA", "strategy:manage", "plan:edit", "plan:approve", "plan:execute",
+                "plan:assign", "report:generate", "report:sign", "gate:view", "waiver:apply",
+                "review:manage", "proddefect:report", "qualitymetric:view", "report:export");
+        restrict(matrix, "QA", "env:manage");
+
+        // Dev sees gates and metrics read-only, may file post-release defects.
+        restrict(matrix, "DEV", "gate:view", "proddefect:report", "qualitymetric:view",
+                "report:export");
+
+        // Ops runs environments, applies waivers for deployment blockers, joins Go/No-Go.
+        allow(matrix, "OPS", "env:manage", "waiver:apply", "review:manage", "proddefect:report",
+                "qualitymetric:view", "report:export", "gate:view");
+
+        // Management: the only waiver approver, may approve plans and sign reports.
+        allow(matrix, "MGMT", "plan:approve", "report:sign", "gate:view", "waiver:approve",
+                "review:manage", "qualitymetric:view", "report:export");
+        restrict(matrix, "MGMT", "strategy:manage");
 
         Map<String, Map<String, Access>> frozen = new LinkedHashMap<>();
         matrix.forEach((role, row) -> frozen.put(role, Map.copyOf(row)));

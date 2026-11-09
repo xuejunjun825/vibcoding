@@ -185,16 +185,50 @@ public class TestPlanService {
     public TestPlanViews.ExecutionResult execute(long planId, TestPlanViews.ExecuteCommand cmd) {
         DataScope scope = TenantContext.require();
         TestPlanEntity plan = requirePlan(planId, scope.tenantId());
+        com.example.deliver.quality.plan.PlanLifecycle.requireWritable(plan.getStatus(), "执行登记");
+        if (!"IN_PROGRESS".equals(plan.getStatus())) {
+            throw new ApiException(409, "ILLEGAL_PLAN_TRANSITION", "计划未开始执行，不能登记结果",
+                    Map.of("status", plan.getStatus(),
+                            "allowedNext", com.example.deliver.quality.plan.PlanLifecycle
+                                    .allowedNext(plan.getStatus())));
+        }
         if (cmd == null || cmd.caseId() == null) {
             throw new ApiException(400, "VALIDATION_FAILED", "执行登记必须指定用例",
                     Map.of("field", "caseId"));
         }
+        Map<String, Object> activeRound = jdbc.one("""
+                SELECT r.id AS id FROM test_plan_round r
+                JOIN test_plan p ON p.id = r.plan_id
+                WHERE /*scope:p*/ AND r.plan_id = :planId AND r.active = 1
+                """, Map.of("planId", planId));
+        if (activeRound == null) {
+            throw new ApiException(409, "NO_ACTIVE_ROUND", "计划没有进行中的轮次，请先开启轮次",
+                    Map.of("planId", planId));
+        }
+        long roundId = com.example.deliver.support.Rows.toLong(
+                com.example.deliver.support.Rows.object(activeRound, "id"), 0L);
         String result = normaliseResult(cmd.result());
         TestPlanCaseEntity planCase = planCases.findByPlanIdAndCaseId(planId, cmd.caseId())
                 .orElseThrow(() -> new ApiException(404, "CASE_NOT_IN_PLAN", "该用例不在计划内",
                         Map.of("planId", planId, "caseId", cmd.caseId())));
+        long inScope = jdbc.count("""
+                SELECT COUNT(*) FROM test_plan_round r
+                JOIN test_plan p ON p.id = r.plan_id
+                WHERE /*scope:p*/ AND r.id = :roundId
+                  AND JSON_CONTAINS(r.case_scope_json, JSON_OBJECT('caseId', :caseId))
+                """, Map.of("roundId", roundId, "caseId", cmd.caseId()));
+        if (inScope == 0) {
+            throw new ApiException(409, "CASE_NOT_IN_ROUND", "该用例不在当前轮次的作用域内",
+                    Map.of("roundId", roundId, "caseId", cmd.caseId()));
+        }
         int version = planCase.getCaseVersion();
         LocalDateTime now = LocalDateTime.now();
+        Map<String, Object> planEnv = jdbc.one("""
+                SELECT p.env_id AS env_id FROM test_plan p
+                WHERE /*scope:p*/ AND p.id = :planId
+                """, Map.of("planId", planId));
+        Long envId = planEnv == null ? null
+                : com.example.deliver.support.Rows.lng(planEnv, "env_id");
         TestExecutionEntity execution = new TestExecutionEntity();
         execution.setTenantId(scope.tenantId());
         execution.setPlanId(planId);
@@ -202,6 +236,8 @@ public class TestPlanService {
         execution.setCaseVersion(version);
         execution.setRequirementId(planCase.getRequirementId());
         execution.setSource("MANUAL");
+        execution.setRoundId(roundId);
+        execution.setEnvId(envId);
         execution.setResult(result);
         execution.setEvidenceFile(cmd.evidence());
         execution.setExecutorId(scope.userId());
@@ -215,20 +251,13 @@ public class TestPlanService {
         planCase.setNote(cmd.note());
         planCases.save(planCase);
 
-        if ("DRAFT".equals(plan.getStatus())) {
-            plan.setStatus("RUNNING");
-        }
-        TestPlanViews.PlanSummary summary = query.summary(planId);
-        if (summary.planned() > 0 && summary.notRun() == 0) {
-            plan.setStatus("DONE");
-        }
         plan.setUpdatedAt(now);
         plan.setUpdatedBy(scope.userId());
         plans.save(plan);
 
         audit.record("EXECUTION_REPORT", "TEST_EXECUTION", execution.getId(),
                 Map.of("planId", planId, "caseId", planCase.getCaseId(), "caseVersion", version,
-                        "result", result));
+                        "result", result, "roundId", roundId));
         return new TestPlanViews.ExecutionResult(execution.getId(), planCase.getCaseId(), version,
                 result, now.toString(), stepsOf(planCase.getCaseId(), version));
     }

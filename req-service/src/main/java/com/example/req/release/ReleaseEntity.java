@@ -57,6 +57,17 @@ public class ReleaseEntity {
     @Column(name = "released_at")
     private LocalDateTime releasedAt;
 
+    /**
+     * 发布后观察窗小时数（24–168，默认 72）。缺陷逃逸判定以"最早成功发布结束时间 + 本值"为窗口终点；
+     * 只影响之后新建的缺陷，历史缺陷的 {@code escape_window_end} 一经落库不再随配置变化（AC-8.3）。
+     */
+    @Column(name = "observation_hours", nullable = false)
+    private Integer observationHours = 72;
+
+    /** 测试报告有效期天数（1–30，默认 7）：报告新鲜度与门禁 QG-02 读取，超期即视为无有效报告。 */
+    @Column(name = "report_validity_days", nullable = false)
+    private Integer reportValidityDays = 7;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -114,6 +125,10 @@ public class ReleaseEntity {
     public void setLockedAt(LocalDateTime lockedAt) { this.lockedAt = lockedAt; }
     public LocalDateTime getReleasedAt() { return releasedAt; }
     public void setReleasedAt(LocalDateTime releasedAt) { this.releasedAt = releasedAt; }
+    public Integer getObservationHours() { return observationHours; }
+    public void setObservationHours(Integer observationHours) { this.observationHours = observationHours; }
+    public Integer getReportValidityDays() { return reportValidityDays; }
+    public void setReportValidityDays(Integer reportValidityDays) { this.reportValidityDays = reportValidityDays; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public Long getCreatedBy() { return createdBy; }
