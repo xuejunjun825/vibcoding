@@ -80,6 +80,18 @@ public class RequirementEntity {
     @Column(name = "mr_url", length = 500)
     private String mrUrl;
 
+    /** GitLab 项目路径（group/subgroup/project），由 MR URL 解析后回写。 */
+    @Column(name = "gitlab_project", length = 200)
+    private String gitlabProject;
+
+    /** GitLab MR 序号（项目内 !123 的 123）。 */
+    @Column(name = "mr_iid")
+    private Long mrIid;
+
+    /** 该需求生效的 Sonar 项目 key（空则继承版本默认值）。 */
+    @Column(name = "sonar_project_key", length = 200)
+    private String sonarProjectKey;
+
     @Column(name = "release_id")
     private Long releaseId;
 
@@ -167,6 +179,12 @@ public class RequirementEntity {
     public void setActualDays(BigDecimal actualDays) { this.actualDays = actualDays; }
     public String getMrUrl() { return mrUrl; }
     public void setMrUrl(String mrUrl) { this.mrUrl = mrUrl; }
+    public String getGitlabProject() { return gitlabProject; }
+    public void setGitlabProject(String gitlabProject) { this.gitlabProject = gitlabProject; }
+    public Long getMrIid() { return mrIid; }
+    public void setMrIid(Long mrIid) { this.mrIid = mrIid; }
+    public String getSonarProjectKey() { return sonarProjectKey; }
+    public void setSonarProjectKey(String sonarProjectKey) { this.sonarProjectKey = sonarProjectKey; }
     public Long getReleaseId() { return releaseId; }
     public void setReleaseId(Long releaseId) { this.releaseId = releaseId; }
     public LocalDate getExpectedDeliveryDate() { return expectedDeliveryDate; }

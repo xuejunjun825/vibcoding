@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>与嘉为蓝鲸 DevOps 能力全景图的匹配度评估</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 0 60px;background:#fff;color:var(--body);
+  font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:960px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;
+  font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.meta-note{font-size:12px;color:var(--muted)}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+@media print{body{padding:0}.toc{break-inside:avoid}}
+
+h1.title{display:none}
+td:first-child,th:first-child{white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="toc"><div class="toc-title">目录</div>
+<ul>
+<li><a href="#与嘉为蓝鲸-devops-能力全景图的匹配度评估"
+id="toc-与嘉为蓝鲸-devops-能力全景图的匹配度评估">与嘉为蓝鲸 DevOps
+能力全景图的匹配度评估</a>
+<ul>
+<li><a href="#1-结论摘要" id="toc-1-结论摘要">1. 结论摘要</a></li>
+<li><a href="#2-产品能力全景图逐平台对照"
+id="toc-2-产品能力全景图逐平台对照">2. 产品能力全景图逐平台对照</a></li>
+<li><a href="#3-国家标准成熟度模型三域对照"
+id="toc-3-国家标准成熟度模型三域对照">3.
+国家标准（成熟度模型）三域对照</a></li>
+<li><a href="#4-差距清单与建议排期" id="toc-4-差距清单与建议排期">4.
+差距清单与建议排期</a></li>
+<li><a href="#5-我们超出蓝鲸全景图的部分同期已交付"
+id="toc-5-我们超出蓝鲸全景图的部分同期已交付">5.
+我们超出蓝鲸全景图的部分（同期已交付）</a></li>
+<li><a href="#6-一句话回答" id="toc-6-一句话回答">6. 一句话回答</a></li>
+</ul></li>
+</ul>
+</div>
+<h1 id="与嘉为蓝鲸-devops-能力全景图的匹配度评估">与嘉为蓝鲸 DevOps
+能力全景图的匹配度评估</h1>
+<blockquote>
+<p>评估对象：<code>2026-嘉为蓝鲸DevOps解决方案介绍.pdf</code>（72
+页）中的两张纲领图——①「DevOps 产品能力全景图」（需求/开发/测试/部署 × 6
+平台 + CAgent +
+CMeas）；②「研发运营一体化（DevOps）能力成熟度模型」（开发管理 /
+持续交付 / 技术运营 三域）。 评估基准：<code>main</code> =
+<code>5640227</code> 已交付能力（M0–M6），M7 进行中标注 🔄；证据见 <a
+href="DELIVERED-MODULES.md">已交付功能模块清单</a>。 判定口径：✅
+自主实现且可验收 · 🔶 部分覆盖（缺关键子项或只做接入侧）· 🔄 本轮进行中
+· ⛔ 未覆盖。</p>
+</blockquote>
+<h2 id="1-结论摘要">1. 结论摘要</h2>
+<table>
+<thead>
+<tr>
+<th>视角</th>
+<th>匹配度</th>
+<th>一句话</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>需求/协作（CTeam 域）</strong></td>
+<td><strong>约 60%</strong></td>
+<td>需求全流程、审批、版本、缺陷、任务、迭代、工时、追溯矩阵齐；缺甘特、Wiki、价值流、风险/基线、自动化规则</td>
+</tr>
+<tr>
+<td><strong>测试管理（CTest 域）</strong></td>
+<td><strong>约 85%</strong></td>
+<td>用例库/计划/轮次/执行/报告/门禁/自动化上报齐全，策略与准出结构化是我们比蓝鲸更细的地方</td>
+</tr>
+<tr>
+<td><strong>度量分析（CMeas 域）</strong></td>
+<td><strong>约 65%</strong></td>
+<td>指标字典、看板、报表、测试报告、带水印导出齐；缺多数据源/外部数据集、仪表板拖拽编排</td>
+</tr>
+<tr>
+<td><strong>持续集成（CCi 域）</strong></td>
+<td><strong>约 45%</strong>（M7 后）</td>
+<td>触发构建、构建记录、质量门禁、环境台账；流水线编排、代码检查、插件商店靠外部系统</td>
+</tr>
+<tr>
+<td><strong>制品管理（CPack 域）</strong></td>
+<td><strong>约 35%</strong>（M7 后）</td>
+<td>检索/选取/sha256/晋级链路；缺制品分发、扫描、依赖目录</td>
+</tr>
+<tr>
+<td><strong>持续交付（CCi 部署域）</strong></td>
+<td><strong>约 40%</strong></td>
+<td>发布单 + 9 项准入 + 上线单 +
+执行登记；缺节点/作业编排、脚本库、插件化部署</td>
+</tr>
+<tr>
+<td><strong>代码管理（CCode 域）</strong></td>
+<td><strong>约 25%</strong>（M7 后）</td>
+<td>MR 结构化、webhook、MR→需求推进；不做仓库托管、分支保护、CR
+行级评论</td>
+</tr>
+<tr>
+<td><strong>AI 助手（CAgent 域）</strong></td>
+<td><strong>0%</strong></td>
+<td>明确不做</td>
+</tr>
+<tr>
+<td><strong>综合（8 平台等权）</strong></td>
+<td><strong>约 44%</strong></td>
+<td>强在「需求→测试→质量门→发布准入」主干闭环，弱在「代码/CI/制品的执行面」与「技术运营」</td>
+</tr>
+</tbody>
+</table>
+<p><strong>定位判断</strong>：我们做的是<strong>治理与流水线中枢</strong>（需求/审批/隔离/门禁/度量），蓝鲸是<strong>工具全家桶</strong>。同样是
+40–60%，我们覆盖的是"管事"的一半，蓝鲸覆盖的是"干活"的一半。若要继续对齐，性价比最高的是继续用<strong>适配层接外部工具</strong>，而不是自建代码托管、CI
+执行器、制品库本体。</p>
+<h2 id="2-产品能力全景图逐平台对照">2. 产品能力全景图逐平台对照</h2>
+<h3 id="21-cteam-敏捷协同需求域覆盖-60">2.1 CTeam 敏捷协同（需求域，覆盖
+60%）</h3>
+<table>
+<thead>
+<tr>
+<th>蓝鲸能力项</th>
+<th>我们</th>
+<th>对应实现</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>需求管理</td>
+<td>✅</td>
+<td>三类需求 BUS/PDR/RD、三层父子拆解、需求池、编号规则</td>
+</tr>
+<tr>
+<td>任务管理</td>
+<td>✅</td>
+<td>任务挂需求、完成率回写、任务看板拖动持久化</td>
+</tr>
+<tr>
+<td>缺陷管理</td>
+<td>✅</td>
+<td>P0–P3、状态机+重开计数、执行失败/手工/生产回流三来源</td>
+</tr>
+<tr>
+<td>版本管理</td>
+<td>✅</td>
+<td>Release + 里程碑、可挂三类需求、延期标红</td>
+</tr>
+<tr>
+<td>迭代管理</td>
+<td>✅</td>
+<td>迭代挂 Release、看板、未迁移任务禁关迭代</td>
+</tr>
+<tr>
+<td>需求矩阵</td>
+<td>✅</td>
+<td>六环追溯矩阵（需求→任务→MR→执行→缺陷→发布单），缺口实时计算</td>
+</tr>
+<tr>
+<td>工时登记</td>
+<td>✅</td>
+<td>0.5h 粒度、周填报、月度锁定、实际人天=工时÷8</td>
+</tr>
+<tr>
+<td>需求评审/状态流转</td>
+<td>✅</td>
+<td>差异化状态机 + 自定义审批流（提报/评审入池/版本/发布四类）</td>
+</tr>
+<tr>
+<td>规划发布/里程碑</td>
+<td>✅</td>
+<td>见版本管理</td>
+</tr>
+<tr>
+<td><strong>甘特图</strong></td>
+<td>⛔</td>
+<td>未交付（PRD §4.22 有设计，无实现）</td>
+</tr>
+<tr>
+<td><strong>Wiki / 文档</strong></td>
+<td>⛔</td>
+<td>未交付（PRD §4.21 有设计，无实现）</td>
+</tr>
+<tr>
+<td><strong>价值流看板（CFlow）</strong></td>
+<td>⛔</td>
+<td>未交付（PRD §4.23 有设计，无实现）</td>
+</tr>
+<tr>
+<td><strong>风险 / 基线</strong></td>
+<td>⛔</td>
+<td>未设计</td>
+</tr>
+<tr>
+<td><strong>自动化规则</strong>（触发事件→条件→动作）</td>
+<td>⛔</td>
+<td>未设计</td>
+</tr>
+<tr>
+<td><strong>外包管理视角</strong></td>
+<td>🔶</td>
+<td>厂商交付排名/产能已有，外包结算与人员台账没有</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-ccode-代码管理开发域覆盖-25m7-中">2.2 CCode
+代码管理（开发域，覆盖 25%，M7 中）</h3>
+<table>
+<thead>
+<tr>
+<th>蓝鲸能力项</th>
+<th>我们</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>合并评审（MR）</td>
+<td>🔄</td>
+<td>M7：MR URL 结构化 <code>gitlab_project + mr_iid</code>、webhook
+同步、MR merged 推进需求到「已合入」</td>
+</tr>
+<tr>
+<td>代码管理（仓库托管）</td>
+<td>⛔</td>
+<td>不做，GitLab 承担</td>
+</tr>
+<tr>
+<td>代码库管理 / 标签管理</td>
+<td>⛔</td>
+<td>不做</td>
+</tr>
+<tr>
+<td>分支管理与保护策略</td>
+<td>⛔</td>
+<td>不做（蓝鲸的强制分支规范、保护、推送设置）</td>
+</tr>
+<tr>
+<td>Commit 规范校验、四种合并、行级评论 CR</td>
+<td>⛔</td>
+<td>不做</td>
+</tr>
+<tr>
+<td>安全合规（敏感信息扫描）</td>
+<td>⛔</td>
+<td>不做</td>
+</tr>
+</tbody>
+</table>
+<h3 id="23-cci-持续集成开发域覆盖-45m7-中">2.3 CCi
+持续集成（开发域，覆盖 45%，M7 中）</h3>
+<table>
+<thead>
+<tr>
+<th>蓝鲸能力项</th>
+<th>我们</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>流水线</td>
+<td>🔄</td>
+<td>M7：触发 Jenkins 构建 + <code>build_record</code> 状态机 + console
+链接；不自建流水线编排</td>
+</tr>
+<tr>
+<td>质量门禁</td>
+<td>✅</td>
+<td>我们更强：版本质量门 5 规则 + 报告三签 + 豁免 + 快照可回放；M7 再接
+Sonar 门禁</td>
+</tr>
+<tr>
+<td>环境管理</td>
+<td>✅</td>
+<td>测试环境台账 DEV/TEST/STAGING/PROD（含负责人/状态）</td>
+</tr>
+<tr>
+<td>代码检查</td>
+<td>🔶</td>
+<td>走 Sonar 快照接入（M7），不自建规则引擎</td>
+</tr>
+<tr>
+<td>研发商店（插件）</td>
+<td>⛔</td>
+<td>不做</td>
+</tr>
+<tr>
+<td>编译加速 / 多环境流水线 / 流水线即代码 / AI 排错</td>
+<td>⛔</td>
+<td>不做</td>
+</tr>
+</tbody>
+</table>
+<h3 id="24-cpack-制品管理开发域覆盖-35m7-中">2.4 CPack
+制品管理（开发域，覆盖 35%，M7 中）</h3>
+<table>
+<thead>
+<tr>
+<th>蓝鲸能力项</th>
+<th>我们</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>制品仓库</td>
+<td>🔄</td>
+<td>不做本体，Nexus 承担；我们做制品检索与选取</td>
+</tr>
+<tr>
+<td>制品搜索</td>
+<td>🔄</td>
+<td>M7：按坐标/版本检索 Nexus</td>
+</tr>
+<tr>
+<td>制品校验</td>
+<td>🔄</td>
+<td>M7：<code>artifact_record</code> + sha256 一致才过准入</td>
+</tr>
+<tr>
+<td>制品分发 / 预热 / 回收站</td>
+<td>⛔</td>
+<td>不做</td>
+</tr>
+<tr>
+<td>制品扫描（漏洞）</td>
+<td>⛔</td>
+<td>不做（可在 M7 适配层外挂）</td>
+</tr>
+<tr>
+<td>依赖目录 / 20+ 制品类型 / JFrog 兼容 / 联邦仓库</td>
+<td>⛔</td>
+<td>不做</td>
+</tr>
+</tbody>
+</table>
+<h3 id="25-ctest-测试管理测试域覆盖-85">2.5 CTest 测试管理（测试域，覆盖
+85%）</h3>
+<table>
+<thead>
+<tr>
+<th>蓝鲸能力项</th>
+<th>我们</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>测试计划</td>
+<td>✅</td>
+<td>七态生命周期 + 评审接审批流 + 变更留痕 +
+<strong>结构化准出条件</strong>（比蓝鲸更细）</td>
+</tr>
+<tr>
+<td>测试用例</td>
+<td>✅</td>
+<td>模块树≤3 层、TC 编号、<strong>用例版本化</strong>、执行钉版本</td>
+</tr>
+<tr>
+<td>测试执行</td>
+<td>✅</td>
+<td>轮次 R1/R2/R3、执行分配、环境绑定、四种结果</td>
+</tr>
+<tr>
+<td>测试报告</td>
+<td>✅</td>
+<td>8 段自动生成、版本化不可变、XLSX(8 sheet)/PDF 带水印、三级会签</td>
+</tr>
+<tr>
+<td>自动化测试</td>
+<td>🔶</td>
+<td>不自建执行器：外部 CI 经 HMAC 开放 API 上报执行结果（幂等）</td>
+</tr>
+<tr>
+<td>测试分层策略</td>
+<td>✅</td>
+<td>测试策略文档 + 门禁严格/宽松按 Release 切换</td>
+</tr>
+</tbody>
+</table>
+<h3 id="26-持续交付部署域覆盖-40">2.6 持续交付（部署域，覆盖 40%）</h3>
+<table>
+<thead>
+<tr>
+<th>蓝鲸能力项</th>
+<th>我们</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>发布管理</td>
+<td>✅</td>
+<td>发布单 + 9 项准入（服务端计算、409 不可绕）+ 上线单 + 执行登记</td>
+</tr>
+<tr>
+<td>节点管理 / 作业管理</td>
+<td>⛔</td>
+<td>不做部署编排（无 agent、无作业引擎）</td>
+</tr>
+<tr>
+<td>配置管理 / 脚本管理 / 插件管理</td>
+<td>⛔</td>
+<td>不做</td>
+</tr>
+<tr>
+<td>灰度 / 蓝绿 / 回滚</td>
+<td>⛔</td>
+<td>不做编排；仅在指标侧有「回滚率」</td>
+</tr>
+<tr>
+<td>发布审批 / 放行留痕</td>
+<td>✅</td>
+<td>审批流 + 质量门豁免 + PMO 强制放行留痕</td>
+</tr>
+</tbody>
+</table>
+<h3 id="27-cagent-智能助手覆盖-0">2.7 CAgent 智能助手（覆盖 0%）</h3>
+<p>需求生成、任务拆分、用例生成、辅助排错、智能问答——<strong>本期明确不做</strong>（无模型接入与算力预算，且属体验增强非治理必需）。</p>
+<h3 id="28-cmeas-度量分析覆盖-65">2.8 CMeas 度量分析（覆盖 65%）</h3>
+<table>
+<thead>
+<tr>
+<th>蓝鲸能力项</th>
+<th>我们</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数据集管理</td>
+<td>🔶</td>
+<td>4 个内建数据集白名单（需求/交付/审批效率/质量），不支持外部接入</td>
+</tr>
+<tr>
+<td>仪表板管理</td>
+<td>✅</td>
+<td>多视角看板 + 岗位工作台卡片</td>
+</tr>
+<tr>
+<td>效能洞察</td>
+<td>✅</td>
+<td>前置时间/P90/FPY/逃逸率/厂商准时率等 12+ 指标，公式单点可复算</td>
+</tr>
+<tr>
+<td>报告管理</td>
+<td>✅</td>
+<td>测试报告 + 自助报表 + 导出带水印 + 周报/月报</td>
+</tr>
+<tr>
+<td>数据源管理</td>
+<td>⛔</td>
+<td>无外部数据源接入（蓝鲸可接多源）</td>
+</tr>
+<tr>
+<td>AI 归因 / 智能预警</td>
+<td>⛔</td>
+<td>不做</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-国家标准成熟度模型三域对照">3.
+国家标准（成熟度模型）三域对照</h2>
+<table>
+<thead>
+<tr>
+<th>能力域</th>
+<th>子域</th>
+<th>覆盖</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>开发管理（标准2）</td>
+<td>价值交付管理</td>
+<td>🔶</td>
+<td>需求工件/需求活动/价值流：前两项强，价值流未做</td>
+</tr>
+<tr>
+<td></td>
+<td>敏捷过程管理</td>
+<td>🔶</td>
+<td>仪式活动、度量驱动改进有看板；缺风险/基线</td>
+</tr>
+<tr>
+<td></td>
+<td>敏捷组织模式</td>
+<td>⛔</td>
+<td>团队结构/敏捷角色未建模（我们有 10 角色但非敏捷框架）</td>
+</tr>
+<tr>
+<td>持续交付（标准3）</td>
+<td>配置管理</td>
+<td>🔶</td>
+<td>版本控制靠 GitLab；变更管理有审批与审计</td>
+</tr>
+<tr>
+<td></td>
+<td>构建与持续集成</td>
+<td>🔶</td>
+<td>M7 触发与构建记录；流水线编排不在我们这层</td>
+</tr>
+<tr>
+<td></td>
+<td>测试管理</td>
+<td>✅</td>
+<td>计划/分层策略/代码质量门禁/自动化测试，四能力项齐</td>
+</tr>
+<tr>
+<td></td>
+<td>部署与发布管理</td>
+<td>🔶</td>
+<td>发布单与准入强；部署模式（滚动/蓝绿/灰度）不做</td>
+</tr>
+<tr>
+<td></td>
+<td>环境管理</td>
+<td>✅</td>
+<td>环境台账 + 计划/执行绑定</td>
+</tr>
+<tr>
+<td></td>
+<td>数据管理</td>
+<td>⛔</td>
+<td>测试数据/数据变更管理未做</td>
+</tr>
+<tr>
+<td></td>
+<td>度量与反馈</td>
+<td>✅</td>
+<td>指标字典 + 看板 + 报表 + 告警/周报</td>
+</tr>
+<tr>
+<td>技术运营（标准4）</td>
+<td>监控采集 / 事件管理 / 变更管理</td>
+<td>🔶</td>
+<td>事件与变更靠需求/缺陷闭环，无监控采集</td>
+</tr>
+<tr>
+<td></td>
+<td>容量与成本 / 高可用 / 连续性 / 用户体验</td>
+<td>⛔</td>
+<td>全部未覆盖（需 APM/监控体系，本平台定位不含）</td>
+</tr>
+<tr>
+<td>安全及风险管理（标准6）</td>
+<td>—</td>
+<td>🔶</td>
+<td>我们有权限矩阵、字段级脱敏、审计、HMAC、水印；缺漏洞扫描与安全门禁本体（M7
+接 Sonar 可补一半）</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-差距清单与建议排期">4. 差距清单与建议排期</h2>
+<p>按「对齐全景图的性价比」排序，成本为单期估量：</p>
+<table>
+<thead>
+<tr>
+<th>优先级</th>
+<th>缺口</th>
+<th>价值</th>
+<th>成本</th>
+<th>建议</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P0</td>
+<td><strong>甘特图</strong>（版本/迭代/需求三主体、拖拽改期落库）</td>
+<td>计划可视化，客户最常问</td>
+<td>S–M</td>
+<td>M8 首项</td>
+</tr>
+<tr>
+<td>P0</td>
+<td><strong>Wiki /
+文档</strong>（空间隔离、页面版本、双向关联、回收站）</td>
+<td>沉淀评审与交付资料</td>
+<td>M</td>
+<td>M8</td>
+</tr>
+<tr>
+<td>P0</td>
+<td><strong>价值流看板</strong>（阶段可配、WIP/停留/P90/瓶颈）</td>
+<td>管理层的"管理抓手"</td>
+<td>M</td>
+<td>M8</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>自动化规则（触发事件→条件→动作）</td>
+<td>减人工流转</td>
+<td>M</td>
+<td>M8/M9</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>风险与基线</td>
+<td>计划治理补齐</td>
+<td>S</td>
+<td>M8</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>制品扫描/分发的接入位</td>
+<td>质量红线前移</td>
+<td>S（接入）</td>
+<td>M7 之后随集成扩展</td>
+</tr>
+<tr>
+<td>P2</td>
+<td>部署编排（节点/作业/脚本/插件）</td>
+<td>真正闭环到生产</td>
+<td>L</td>
+<td>建议接蓝鲸 CD/Argo，不自建</td>
+</tr>
+<tr>
+<td>P2</td>
+<td>代码托管与分支保护/CR</td>
+<td>代码治理</td>
+<td>L</td>
+<td>建议用 GitLab 能力，不自建</td>
+</tr>
+<tr>
+<td>P3</td>
+<td>CAgent（AI 辅助）</td>
+<td>体验加分</td>
+<td>XL</td>
+<td>暂不做</td>
+</tr>
+<tr>
+<td>P3</td>
+<td>技术运营域（监控/容量/高可用）</td>
+<td>需外部 APM</td>
+<td>XL</td>
+<td>与运维平台集成，不做本体</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-我们超出蓝鲸全景图的部分同期已交付">5.
+我们超出蓝鲸全景图的部分（同期已交付）</h2>
+<ul>
+<li><strong>域 ×
+厂商双维度行级隔离</strong>：多厂商外包研发的数据隔离，全景图未体现（蓝鲸靠项目/空间模型）。</li>
+<li><strong>多租户三形态</strong>（ROW/SCHEMA/DATABASE）+
+开通即预设角色与域。</li>
+<li><strong>人天成本口径</strong>：预估/实际/偏差三级汇总 +
+父需求只读汇总（全景图只有"工时核算"）。</li>
+<li><strong>二级管理企业提报</strong>与集团级需求池双层可见性。</li>
+<li><strong>质量门工程化</strong>：报告版本+三签+豁免（含硬红线）+
+快照可回放/可 diff + 直连旁路同拒。</li>
+<li><strong>字段级脱敏 + 统一作用域谓词</strong>（8
+个出口同源，含导出/附件/看板）。</li>
+<li><strong>测试计划结构化准出条件</strong>（409 列 <code>unmet</code> +
+修复指引）。</li>
+</ul>
+<h2 id="6-一句话回答">6. 一句话回答</h2>
+<blockquote>
+<p><strong>匹配度约 44%（八平台等权），但落在"治理中枢"这一层已经接近
+70%</strong>：需求全流程、测试管理、质量门与发布准入是我们的强项；代码管理、CI
+流水线、制品平台本体、部署编排与 AI
+是缺口，且更适合<strong>适配集成</strong>而非自建。若要继续对齐全景图，建议下一轮就做
+<strong>甘特图 + Wiki + 价值流</strong>
+三件（客户可见度最高、纯自建可控），其余靠 M7 适配层扩展。</p>
+</blockquote>
+</div>
+</body>
+</html>

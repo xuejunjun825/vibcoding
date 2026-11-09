@@ -203,7 +203,7 @@ class DeployOrderFlowTest {
         when(admissionEvaluator.evaluateAndStore(order)).thenReturn(result(true));
         when(admissionEvaluator.allPassed(any())).thenReturn(true);
 
-        DeployViews.SubmitResult submitted = service.submit(ORDER_ID, new DeployViews.SubmitCmd(true));
+        DeployViews.SubmitResult submitted = service.submit(ORDER_ID, new DeployViews.SubmitCmd(true, null));
         assertEquals(DeployOrderStates.PENDING_APPROVAL, submitted.status());
         verify(auditService).record(eq("NO_GO_CONFIRM"), eq("deploy_order"), eq(ORDER_ID), any());
     }
@@ -434,5 +434,51 @@ class DeployOrderFlowTest {
                 eq(ORDER_ID), any());
         verify(auditService).record(eq("EXECUTION"), eq("deploy_order"), eq(ORDER_ID), any());
         verifyNoInteractions(notificationWriter);
+    }
+
+    /** 含一条 SKIP（Sonar 未绑定 key）的清单：没有 FAIL，属于"可提交但要确认跳过数"。 */
+    private static DeployViews.AdmissionResult resultWithSkip() {
+        List<AdmissionItem> items = List.of(
+                AdmissionItem.pass(AdmissionItem.REQ_TEST_PASSED, "需求测试通过", "1 条均已通过"),
+                AdmissionItem.pass(AdmissionItem.NO_OPEN_HIGH_DEFECT, "无未关闭 P0/P1", "0 个"),
+                AdmissionItem.pass(AdmissionItem.MR_FILLED, "MR 已填", "已填"),
+                AdmissionItem.pass(AdmissionItem.MAN_DAYS_FILLED, "人天已填", "3/2.5"),
+                AdmissionItem.pass(AdmissionItem.REQ_APPROVALS_DONE, "审批已通过", "2/2"),
+                AdmissionItem.skip(AdmissionItem.SONAR_GATE_PASSED, "Sonar 质量门",
+                        "跳过：需求未绑定 Sonar projectKey", "NOT_CONFIGURED"));
+        return new DeployViews.AdmissionResult(items, LocalDateTime.now(), "sig-skip");
+    }
+
+    @Test
+    @DisplayName("SKIP 永不计通过，但可提交：未确认跳过数 → 400 SKIP_NOT_ACKNOWLEDGED，等值确认后才进审批")
+    void skipMustBeAcknowledgedOnSubmit() {
+        when(admissionEvaluator.evaluateAndStore(order)).thenReturn(resultWithSkip());
+        when(admissionEvaluator.allPassed(any())).thenReturn(true);
+
+        assertEquals(1, resultWithSkip().skipCount(), "跳过项要计数，且不计入通过");
+        assertEquals(5, resultWithSkip().counts().passed());
+
+        DeployErrors.SkipNotAcknowledgedException denied = assertThrows(
+                DeployErrors.SkipNotAcknowledgedException.class, () -> service.submit(ORDER_ID, null));
+        assertEquals(400, denied.status());
+        assertEquals(DeployErrors.SKIP_NOT_ACKNOWLEDGED, denied.code());
+        assertEquals(1, denied.detail().get("skipCount"));
+        assertEquals(DeployOrderStates.DRAFT, order.getStatus(), "未确认跳过数不得推进状态");
+
+        DeployViews.SubmitResult submitted = service.submit(ORDER_ID, new DeployViews.SubmitCmd(null, 1));
+        assertEquals(DeployOrderStates.PENDING_APPROVAL, submitted.status());
+    }
+
+    @Test
+    @DisplayName("跳过确认先于质量门闸门：两者同时触发时返回 400 SKIP_NOT_ACKNOWLEDGED（s5 契约）")
+    void skipAcknowledgementPrecedesQualityGateGate() {
+        when(admissionEvaluator.evaluateAndStore(order)).thenReturn(withGate(resultWithSkip(), gate("FAIL")));
+        when(admissionEvaluator.allPassed(any())).thenReturn(true);
+
+        DeployErrors.SkipNotAcknowledgedException denied = assertThrows(
+                DeployErrors.SkipNotAcknowledgedException.class, () -> service.submit(ORDER_ID, null));
+        assertEquals(DeployErrors.SKIP_NOT_ACKNOWLEDGED, denied.code(),
+                "跳过数没确认时要先让用户确认，而不是先报质量门失败");
+        assertEquals(DeployOrderStates.DRAFT, order.getStatus());
     }
 }

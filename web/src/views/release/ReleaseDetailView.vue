@@ -12,6 +12,11 @@ import {
   requestReleaseApproval,
 } from '@/api/req'
 import { gateApi, releaseQualityApi } from '@/api/quality'
+import {
+  getReleaseIntegration,
+  putReleaseIntegration,
+  type ReleaseIntegrationSettings,
+} from '@/api/integration'
 import type {
   GateDetail,
   GateSnapshot,
@@ -214,11 +219,50 @@ async function load(): Promise<void> {
   try {
     dict.ensure()
     detail.value = await getRelease(releaseId.value)
+    void loadIntegration()
   } catch (err) {
     error.value = messageOf(err)
     detail.value = null
   } finally {
     loading.value = false
+  }
+}
+
+/* ---------------- 集成设置（DESIGN I7 / AC-4.4、AC-5.5） ---------------- */
+const integration = ref<ReleaseIntegrationSettings | null>(null)
+const integrationLoading = ref(false)
+const integrationSaving = ref(false)
+const integrationError = ref('')
+const integrationAutoAdvance = ref(false)
+const integrationSonarKey = ref('')
+
+async function loadIntegration(): Promise<void> {
+  integrationLoading.value = true
+  integrationError.value = ''
+  try {
+    integration.value = await getReleaseIntegration(releaseId.value)
+    integrationAutoAdvance.value = integration.value.mrAutoAdvance
+    integrationSonarKey.value = integration.value.defaultSonarProjectKey ?? ''
+  } catch (err) {
+    integrationError.value = messageOf(err)
+  } finally {
+    integrationLoading.value = false
+  }
+}
+
+async function saveIntegration(): Promise<void> {
+  integrationSaving.value = true
+  integrationError.value = ''
+  try {
+    integration.value = await putReleaseIntegration(releaseId.value, {
+      mrAutoAdvance: integrationAutoAdvance.value,
+      defaultSonarProjectKey: integrationSonarKey.value.trim() || null,
+    })
+    ElMessage.success('集成设置已保存')
+  } catch (err) {
+    integrationError.value = messageOf(err)
+  } finally {
+    integrationSaving.value = false
   }
 }
 
@@ -611,6 +655,47 @@ function statusOfMilestone(status?: string): string {
               </li>
             </ul>
             <p v-else class="muted small">没有识别到风险项。</p>
+          </section>
+
+          <section class="surface surface--pad side-block" aria-labelledby="release-integration-title">
+            <h2 id="release-integration-title" class="section-title">集成设置</h2>
+            <p class="muted small">
+              版本级默认值：需求没单独配置时继承这里。改动只影响后续同步，不追溯已生成的快照。
+            </p>
+            <div class="intg-row">
+              <span class="intg-label">MR 合并自动推进</span>
+              <el-switch
+                v-model="integrationAutoAdvance"
+                size="small"
+                :disabled="integrationLoading || integrationSaving || !can('release:plan')"
+                aria-label="MR 合并后自动推进需求状态"
+              />
+            </div>
+            <p class="muted small intg-hint">
+              默认关闭：MR 合入后由人工在需求「集成」页确认推进；打开后仅在状态机允许时自动前进。
+            </p>
+            <div class="intg-field">
+              <span class="intg-label">默认 Sonar 项目 key</span>
+              <el-input
+                v-model="integrationSonarKey"
+                size="small"
+                placeholder="如 supply-order-service"
+                :disabled="integrationLoading || integrationSaving || !can('release:plan')"
+              />
+            </div>
+            <p v-if="integrationError" class="intg-error" role="alert">{{ integrationError }}</p>
+            <div class="intg-actions">
+              <el-button
+                size="small"
+                type="primary"
+                :loading="integrationSaving"
+                :disabled="integrationLoading || !can('release:plan')"
+                @click="saveIntegration"
+              >
+                保存
+              </el-button>
+              <span v-if="!can('release:plan')" class="muted small">需要权限：release:plan</span>
+            </div>
           </section>
         </aside>
       </div>
@@ -1129,6 +1214,35 @@ function statusOfMilestone(status?: string): string {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.intg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.intg-label {
+  font-size: 12px;
+  color: var(--text-body);
+}
+.intg-hint {
+  margin-top: -4px;
+  line-height: 16px;
+}
+.intg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.intg-error {
+  margin: 0;
+  color: var(--danger-ink);
+  font-size: 12px;
+}
+.intg-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .milestones,
 .risks {

@@ -203,8 +203,10 @@ section "q5 · R2：五项历史快照 → legacy=true（列表内条件不可�
 api_call POST "/api/req/deploy-orders/${DEP}/evaluate" '{}'
 expect "重新固化六项快照 200" 200
 ADM_JSON="$(db_q "SELECT admission_result_json FROM deploy_order WHERE id=${DEP}")"
-# 历史快照的真实形状：没有第 6 项，也没有 gate 证据段。
-FIVE_JSON="$(jq -c 'del(.items[] | select(.code=="QUALITY_GATE")) | del(.gate)' <<<"$ADM_JSON" 2>/dev/null)"
+# 历史快照的真实形状：M6 之前的五项准入（还没有质量门，也没有 gate 证据段）。
+# M7 把准入扩成了 9 项，所以这里必须裁掉 M7 追加的尾部（构建/Sonar/制品 + 质量门），
+# 只保留前 5 项；单纯删 QUALITY_GATE 只减 1 项，永远凑不出五项历史快照。
+FIVE_JSON="$(jq -c '.items = (.items[:5]) | del(.gate)' <<<"$ADM_JSON" 2>/dev/null)"
 if [[ -n "$FIVE_JSON" && "$FIVE_JSON" != "null" ]] \
     && [[ "$(jq -r '.items | length' <<<"$FIVE_JSON" 2>/dev/null)" == "5" ]]; then
     HEX_JSON="$(printf '%s' "$FIVE_JSON" | xxd -p | tr -d '\n')"

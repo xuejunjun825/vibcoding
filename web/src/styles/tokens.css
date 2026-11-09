@@ -80,6 +80,24 @@
   --paper-edge: #e5e6eb; /* 报告纸边 */
   --t-status: 600ms; /* 状态推进高亮渐隐 */
 
+  /* ---- M7 集成域（DESIGN §7.2，只增不改） ---- */
+  --w-intg-card: 424px; /* 集成卡宽（2 列 @864 内容宽，<960 视口切 1 列） */
+  --h-intg-card: 452px; /* 卡最小高：header 40 + 5 行字段 290 + gap 48 + footer 40 + padding 32 */
+  --w-admission-pill: 64px; /* 四态 pill 同宽，防状态切换时跳动 */
+  --h-admission-row: 48px;
+  --h-admission-row-open: 96px;
+  --h-count-strip: 40px; /* 计数条：通过 x · 失败 y · 跳过 z · 关闭 w */
+  --w-drawer-artifact: 720px; /* 制品检索/晋级抽屉 */
+  --w-drawer-help: 640px; /* 「如何接入」抽屉（含桩与真实差异表） */
+  --w-drawer-config: 560px;
+  --h-build-row: 44px; /* 最近构建行：296×44 两行 */
+  --w-sha-chip: 160px; /* sha256 只显示前 12 位 + 复制 */
+  --w-buildid-chip: 88px; /* #1284 */
+  --intg-unconfigured-bg: #fafbfc; /* 未配置槽的虚线区底色 */
+  --intg-unconfigured-border: #c9cdd4; /* 仅虚线描边，不做浅灰实线 */
+  --intg-code-bg: #f7f8fa; /* 代码/坐标 mono 行底 */
+  --intg-running: #2b6fe5; /* RUNNING 呼吸点（reduced-motion 下静止） */
+
   /* ---- 字体 ---- */
   --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # q4-gate-admission.sh — AC-5 发布准入第 6 项质量门。
 #
-# 覆盖：准入固定 6 项（前 5 项在前、QUALITY_GATE 第 6）、无报告 → QG-01 FAIL 且提交 409
+# 覆盖：准入固定 9 项（M6 的 6 项语义不变、QUALITY_GATE 仍第 6；M7 追加 BUILD/SONAR/ARTIFACT）、
+# 集成默认关闭时后三项为 CLOSED 不阻断、无报告 → QG-01 FAIL 且提交 409
 # QUALITY_GATE_FAILED（带 failedRules 与 snapshotId）、报告签发后转为 PASS、未关闭 P1 → QG-04 FAIL、
 # 通过率 94.7% → QG-03 FAIL、报告过期 → QG-02 FAIL、绕过网关直连 req 同样拦截、
 # 强制放行已退役恒 409 FORCE_RELEASE_RETIRED。
@@ -30,12 +31,13 @@ api_call POST "/api/deliver/test-plans/${PLAN}/complete" '{}'
 DEP="$(q_create_deploy_order "$REL" "$REQ_ID" PROD)" || exit 1
 info "releaseId=${REL} requirementId=${REQ_ID} planId=${PLAN} deployOrderId=${DEP}"
 
-section "q4 · 准入 6 项结构（前 5 项顺序不变，质量门第 6）"
+section "q4 · 准入 9 项结构（前 6 项含质量门，M7 三项在后）"
 api_call POST "/api/req/deploy-orders/${DEP}/evaluate" '{}'
 expect "准入评估 200" 200
-expect_num "固定 6 项" "$(jq -r '.items | length' <<<"$HTTP_BODY")" eq 6
-expect_jq "第 6 项是 QUALITY_GATE" '.items[5].code' 'QUALITY_GATE'
-expect_jq "前 5 项仍为既有顺序" '[.items[0:5][].code] | join(",")' 'REQ_TEST_PASSED,NO_OPEN_HIGH_DEFECT,MR_FILLED,MAN_DAYS_FILLED,REQ_APPROVALS_DONE'
+expect_num "固定 9 项" "$(jq -r '.items | length' <<<"$HTTP_BODY")" eq 9
+expect_jq "第 6 项仍是 QUALITY_GATE" '.items[5].code' 'QUALITY_GATE'
+expect_jq "前 6 项顺序（M6 语义不变）" '[.items[0:6][].code] | join(",")' 'REQ_TEST_PASSED,NO_OPEN_HIGH_DEFECT,REQ_APPROVALS_DONE,MR_FILLED,MAN_DAYS_FILLED,QUALITY_GATE'
+expect_jq "M7 三项顺序" '[.items[6:9][].code] | join(",")' 'BUILD_PASSED,SONAR_GATE_PASSED,ARTIFACT_VERIFIED'
 
 section "q4 · 无已会签报告 → QG-01 FAIL，提交被 409 拦截"
 GATE_JSON="$(q_gate_snapshot "$REL" "$DEP")"

@@ -4,6 +4,7 @@ import com.example.platform.common.error.ApiException;
 import com.example.req.integration.DeliverPlanCoverageClient;
 import com.example.req.requirement.RequirementErrors;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -18,6 +19,9 @@ public final class DeployErrors {
     public static final String APPROVAL_NOT_CONFIGURED = "APPROVAL_NOT_CONFIGURED";
     public static final String BIZ_NOT_FOUND = "BIZ_NOT_FOUND";
     public static final String NO_GO_CONFIRM_REQUIRED = "NO_GO_CONFIRM_REQUIRED";
+
+    /** 跳过项未等值确认（AC-8.3）：400，detail 带 skipCount 与逐条跳过项。 */
+    public static final String SKIP_NOT_ACKNOWLEDGED = "SKIP_NOT_ACKNOWLEDGED";
 
     /**
      * 发布单引用了未批准的测试计划（R1）。与交付侧"生成报告"的同名码刻意不合并：
@@ -53,6 +57,37 @@ public final class DeployErrors {
         public List<AdmissionItem> items() {
             return items;
         }
+    }
+
+    /**
+     * 跳过项未等值确认（PRD AC-8.3）：400 + 机器码，{@code detail.skipCount} 是服务端算出的跳过数，
+     * 前端据此弹"本次有 N 项被跳过，确认请回传 N"。单独成类是为了让 submit 的
+     * {@code noRollbackFor} 仍提交已落库的准入快照（用户看得到是哪几项被跳过）。
+     */
+    public static final class SkipNotAcknowledgedException extends ApiException {
+
+        public SkipNotAcknowledgedException(int skipCount, Integer acknowledged, List<AdmissionItem> items) {
+            super(400, SKIP_NOT_ACKNOWLEDGED,
+                    "本次准入有 " + skipCount + " 项被跳过（skip ≠ pass），请确认后以 acknowledgedSkipCount="
+                            + skipCount + " 重新提交",
+                    detail(skipCount, acknowledged, items));
+        }
+
+        private static Map<String, Object> detail(int skipCount, Integer acknowledged, List<AdmissionItem> items) {
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("skipCount", skipCount);
+            detail.put("acknowledgedSkipCount", acknowledged == null ? 0 : acknowledged);
+            detail.put("skipped", items == null ? List.of() : items.stream()
+                    .filter(item -> AdmissionItem.SKIP.equals(item.status()))
+                    .map(AdmissionPolicy::toMap)
+                    .toList());
+            return detail;
+        }
+    }
+
+    public static SkipNotAcknowledgedException skipNotAcknowledged(int skipCount, Integer acknowledged,
+                                                                   List<AdmissionItem> items) {
+        return new SkipNotAcknowledgedException(skipCount, acknowledged, items);
     }
 
     /** 没有可用的需求发布审批流：单据停在 DRAFT（不会静默变 APPROVED）。 */

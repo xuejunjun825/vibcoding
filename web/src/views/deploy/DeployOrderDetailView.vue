@@ -7,20 +7,32 @@ import {
   evaluateAdmission,
   getDeployOrder,
   recordExecution,
-  submitDeployOrder,
 } from '@/api/req'
-import { ApiError } from '@/api/client'
-import type { AdmissionSnapshot, DeployOrderDetail, GateItem } from '@/api/types'
+import { ApiError, http } from '@/api/client'
+import type { AdmissionCounts, AdmissionSnapshot, DeployOrderDetail, GateItem } from '@/api/types'
+import {
+  bindArtifact,
+  getBoundArtifact,
+  type ArtifactItem,
+  type ArtifactManualRef,
+  type ArtifactView,
+} from '@/api/integration'
 import ErrorState from '@/components/ErrorState.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import GateChecklist from '@/components/GateChecklist.vue'
+import BuildStatusCard from '@/components/integration/BuildStatusCard.vue'
+import ArtifactSummaryCard from '@/components/integration/ArtifactSummaryCard.vue'
+import ArtifactPickerDrawer from '@/components/integration/ArtifactPickerDrawer.vue'
+import PromoteDialog from '@/components/integration/PromoteDialog.vue'
 import ConclusionBar from '@/components/quality/ConclusionBar.vue'
-import QualityGatePanel from '@/components/quality/QualityGatePanel.vue'
 import { usePermission } from '@/composables/usePermission'
 import { formatDateTime, formatDuration, formatPercent } from '@/utils/format'
 import { messageOf } from '@/views/req/platform'
 
 /**
- * P4 发布单详情：6 项准入常驻清单（不折叠、不用 toast），第 6 项质量门可展开规则卡；
+ * P4 发布单详情：9 项准入常驻清单（不折叠、不用 toast），四态 PASS/FAIL/SKIP/CLOSED；
+ * 第 6 项质量门可展开规则卡，跳过项提交时须勾选确认并回传 acknowledgedSkipCount；
+ * 构建卡 5s 轮询、制品卡只读本地快照，首屏不向 Jenkins/GitLab/Sonar/Nexus 发起任何外呼。
  * 409 原地展示逐条规则差额；强制放行入口已退役，历史记录只读展示，执行结果单独登记。
  */
 const ENVS: Record<string, string> = { DEV: '开发', TEST: '测试', STAGING: '预发', PROD: '生产' }
@@ -45,9 +57,37 @@ const actionError = ref('')
 
 const id = computed(() => Number(route.params.id))
 const items = computed<GateItem[]>(() => admission.value?.items ?? detail.value?.admission?.items ?? [])
-const failedItems = computed(() => items.value.filter((item) => !item.passed))
-const allPassed = computed(() => items.value.length > 0 && failedItems.value.length === 0)
+
+/** 历史快照没有 status 字段，只能由 passed 反推；有 status 时以服务端四态为准 */
+function itemStatus(item: GateItem): 'PASS' | 'FAIL' | 'SKIP' | 'CLOSED' {
+  return item.status ?? (item.passed ? 'PASS' : 'FAIL')
+}
+
+const failedItems = computed(() => items.value.filter((item) => itemStatus(item) === 'FAIL'))
+const skippedItems = computed(() => items.value.filter((item) => itemStatus(item) === 'SKIP'))
+const skippedCount = computed(
+  () => admission.value?.counts?.skipped ?? admission.value?.skipCount ?? skippedItems.value.length,
+)
+const closedCount = computed(
+  () => admission.value?.counts?.closed ?? items.value.filter((item) => itemStatus(item) === 'CLOSED').length,
+)
 const missingChecklist = computed(() => items.value.length === 0)
+
+/** 服务端 counts 优先（它知道被策略关闭的项），缺省按四态就地统计 */
+const counts = computed<AdmissionCounts>(() => {
+  if (admission.value?.counts) return admission.value.counts
+  return {
+    passed: items.value.filter((item) => itemStatus(item) === 'PASS').length,
+    failed: failedItems.value.length,
+    skipped: skippedItems.value.length,
+    closed: closedCount.value,
+    active: items.value.filter((item) => itemStatus(item) !== 'CLOSED').length,
+    total: items.value.length,
+  }
+})
+
+// 只有 FAIL 阻断提交：SKIP 永不计通过但可提交（需勾选确认），CLOSED 表示该项未启用
+const allPassed = computed(() => items.value.length > 0 && failedItems.value.length === 0)
 const submitBlockReason = computed(() => {
   if (!can('deploy:create')) return '需要权限：deploy:create'
   if (missingChecklist.value) return '尚未完成准入校验，请先执行校验'
@@ -62,6 +102,7 @@ async function load(): Promise<void> {
   try {
     detail.value = await getDeployOrder(id.value)
     admission.value = detail.value.admission ?? null
+    void loadArtifact()
     if (!admission.value) {
       await evaluate(true)
     }
@@ -91,21 +132,58 @@ onMounted(load)
 watch(id, load)
 
 const submitting = ref(false)
+const ackOpen = ref(false)
+const ackChecked = ref(false)
+const ackCount = ref(0)
+const ackMessage = ref('')
 
-async function submit(): Promise<void> {
+/** 有 SKIP 时先弹确认框：跳过 ≠ 通过，必须显式勾选并回报数量 */
+function requestSubmit(): void {
   if (submitBlockReason.value) return
+  if (skippedCount.value > 0) {
+    ackCount.value = skippedCount.value
+    ackChecked.value = false
+    ackMessage.value = ''
+    ackOpen.value = true
+    return
+  }
+  void doSubmit(0)
+}
+
+async function confirmAck(): Promise<void> {
+  if (!ackChecked.value) return
+  ackOpen.value = false
+  await doSubmit(ackCount.value)
+}
+
+async function doSubmit(acknowledgedSkipCount: number): Promise<void> {
   submitting.value = true
   rejected.value = false
   rejectedText.value = ''
   actionError.value = ''
   try {
-    await submitDeployOrder(id.value)
+    // req.ts 的 submitDeployOrder 还没带 acknowledgedSkipCount（跨任务边界），
+    // 这里按同一 endpoint 直接提交完整 payload，等该 API 补齐后可删掉这段桥接。
+    await http.post(`/api/req/deploy-orders/${id.value}/submit`, {
+      confirmNoGo: false,
+      acknowledgedSkipCount,
+    })
     ElMessage.success('发布申请已提交，进入审批')
     await load()
   } catch (err) {
     if (err instanceof ApiError && err.isConflict) {
       // 先重算再置位：evaluate() 会清掉上一次的拒绝条，顺序反了会让 409 一闪而过
       await evaluate(true)
+      const code = err.code || ''
+      const detail = err.detail as { skipCount?: number; acknowledged?: number } | undefined
+      if (code.includes('SKIP') && (detail?.skipCount ?? 0) > 0) {
+        // 服务端认为跳过数已变（例如期间新增了未启用项）：用服务端数字重新确认
+        ackCount.value = detail?.skipCount ?? skippedCount.value
+        ackChecked.value = false
+        ackMessage.value = err.message || '跳过项数量已变化，请重新确认'
+        ackOpen.value = true
+        return
+      }
       rejected.value = true
       rejectedText.value = err.message || '准入校验未通过，提交被拒绝'
       gateFailedRules.value = failedRulesOf(err)
@@ -116,6 +194,73 @@ async function submit(): Promise<void> {
     submitting.value = false
   }
 }
+
+/* ---------------- 制品（准入第 9 项） ---------------- */
+const artifact = ref<ArtifactView | null>(null)
+const artifactLoading = ref(false)
+const pickerOpen = ref(false)
+const promoteOpen = ref(false)
+const artifactError = ref('')
+
+async function loadArtifact(): Promise<void> {
+  artifactLoading.value = true
+  artifactError.value = ''
+  try {
+    artifact.value = await getBoundArtifact(id.value)
+  } catch (err) {
+    // 未绑定时服务端返回 404 / 409，都按「空卡」处理，不影响准入清单渲染
+    artifact.value = null
+    if (err instanceof ApiError && err.status >= 500) artifactError.value = messageOf(err)
+  } finally {
+    artifactLoading.value = false
+  }
+}
+
+async function onPickArtifact(item: ArtifactItem): Promise<void> {
+  // 检索结果（ArtifactItem）契约里没有数据库 id，只有坐标；有 id 时按 id 绑定，
+  // 否则退化为按坐标登记，避免把 undefined 传给服务端（见 OUT-OF-SCOPE）。
+  const artifactId = (item as ArtifactItem & { id?: number }).id
+  try {
+    artifact.value = artifactId
+      ? await bindArtifact(id.value, { artifactId })
+      : await bindArtifact(id.value, { manual: toManualRef(item) })
+    ElMessage.success('已绑定制品')
+    await evaluate(true)
+  } catch (err) {
+    artifactError.value = messageOf(err)
+  }
+}
+
+function toManualRef(item: ArtifactItem): ArtifactManualRef {
+  return {
+    repo: item.repository ?? '',
+    groupId: item.groupId ?? '',
+    artifactName: item.artifactName,
+    version: item.version,
+    packaging: item.packaging ?? undefined,
+    sha256: item.sha256 ?? '',
+  }
+}
+
+async function onManualArtifact(item: ArtifactManualRef): Promise<void> {
+  try {
+    artifact.value = await bindArtifact(id.value, { manual: item })
+    ElMessage.success('已登记手工制品（准入第 9 项跳过）')
+    await evaluate(true)
+  } catch (err) {
+    artifactError.value = messageOf(err)
+  }
+}
+
+async function onPromoted(): Promise<void> {
+  promoteOpen.value = false
+  await loadArtifact()
+  await evaluate(true)
+}
+
+const canBuild = computed(() => can('deploy:create') || can('deploy:execute'))
+const canBindArtifact = computed(() => can('deploy:create'))
+const canPromoteArtifact = computed(() => can('deploy:create'))
 
 interface FailedRuleDetail {
   code: string
@@ -288,9 +433,9 @@ const legacyAdmission = computed(() => Boolean(admission.value?.legacy))
             :loading="submitting"
             :disabled="Boolean(submitBlockReason)"
             :title="submitBlockReason"
-            @click="submit"
+            @click="requestSubmit"
           >
-            {{ detail.status === 'FAILED' ? '重新发起' : '提交发布申请' }}
+            {{ detail.status === 'FAILED' ? '重新发起' : skippedCount > 0 ? `提交发布申请（跳过 ${skippedCount} 项）` : '提交发布申请' }}
           </el-button>
         </div>
       </header>
@@ -353,25 +498,49 @@ const legacyAdmission = computed(() => Boolean(admission.value?.legacy))
             </ul>
           </div>
 
-          <QualityGatePanel
+          <GateChecklist
             mode="admission"
-            title="发布准入检查（6 项）"
+            title="发布准入检查（9 项）"
             :items="items"
+            :counts="counts"
+            :partial="Boolean(admission?.partial)"
             :rejected="rejected"
             :rejected-text="rejectedText"
             :checked-at="admission?.checkedAt ?? null"
             :stale="Boolean(admission?.stale)"
-            :legacy="legacyAdmission"
           />
+
+          <ArtifactSummaryCard
+            :order-id="id"
+            :artifact="artifact"
+            :loading="artifactLoading"
+            :can-bind="canBindArtifact"
+            :can-promote="canPromoteArtifact"
+            class="artifact-block"
+            @pick="pickerOpen = true"
+            @promote="promoteOpen = true"
+          />
+          <p v-if="artifactError" class="muted small artifact-error">{{ artifactError }}</p>
+
           <div class="checklist-foot">
             <span class="muted small">
-              准入由服务端按当前数据实时计算；第 6 项质量门只透传 deliver 的规则结果，客户端提交的 PASS/FAIL 一律无效。
+              准入由服务端按本地事实实时计算（零外呼），首屏不向 Jenkins / GitLab / Sonar / Nexus 发起请求；第 6 项质量门只透传 deliver 的规则结果。
             </span>
+            <span v-if="skippedCount > 0" class="skip-note">
+              本次提交有 {{ skippedCount }} 项未校验（跳过 ≠ 通过），提交时需勾选确认。
+            </span>
+            <span v-if="legacyAdmission" class="muted small">历史快照：仅记录通过/失败两态。</span>
             <span v-if="missingChecklist" class="muted small">尚未拿到校验结果，请点「重新校验」。</span>
           </div>
         </section>
 
         <aside class="column-side">
+          <BuildStatusCard
+            :order-id="id"
+            :can-trigger="canBuild"
+            :trigger-disabled-reason="canBuild ? '' : '需要权限：deploy:create'"
+            @settled="evaluate(true)"
+          />
           <section class="surface surface--pad side-block">
             <h2 class="section-title">发布基本信息</h2>
             <dl class="fields">
@@ -458,6 +627,37 @@ const legacyAdmission = computed(() => Boolean(admission.value?.legacy))
         <el-button type="primary" :loading="execSaving" @click="submitExecution">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="ackOpen" title="确认跳过项" width="520px" append-to-body>
+      <p v-if="ackMessage" class="dialog-error" role="alert">{{ ackMessage }}</p>
+      <p class="ack-lead">
+        本次提交有 <b>{{ ackCount }}</b> 项准入未校验（跳过 ≠ 通过）。发布后它们不会补算，责任由提交人承担。
+      </p>
+      <ul v-if="skippedItems.length" class="ack-list">
+        <li v-for="item in skippedItems" :key="item.code">
+          <span class="mono ack-list__code">{{ item.code }}</span>
+          <span class="ack-list__name">{{ item.name }}</span>
+          <span class="ack-list__reason">{{ item.detail || item.reasonCode || '未启用或证据缺失' }}</span>
+        </li>
+      </ul>
+      <el-checkbox v-model="ackChecked" class="ack-check">
+        我已知晓 {{ ackCount }} 项未校验
+      </el-checkbox>
+      <template #footer>
+        <el-button @click="ackOpen = false">取消</el-button>
+        <el-button type="primary" :disabled="!ackChecked" :loading="submitting" @click="confirmAck">
+          仍要提交（跳过 {{ ackCount }} 项）
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <ArtifactPickerDrawer
+      v-model="pickerOpen"
+      :order-id="id"
+      @select="onPickArtifact"
+      @manual="onManualArtifact"
+    />
+    <PromoteDialog v-model="promoteOpen" :artifact="artifact" @promoted="onPromoted" />
   </div>
 </template>
 
@@ -668,6 +868,59 @@ const legacyAdmission = computed(() => Boolean(admission.value?.legacy))
   gap: 4px;
   padding: 10px 14px;
   border-top: 1px solid var(--divider);
+}
+.skip-note {
+  color: var(--warning-ink);
+  font-size: 12px;
+}
+.artifact-block {
+  margin: 12px 12px 0;
+}
+.artifact-error {
+  margin: 6px 14px 0;
+  color: var(--danger-ink);
+}
+.ack-lead {
+  margin: 0 0 10px;
+  color: var(--text-body);
+  font-size: 13px;
+  line-height: 20px;
+}
+.ack-list {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--divider);
+  border-radius: var(--r-ctl);
+  background: var(--bg-sunken);
+}
+.ack-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.ack-list__code {
+  flex: none;
+  color: var(--text-weak);
+}
+.ack-list__name {
+  flex: none;
+  color: var(--text-title);
+}
+.ack-list__reason {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted-aa);
+}
+.ack-check :deep(.el-checkbox__label) {
+  font-size: 12px;
+  color: var(--text-body);
 }
 .column-side {
   display: flex;

@@ -3,7 +3,7 @@ SHELL := /bin/bash
 
 .PHONY: help dev-up dev-down verify build lint test test-negative nacos-status clean distclean \
         platform-up platform-down platform-web platform-verify platform-test-negative \
-        platform-seed platform-unit platform-perf quality-verify quality-e2e
+        platform-seed platform-unit platform-perf quality-verify quality-e2e integration-verify
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
@@ -66,6 +66,9 @@ quality-e2e: ## M6 质量域浏览器 E2E（Playwright/Node；服务未起则 SK
 	    echo "[SKIP] web 未启动（$${WEB_URL:-http://127.0.0.1:5173}/），跳过 quality-e2e：make platform-up 后再跑"; \
 	    exit 0; fi; \
 	  node web/e2e/quality.spec.mjs'
+
+integration-verify: ## M7 集成对接验收 s0..s7（本地四合一桩 127.0.0.1:19090；PASS==TOTAL 守卫；先 make platform-up）
+	@./scripts/integration-verify.sh
 
 clean: ## 清理 Maven 产物与运行态 pid（请先 make dev-down；保留 .nacos 缓存）
 	@bash -c 'source ./scripts/lib.sh; \

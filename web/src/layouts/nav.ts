@@ -173,6 +173,14 @@ export const NAV_GROUPS: NavGroup[] = [
         functionCode: 'apiclient:manage',
       },
       {
+        // M7：四个外部系统插槽（DESIGN §3.2，routeName 未注册时本条目自动隐藏）
+        label: '集成配置',
+        to: '/admin/integrations',
+        icon: 'plug',
+        routeName: 'admin-integrations',
+        functionCode: 'integration:manage',
+      },
+      {
         label: '指标字典',
         to: '/admin/metrics',
         icon: 'ruler',
@@ -249,4 +257,6 @@ export const NAV_ICONS: Record<string, string> = {
   server: 'M2.8 3.2h10.4V6.6H2.8V3.2ZM2.8 9.4h10.4v3.4H2.8V9.4ZM5 4.9h.01M5 11.1h.01',
   gate: 'M2.4 5h11.2M2.4 11h11.2M5 2.6V5M11 2.6V5M5 11v3M11 11v3M8 5v6',
   gauge: 'M3 11.4a5 5 0 1 1 10 0M8 11.2l2.6-3.8M2.6 11.4h10.8',
+  // M7 集成配置：插头（四槽接线台的隐喻；不借用任何外部系统的主色/商标图形）
+  plug: 'M6 2.6V5M10 2.6V5M3.6 5h8.8v2.2a4.4 4.4 0 0 1-8.8 0V5M8 11.4v2.1',
 }

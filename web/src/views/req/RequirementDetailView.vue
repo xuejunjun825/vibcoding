@@ -18,6 +18,7 @@ import StatusPill from '@/components/StatusPill.vue'
 import ApprovalTab from '@/views/req/tabs/ApprovalTab.vue'
 import ChildrenTab from '@/views/req/tabs/ChildrenTab.vue'
 import DefectsTab from '@/views/req/tabs/DefectsTab.vue'
+import IntegrationTab from '@/views/req/tabs/IntegrationTab.vue'
 import OverviewTab from '@/views/req/tabs/OverviewTab.vue'
 import TasksTab from '@/views/req/tabs/TasksTab.vue'
 import TestingTab from '@/views/req/tabs/TestingTab.vue'
@@ -56,7 +57,7 @@ const approval = ref<ApprovalInstanceDetail | null>(null)
 const approvalLoading = ref(false)
 const approvalError = ref('')
 
-const TAB_KEYS = ['overview', 'children', 'tasks', 'testing', 'defects', 'approval', 'trace'] as const
+const TAB_KEYS = ['overview', 'children', 'tasks', 'testing', 'defects', 'approval', 'trace', 'integration'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 const activeTab = ref<TabKey>(TAB_KEYS.includes(String(route.query.tab) as TabKey) ? (String(route.query.tab) as TabKey) : 'overview')
 const tabCounts = reactive({ children: 0, tasks: 0 })
@@ -72,6 +73,7 @@ const tabs = computed(() => [
   { key: 'defects', label: '缺陷' },
   { key: 'approval', label: '审批' },
   { key: 'trace', label: '追溯' },
+  { key: 'integration', label: '集成' },
 ])
 
 const allowedActions = computed(() => detail.value?.allowedActions ?? [])
@@ -432,6 +434,11 @@ onMounted(async () => {
           :requirement-id="detail.id"
           :release-id="detail.releaseId"
           @open="(tab: string) => setTab(tab as TabKey)"
+        />
+        <IntegrationTab
+          v-else-if="activeTab === 'integration'"
+          :requirement-id="detail.id"
+          :fallback-mr-url="detail.delivery?.mrUrl ?? ''"
         />
       </section>
 

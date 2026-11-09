@@ -47,6 +47,18 @@ public final class PermissionRouteTable {
             rule(null, "^/admin/metric-definitions(/.*)?$", false, "metric:manage"),
             rule(null, "^/admin/audit(/.*)?$", false, "audit:view"),
 
+            // ---- M7 integration domain ----
+            // 配置 / 准入项开关 / 同步日志是管理面，读写同一个码：未匹配的路径返回 null，
+            // 等于任何已认证账号都能改集成配置（换成自己控制的 Jenkins 地址）并读出
+            // 别处的凭据末四位与同步摘要。webhook 走 /integration/webhooks/**，由网关匿名
+            // 放行、由 WebhookSignatureVerifier 自证身份，故意不进这张表。
+            rule(null, "^/integration/(configs|logs|admission-items)(/.*)?$", false,
+                    "integration:manage"),
+            // 制品检索是交互读（发布单页选制品，界面按 deploy:create 决定是否显示入口），
+            // 只有晋级是写：它把制品推到正式仓库，属于发布动作而不是集成管理，
+            // 与前端 ArtifactSummaryCard.canPromote（deploy:create）保持同一个码。
+            rule("POST", "^/artifacts/\\d+/promote$", false, "deploy:create"),
+
             // ---- requirements ----
             rule("POST", "^/requirements$", true, "req:report:bus", "req:report:dev"),
             rule(null, "^/requirements/\\d+/decompose$", false, "req:split"),

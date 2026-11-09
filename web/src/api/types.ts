@@ -69,6 +69,8 @@ export type FunctionCode =
   | 'apiclient:manage'
   | 'export:detail'
   | 'audit:view'
+  // M7 集成域（PermissionMatrix 追加 1 码；前端只引用同一个码，不另起别名）
+  | 'integration:manage'
 
 /* ---------------- 认证 ---------------- */
 
@@ -225,6 +227,12 @@ export interface CreateRequirementPayload {
   priority: Priority
   expectedDeliveryDate?: string | null
   parentId?: number | null
+  /**
+   * 需求级 Sonar 项目键（仅 `updateRequirement` 生效：PUT/PATCH /requirements/{id} 的 extra 字段）。
+   * 空串或 null 表示清除自有键、回落到版本默认值；非法字符服务端 400 `SONAR_KEY_INVALID`。
+   * 创建接口忽略此字段——新建时还没有 Sonar 快照可对齐，键应在需求详情里补。
+   */
+  sonarProjectKey?: string | null
   attachments?: number[]
 }
 
@@ -345,11 +353,19 @@ export interface AdmissionSnapshot {
   items: GateItem[]
   checkedAt?: string | null
   stale?: boolean
-  /** 6 项事实的签名：第 6 项加入后必须变化，否则旧结果会被误判为最新 */
+  /** 9 项事实的签名：任一项证据变化必须变化，否则旧结果会被误判为最新 */
   signature?: string | null
   /** M6 之前生成的 5 项单据：视图补 legacy 标记，不伪造 PASS */
   legacy?: boolean
   passed?: boolean
+  /** M7：四态计数（服务端唯一算法；前端不自己数） */
+  counts?: AdmissionCounts
+  /** 跳过项数；>0 时提交必须回传等值 acknowledgedSkipCount */
+  skipCount?: number
+  /** 阻断提交的项（有 FAIL 时非空） */
+  blocking?: string[]
+  /** 有项因超预算/数据不可用而降级为 SKIP 时为 true */
+  partial?: boolean
 }
 
 export interface DeployOrderRow {
@@ -408,10 +424,25 @@ export interface AdmissionConflictDetail {
 
 /* ---------------- 门禁 / 准入 ---------------- */
 
+/**
+ * 准入项四态（M7 · DESIGN §5.2）：CLOSED 不阻断也不进分母，SKIP 永不计 PASS。
+ * 判定与计数全部由服务端下发，前端只做展示映射。
+ */
+export type AdmissionStatus = 'PASS' | 'FAIL' | 'SKIP' | 'CLOSED'
+
 export interface GateItem {
   code: string
   name: string
+  /** 兼容字段：服务端恒有，且恒等于 status === 'PASS' */
   passed: boolean
+  /** M7 四态；M6 历史快照无此字段时回落到 passed ? PASS : FAIL */
+  status?: AdmissionStatus
+  /** 9 项固定顺序（1 起） */
+  order?: number
+  /** 跳过/关闭/失败的结构化原因码（见 TECHNICAL §4.6） */
+  reasonCode?: string | null
+  /** 本地证据摘要：build#1284、sonar 快照 hash、sha256 前 12 位… */
+  evidence?: string | null
   detail?: string | null
   fixHint?: string | null
   forced?: boolean
@@ -421,6 +452,16 @@ export interface GateItem {
   snapshotId?: number | null
   /** 该条是否属于阻塞项（历史 5 项为 true） */
   required?: boolean
+}
+
+/** 计数条：通过 x · 失败 y · 跳过 z · 关闭 w；active = total - closed */
+export interface AdmissionCounts {
+  passed: number
+  failed: number
+  skipped: number
+  closed: number
+  active: number
+  total: number
 }
 
 export interface GateBlocker {
@@ -1374,4 +1415,24 @@ export interface ReviewCreatePayload {
 export interface ReleaseQualitySettings {
   observationHours?: number
   reportValidityDays?: number
+}
+
+/* ---------------- M7 集成域：跨域共享部分 ---------------- */
+// 集成域自身 DTO（配置/构建/MR/Sonar/制品/同步日志）集中在 `api/integration.ts`，
+// 这里只放"两个以上域都会用到"的三样：提交体、跳过确认明细、功能码（上面已加）。
+
+/**
+ * POST `/deploy-orders/{id}/submit` 请求体（TECHNICAL §4.6）。
+ * skipCount > 0 时必须回传等值 `acknowledgedSkipCount`，否则 400 `SKIP_NOT_ACKNOWLEDGED`（detail.skipCount）。
+ */
+export interface DeploySubmitPayload {
+  confirmNoGo?: boolean
+  acknowledgedSkipCount?: number | null
+}
+
+/** 400 `SKIP_NOT_ACKNOWLEDGED` 的 detail：页面照 skipCount 重弹确认框，不吞错 */
+export interface SkipAckConflictDetail {
+  skipCount?: number
+  code?: string
+  message?: string
 }

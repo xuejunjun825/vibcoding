@@ -143,8 +143,15 @@ platform_routes_preserve_demo() {
 #   quality/                                  M6 质量域：ScopedJdbc 只读，快速路径聚合（计划/轮次/报告版本/
 #                                            门禁快照）需要在同一事务里读改写；与 deliver 既有的
 #                                            NamedParameterJdbcTemplate 写路径约定一致，故整体放行
+#   integration/                              M7 集成域：三类都必须绕过 ScopedJdbc，且都显式带 tenant_id 参数：
+#                                            (1) 后台任务（BuildPollingJob/MrFallbackPollingJob/SonarRefreshJob）
+#                                                按 tenant 遍历，请求里根本没有 TenantContext；
+#                                            (2) 快照读改写（sonar 快照 upsert 用 GeneratedKeyHolder 拿自增 id）；
+#                                            (3) 幂等 upsert / 单调写（mr_sync 的 last_event_at 比较、build_record
+#                                                的唯一键冲突重试），ScopedJdbc 只有读入口。
+#                                            所有语句一律 `AND tenant_id = ?` 绑定，不放宽为拼接。
 scoped_jdbc_single_source() {
-    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/'
+    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/|integration/'
     local hits
     hits="$(grep -rl 'JdbcTemplate' "$ROOT/req-service/src/main/java" "$ROOT/deliver-service/src/main/java" 2>/dev/null \
         | grep -v '/seed/' | grep -Ev "$allow_re" || true)"

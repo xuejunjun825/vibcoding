@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>已交付功能模块清单</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 0 60px;background:#fff;color:var(--body);
+  font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:960px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;
+  font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.meta-note{font-size:12px;color:var(--muted)}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+@media print{body{padding:0}.toc{break-inside:avoid}}
+
+h1.title{display:none}
+td:first-child,th:first-child{white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="toc"><div class="toc-title">目录</div>
+<ul>
+<li><a href="#已交付功能模块清单"
+id="toc-已交付功能模块清单">已交付功能模块清单</a>
+<ul>
+<li><a href="#0-版本台账" id="toc-0-版本台账">0. 版本台账</a></li>
+<li><a href="#1-平台基座r1" id="toc-1-平台基座r1">1.
+平台基座（r1）</a></li>
+<li><a href="#2-组织租户与权限r2" id="toc-2-组织租户与权限r2">2.
+组织、租户与权限（r2）</a></li>
+<li><a href="#3-需求全流程r2" id="toc-3-需求全流程r2">3.
+需求全流程（r2）</a></li>
+<li><a href="#4-自定义审批引擎r2自研轻量"
+id="toc-4-自定义审批引擎r2自研轻量">4.
+自定义审批引擎（r2，自研轻量）</a></li>
+<li><a href="#5-版本发布与准入r2--m6-加强"
+id="toc-5-版本发布与准入r2--m6-加强">5. 版本发布与准入（r2 + M6
+加强）</a></li>
+<li><a href="#6-研发交付r2" id="toc-6-研发交付r2">6.
+研发交付（r2）</a></li>
+<li><a href="#7-测试管理r2-用例库与执行--m6-补全"
+id="toc-7-测试管理r2-用例库与执行--m6-补全">7. 测试管理（r2 用例库与执行
++ M6 补全）</a></li>
+<li><a href="#8-质量保证闭环m6deliver-servicequality"
+id="toc-8-质量保证闭环m6deliver-servicequality">8.
+质量保证闭环（M6，<code>deliver-service/.../quality/*</code>）</a></li>
+<li><a href="#9-度量看板与报表r2--m6" id="toc-9-度量看板与报表r2--m6">9.
+度量、看板与报表（r2 + M6）</a></li>
+<li><a href="#10-通知与平台化r2" id="toc-10-通知与平台化r2">10.
+通知与平台化（r2）</a></li>
+<li><a href="#11-数据模型与工程质量" id="toc-11-数据模型与工程质量">11.
+数据模型与工程质量</a></li>
+<li><a href="#12-进行中--明确不做" id="toc-12-进行中--明确不做">12.
+进行中 / 明确不做</a></li>
+</ul></li>
+</ul>
+</div>
+<h1 id="已交付功能模块清单">已交付功能模块清单</h1>
+<blockquote>
+<p>生成时间：2026-11-09 · 口径：<strong>已验收并合入
+<code>main</code></strong> 的能力；进行中的 M7 单列在
+§12，不计入已交付。任务夹路径见各轮目录
+<code>docs/teamflow/20261*-r*</code>。 分支 <code>main</code> 当前 =
+<code>5640227</code>（M6 合入后）；证据见各任务夹的
+<code>ACCEPTANCE.md</code>。</p>
+</blockquote>
+<h2 id="0-版本台账">0. 版本台账</h2>
+<table>
+<thead>
+<tr>
+<th>轮次</th>
+<th>里程碑</th>
+<th>范围要点</th>
+<th>验收</th>
+<th>合入</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>r1</td>
+<td>M0 环境骨架</td>
+<td>网关/示例服务/一键启停/体检</td>
+<td>8/8 AC · <code>verify</code> 14/14</td>
+<td><code>0741e6a</code></td>
+</tr>
+<tr>
+<td>r2</td>
+<td>M1–M5 需求平台</td>
+<td>组织权限·需求池·审批·版本发布·缺陷任务·用例执行·指标报表·开放
+API</td>
+<td>20/20 AC · <code>platform-verify</code> 167/167</td>
+<td><code>5f1bb66</code></td>
+</tr>
+<tr>
+<td>r3+r4</td>
+<td>M6 质量闭环</td>
+<td>计划生命周期·轮次·报告三签·质量门与豁免·生产回流·Go/No-Go</td>
+<td>10/10 AC · <code>quality-verify</code> 347/347</td>
+<td><code>5640227</code></td>
+</tr>
+<tr>
+<td>r5</td>
+<td>M7 集成对接</td>
+<td>Jenkins/GitLab/Sonar/Nexus 适配层·准入扩到 9 项</td>
+<td>进行中</td>
+<td>未合入</td>
+</tr>
+</tbody>
+</table>
+<p><strong>规模</strong>：已交付 REST 映射 <strong>196</strong>
+个（req-service 81 / deliver-service 115），前端 <strong>54</strong>
+个页面/组件，数据库 <strong>53</strong> 张业务表（V1 39 + V5 14，另有 5
+次增列/字典迁移）。</p>
+<h2 id="1-平台基座r1">1. 平台基座（r1）</h2>
+<ul>
+<li><strong>注册与配置</strong>：Nacos 3.3
+standalone；<code>demo-service</code> 通过
+<code>spring.config.import=nacos:</code>
+拉配置，<code>@RefreshScope</code> 热更新。</li>
+<li><strong>统一入口</strong>：<code>api-gateway</code> 8080，Java
+<code>RouteLocator</code> 声明路由，<code>/api/**</code> StripPrefix +
+<code>lb://</code>，JWT 网关校验。</li>
+<li><strong>运维脚本</strong>：<code>scripts/{nacos,dev-up,dev-down,verify,build,env-precheck}.sh</code>
++ <code>make dev-up / verify / test-negative / dev-down</code>。</li>
+<li><strong>体检</strong>：<code>make verify</code> 14
+项逐条打表、<code>make test-negative</code> 真负向（4
+类故障逐一指名）。</li>
+<li>页面/端口：网关 8080 · req 8082 · deliver 8083 · 前端 5173 · Nacos
+8848/8849/9848/9849。</li>
+</ul>
+<h2 id="2-组织租户与权限r2">2. 组织、租户与权限（r2）</h2>
+<ul>
+<li><strong>多租户</strong>：<code>tenant</code> 三形态（ROW
+同库行级默认 / SCHEMA / DATABASE）+ 开通即预设 10 角色、7
+域；缺/错租户头 403 不落库。</li>
+<li><strong>组织树</strong>：集团 → 二级管理企业 → 部门 →
+人员；用户属厂商 + 被授权若干域。</li>
+<li><strong>权限</strong>：10 角色 ×
+权限矩阵（<code>PermissionMatrix</code> 26→41 码、410 格），后端
+<code>PermissionInterceptor</code> 拒绝而非隐藏按钮；多角色并集。</li>
+<li><strong>隔离</strong>：域 ×
+厂商双维度，<code>ScopeSql</code>/<code>ScopedJdbc</code>
+单点生成谓词，覆盖列表/搜索/导出/附件/看板 8
+个入口；导出带水印、行数与页面同源。</li>
+<li><strong>审计</strong>：<code>audit_log</code>
+全量记录状态流转、权限拒绝、加签/减签、门禁放行、集成调用。</li>
+<li>接口：<code>/sys/admin/*</code>（用户/组织/域/厂商/权限/租户/审计，7
+个控制器）；页面：<code>admin/*</code> 10 页。</li>
+</ul>
+<h2 id="3-需求全流程r2">3. 需求全流程（r2）</h2>
+<ul>
+<li><strong>三类需求</strong>：业务 BUS / 产品 PDR / 研发
+RD，编号全局自增 + 类型前缀；三层父子拆解（一父多子可跨
+Release，父需求只读汇总）。</li>
+<li><strong>状态机</strong>：按类型差异化（<code>StateTables</code>
+单点定义，非法流转 409 + <code>allowedTargets</code>，直写 status
+400）；每次流转写审计。</li>
+<li><strong>需求池</strong>：类型 Tab +
+域/厂商/状态/版本/负责人/优先级筛选，聚合/平铺双视图，keyset 分页（10
+万行同源验证）。</li>
+<li><strong>提报与评审入池</strong>：二级企业业务人员可提报并跟踪自己提报、只读浏览全集团已入池业务需求。</li>
+<li><strong>版本计划</strong>：<code>release</code> +
+里程碑，可挂三类需求并按父需求聚合；延期标红。</li>
+<li><strong>人天口径</strong>：0.5
+天精度，子需求汇总，父需求只读；实际人天可由工时（÷8）回写。</li>
+<li>接口：<code>/requirements</code>、<code>/releases</code>；页面：需求池/创建/详情
++ 8 个 Tab。</li>
+</ul>
+<h2 id="4-自定义审批引擎r2自研轻量">4.
+自定义审批引擎（r2，自研轻量）</h2>
+<ul>
+<li><strong>流程定义</strong>：四类单据（提报 / 评审入池 / 需求版本 /
+发布）+ 需求类型 ×
+域绑定、默认回退；发布后固化版本，在途实例按启动版本走。</li>
+<li><strong>节点</strong>：审批（会签全员 /
+或签一人）、条件分支（类型/域/优先级/人天）、抄送（不阻塞）。</li>
+<li><strong>审批人来源</strong>：指定人 / 角色 / 发起人直属主管 /
+域负责人 / 厂商负责人；无审批人不允许发布（400 带
+<code>nodeKey</code>）。</li>
+<li><strong>运行期操作</strong>：前加签 /
+后加签（可多人）、减签（必填原因 +
+通知）、转办、撤回、催办；已办任务加签 409。</li>
+<li><strong>审批中心</strong>：我的待办 / 已办 / 我发起 +
+超时提醒；单据状态联动（提交→PENDING_REVIEW、评审通过→POOLED、发布级联）。</li>
+<li>接口：<code>/approvals</code>、<code>/admin/workflows</code>；页面：审批中心、流程管理。</li>
+</ul>
+<h2 id="5-版本发布与准入r2--m6-加强">5. 版本发布与准入（r2 + M6
+加强）</h2>
+<ul>
+<li><strong>发布单</strong>：挂 Release、需求关联、准入 <strong>9
+项</strong>（M7 落地中；当前交付为 M6 的 6 项：需求全测过、无未关闭
+P0/P1、MR 已填、人天已填、审批已过、<strong>质量门通过</strong>）。</li>
+<li><strong>准入服务端计算</strong>：FAIL 返回 409
+<code>ADMISSION_FAILED</code> 不可绕过；逐项快照固化
+<code>admission_result_json</code>，可回放/diff，不写库伪造 PASS。</li>
+<li><strong>强制放行退役</strong>：改为规则级豁免 + PMO
+审批，保留原因/期限/审计/通知。</li>
+<li><strong>发布执行登记</strong>：审核后登记执行、发布结果与上线记录。</li>
+<li>接口：<code>/deploy-orders</code>；页面：发布单列表/详情。</li>
+</ul>
+<h2 id="6-研发交付r2">6. 研发交付（r2）</h2>
+<ul>
+<li><strong>缺陷</strong>：BUG 编号、P0–P3、状态机 +
+重开计数、来源（执行失败/手工/生产回流）、看板 4
+指标（缺陷密度/重开率/MTTR 等）同源。</li>
+<li><strong>任务与迭代</strong>：任务挂需求、完成率回写父需求；迭代挂
+Release，看板拖动持久化，未迁移任务禁止关迭代（409）。</li>
+<li><strong>追溯矩阵</strong>：需求 → 任务 → MR → 测试执行 → 缺陷 →
+发布单 六环互跳，缺口实时计算（不假绿）、可筛选。</li>
+<li><strong>工时</strong>：0.5h 粒度填报、周填报、月度锁定；实际人天 =
+工时 ÷ 8，与手填二选一。</li>
+<li>接口：<code>/defects</code>、<code>/tasks</code>、<code>/sprints</code>、<code>/trace</code>；页面：缺陷列表/详情/看板、迭代、迭代看板、追溯矩阵。</li>
+</ul>
+<h2 id="7-测试管理r2-用例库与执行--m6-补全">7. 测试管理（r2 用例库与执行
++ M6 补全）</h2>
+<ul>
+<li><strong>用例库</strong>：模块树 ≤ 3 层、TC
+编号、<strong>用例版本化</strong>（执行记录钉
+<code>case_version</code>），四种执行结果，失败一键转缺陷（带用例/版本/需求/执行记录）。</li>
+<li><strong>测试策略</strong>：版本级策略文档、版本化（M6）。</li>
+<li><strong>测试计划</strong>：草稿→待评审→已批准→执行中→已完成→关闭/归档七态；评审接审批流（第五类单据）、变更留痕
+<code>plan_change_log</code>；结构化准出条件（未满足 409 带
+<code>unmet[{key,actual,expected,fixHint}]</code>）。</li>
+<li><strong>测试轮次</strong>：R1 新功能 / R2 回归 / R3
+缺陷验证，历史不可覆盖，关轮未执行 409。</li>
+<li><strong>执行分配与环境台账</strong>：执行人 × 模块 × 用例数（差额
+400）、环境字典（DEV/TEST/STAGING/PROD）。</li>
+<li><strong>自动化上报</strong>：开放 API
+<code>POST /v1/test-executions</code>（AppKey + HMAC + 时间戳 + IP +
+scope），run_id+case_id 幂等，未知用例/版本 422
+不落库；不自建执行器。</li>
+<li>接口：<code>/test-cases</code>、<code>/test-modules</code>、<code>/test-plans</code>、<code>/v1/test-executions</code>；页面：用例库、计划列表/详情/执行。</li>
+</ul>
+<h2 id="8-质量保证闭环m6deliver-servicequality">8.
+质量保证闭环（M6，<code>deliver-service/.../quality/*</code>）</h2>
+<ul>
+<li><strong>测试报告</strong>：8 段结构自动生成、版本化不可变、XLSX(8
+sheet)/PDF 带水印导出、三级会签（测试负责人→产品→PMO），驳回整份作废出
+v(N+1)。</li>
+<li><strong>版本质量门</strong>：规则集（报告 PASS 且 7
+天内、CONDITIONAL 需豁免、通过率 ≥95%/严格 100%、未关闭
+P0/P1=0），提交前实时计算并固化 <code>quality_gate_snapshot</code>，409
+列失败项 + 修复指引，直连旁路同拒（fail-closed）。</li>
+<li><strong>豁免</strong>：规则级豁免（原因/影响/有效期 1–30
+天），QG-04（P0/P1）硬红线不可豁免，到期自动失效。</li>
+<li><strong>生产回流</strong>：<code>defect.source=PROD</code>、72h
+观察窗逃逸判定（INSERT
+一次判定，窗口变更不改史），回写版本质量统计。</li>
+<li><strong>指标</strong>：FPY（R1
+通过数/已执行数）、回归通过率、缺陷逃逸率、发布后 72h
+缺陷数、回滚率，统一走 <code>MetricFormulas</code>。</li>
+<li><strong>Go/No-Go 评审</strong>：评审记录 + NO-GO 需 PMO
+二次确认（409 <code>NO_GO_CONFIRM_REQUIRED</code>）。</li>
+<li>页面：质量门列表/详情、测试报告列表/详情、测试策略、环境台账、质量指标、Go/No-Go（8
+页）。</li>
+</ul>
+<h2 id="9-度量看板与报表r2--m6">9. 度量、看板与报表（r2 + M6）</h2>
+<ul>
+<li><strong>指标字典</strong>：定义/公式/负责人/版本/生效日；公式单点
+<code>MetricFormulas</code>（查询层只取计数）。</li>
+<li><strong>多视角看板</strong>：需求（类型/状态/域/厂商/企业）、周期（提报→入池→交付，含
+P90）、人天三列（预估/实际/偏差）、厂商排名（准时交付率 +
+承接量）。</li>
+<li><strong>岗位工作台</strong>：待办中心 + 快捷动作 + 数据卡片 +
+我的列表 + 消息，按角色预置模板。</li>
+<li><strong>自助报表</strong>：4 数据集（需求/交付/审批效率/质量）+
+维度度量白名单，拖拽行/列/值/筛选出交叉表→图表，保存/共享/设为工作台卡片，导出
+CSV/XLSX（默认私有，共享需手动）。</li>
+<li>页面：报表、价值流、工作台、指标管理。</li>
+</ul>
+<h2 id="10-通知与平台化r2">10. 通知与平台化（r2）</h2>
+<ul>
+<li><strong>通知</strong>：站内 + SMTP
+邮件（审批待办/超时、发布结果、缺陷指派/重开、周报）+ 出站
+Webhook（订阅/投递日志/签名）。</li>
+<li><strong>开放 API</strong>：<code>api_client</code>（AppKey/HMAC/重试
+5 次/调用日志/限流）；<strong>字段级脱敏</strong>
+<code>field_visibility</code> 四出口统一。</li>
+<li><strong>系统管理</strong>：用户/组织/域/厂商/租户/权限/指标字典/集成配置（M7）/审计。</li>
+<li>页面：管理后台 10 页 + 通知中心。</li>
+</ul>
+<h2 id="11-数据模型与工程质量">11. 数据模型与工程质量</h2>
+<ul>
+<li><strong>迁移</strong>：<code>V1__platform_schema.sql</code>（39
+表）→ <code>V2</code> 列类型/<code>V3</code> 角色目录/<code>V4</code>
+追溯索引/<code>V5__quality_management.sql</code>（14 表 + 5 表增列 + 5
+指标）/<code>V6</code> 状态宽度/<code>V7</code> 环境字典。</li>
+<li><strong>架构单点</strong>（每条只有一份实现，验收时逐项核对）：<code>StateTables</code>、<code>ScopeSql</code>、<code>PermissionMatrix/RouteTable</code>、<code>MetricFormulas</code>、<code>GateEvaluator</code>、<code>QualityAggregator</code>、<code>AuditService</code>、<code>JwtCodec</code>、<code>HmacSigner</code>。</li>
+<li><strong>测试套件</strong>：<code>make verify</code> 14 ·
+<code>platform-verify</code> 167 · <code>platform-test-negative</code>
+25 · <code>platform-unit</code> 140 · <code>quality-verify</code> 347 ·
+<code>lint</code> 16 · <code>web typecheck/build</code> 0
+error；<code>platform-perf</code> 6 项（列表 P95 0.216s、准入
+0.019s、上报 20 并发 p95 0.020s）。</li>
+</ul>
+<h2 id="12-进行中--明确不做">12. 进行中 / 明确不做</h2>
+<ul>
+<li><strong>进行中（M7，r5）</strong>：Jenkins 构建、GitLab MR 与
+webhook、Sonar 质量门禁、Nexus 制品检索与晋级；带来准入 9
+项、<code>integration_config</code>/<code>integration_sync_log</code>/<code>build_record</code>/<code>mr_sync</code>/<code>artifact_record</code>
+等表与 3
+个管理页；本地桩验收（<code>make integration-verify</code>）。</li>
+<li><strong>明确不做（本期非目标）</strong>：CPack/CCode/CAgent/CTest/CWiki/CTeam/CMeas/CCI/CFlow
+其余九平台、CPack 制品平台本体、自建 CI 执行器、移动端、AI
+辅助、表单自定义引擎、金额折算、多级会签、SSO、多语言、ES、甘特 FS/SS
+依赖。</li>
+<li><strong>遗留
+P3（不阻塞）</strong>：<code>PlanLifecycleService.java:165</code>
+状态字面量收敛、<code>QualityGateService</code> 规则证据 upsert
+需补文档、q4 脚本过时注释、横幅样式与键盘可达性人工补测。</li>
+</ul>
+</div>
+</body>
+</html>

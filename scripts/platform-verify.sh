@@ -341,7 +341,7 @@ section "AC-5 权限矩阵：接口生成探测矩阵，逐格断言 2xx/403"
 api_call GET /api/req/admin/permissions
 expect "GET /admin/permissions 200" 200
 FN_COUNT="$(jlen "$HTTP_BODY" '.functions')"
-expect_num "权限矩阵暴露 41 个函数码" "${FN_COUNT:-0}" eq 41 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码）"
+expect_num "权限矩阵暴露 42 个函数码" "${FN_COUNT:-0}" eq 42 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码 + 1 M7 integration:manage）"
 ROLE_COUNT="$(jlen "$HTTP_BODY" '.roles')"
 expect_num "权限矩阵暴露 10 个角色" "${ROLE_COUNT:-0}" eq 10 "建租户预置的 10 角色"
 ROLE_CODES="$(db_q "SELECT GROUP_CONCAT(DISTINCT code ORDER BY code) FROM sys_role WHERE tenant_id=$(tenant_id)")"

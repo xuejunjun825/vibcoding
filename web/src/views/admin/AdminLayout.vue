@@ -25,6 +25,7 @@ const items: AdminNavItem[] = [
   { to: '/admin/permissions', label: '权限矩阵', hint: '10 角色 × 功能码，只读可断言' },
   { to: '/admin/workflows', label: '流程定义', codes: ['workflow:manage'], hint: '审批节点图、发布校验与版本固化' },
   { to: '/admin/api-clients', label: 'API 客户端', codes: ['apiclient:manage'], hint: '开放 API 的 AppKey、scopes、限流与 IP 白名单' },
+  { to: '/admin/integrations', label: '集成配置', codes: ['integration:manage'], hint: 'Jenkins · GitLab · Sonar · Nexus 四槽接线与同步日志' },
   { to: '/admin/metrics', label: '指标字典', codes: ['metric:manage'], hint: '指标编码、公式与生效版本' },
   { to: '/admin/audit', label: '审计日志', codes: ['audit:view'], hint: '越权、强制放行与关键写操作留痕' },
 ]

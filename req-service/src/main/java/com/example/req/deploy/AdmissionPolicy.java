@@ -3,8 +3,13 @@ package com.example.req.deploy;
 import com.example.platform.contract.GateBlocker;
 import com.example.platform.contract.GateDecision;
 import com.example.platform.contract.quality.GateSnapshot;
+import com.example.req.integration.admission.AdmissionItemPolicy;
+import com.example.req.integration.admission.AdmissionViews;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,10 +18,13 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * 准入的纯判定：输入是"已经取到的数据"，输出是固定顺序的清单（M6 起为六项）。
+ * 准入的纯判定：输入是"已经取到的数据"，输出是固定顺序的九项清单（M7 起）。
  *
  * <p>刻意不查询数据库、不调 HTTP——取数在 {@link AdmissionEvaluator}，
- * 这样六项规则可以逐条单测（含反面：服务不可用时必须 FAIL 而不是放行）。</p>
+ * 九项规则因此可以逐条单测（含反面：服务不可用时必须 FAIL 而不是放行）。</p>
+ *
+ * <p>四态（PRD AC-8.2）：PASS 通过 / FAIL 阻断 / SKIP 跳过（永不计数为通过，提交需等值确认）/
+ * CLOSED 关闭（项开关关闭或集成未启用，不阻断、不计入分母）。</p>
  */
 public final class AdmissionPolicy {
 
@@ -33,6 +41,15 @@ public final class AdmissionPolicy {
 
     public static final String FIX_GATE_UNAVAILABLE =
             "质量门服务不可用，请稍后重试；持续失败请联系运维检查 deliver-service";
+
+    public static final String FIX_BUILD =
+            "在发布单详情触发构建，或修复失败原因后重新构建；2 小时未结束的构建会被判超时";
+
+    public static final String FIX_SONAR =
+            "在需求详情补填 Sonar projectKey（或版本默认 key），修复未达标指标后刷新 Sonar 快照";
+
+    public static final String FIX_ARTIFACT =
+            "在发布单绑定制品（Nexus 检索或手工登记），确保 sha256 与源端一致并完成校验";
 
     public AdmissionPolicy() {
     }
@@ -66,26 +83,43 @@ public final class AdmissionPolicy {
      * @param gates            需求→门禁结论；{@code null} 表示门禁服务不可用（必须 FAIL）
      * @param openHighDefects  需求→未关闭 P0/P1 数；{@code null} 表示缺陷服务不可用（必须 FAIL）
      * @param gate             第 6 项质量门证据；{@code null} 表示 deliver 未在预算内应答（必须 FAIL）
+     * @param closedCodes      被管理员关闭的准入项（不含锁定项）；这些项输出 CLOSED 且不参与分母
+     * @param build            ⑦ 构建证据（本地读）；{@code null} 表示读取失败（必须 FAIL）
+     * @param sonar            ⑧ Sonar 证据（本地读）
+     * @param artifact         ⑨ 制品证据（本地读）
      */
     public record Inputs(List<ReqFact> requirements, Map<Long, GateDecision> gates,
-                         Map<Long, Integer> openHighDefects, DeployViews.GateEvidence gate) {
+                         Map<Long, Integer> openHighDefects, DeployViews.GateEvidence gate,
+                         Set<String> closedCodes, AdmissionViews.Evidence build,
+                         AdmissionViews.Evidence sonar, AdmissionViews.Evidence artifact) {
 
-        /** 五行版构造：无质量门证据（单测与历史调用点用），等价于第 6 项 GATE_UNAVAILABLE。 */
+        /** 四项版构造：M6 的调用点（无集成证据 ⇒ ⑦⑧⑨ 一律 FAIL，fail-closed）。 */
+        public Inputs(List<ReqFact> requirements, Map<Long, GateDecision> gates,
+                      Map<Long, Integer> openHighDefects, DeployViews.GateEvidence gate) {
+            this(requirements, gates, openHighDefects, gate, Set.of(), null, null, null);
+        }
+
+        /** 三项版构造：单测与 M6 之前的历史调用点。 */
         public Inputs(List<ReqFact> requirements, Map<Long, GateDecision> gates,
                       Map<Long, Integer> openHighDefects) {
-            this(requirements, gates, openHighDefects, null);
+            this(requirements, gates, openHighDefects, null, Set.of(), null, null, null);
         }
     }
 
+    /** 九项固定顺序（PRD AC-8.1）：①②③ 需求/审批，④⑤ 资料，⑥ 质量门，⑦⑧⑨ 集成。 */
     public List<AdmissionItem> evaluate(Inputs inputs) {
         List<ReqFact> requirements = inputs.requirements() == null ? List.of() : inputs.requirements();
-        List<AdmissionItem> items = new ArrayList<>(6);
-        items.add(testPassed(requirements, inputs.gates()));
-        items.add(noOpenHighDefect(requirements, inputs.openHighDefects()));
-        items.add(mrFilled(requirements));
-        items.add(manDaysFilled(requirements));
-        items.add(approvalsDone(requirements));
-        items.add(qualityGate(inputs.gate()));
+        Set<String> closed = inputs.closedCodes() == null ? Set.of() : inputs.closedCodes();
+        List<AdmissionItem> items = new ArrayList<>(9);
+        items.add(switched(testPassed(requirements, inputs.gates()), closed));
+        items.add(switched(noOpenHighDefect(requirements, inputs.openHighDefects()), closed));
+        items.add(switched(approvalsDone(requirements), closed));
+        items.add(switched(mrFilled(requirements), closed));
+        items.add(switched(manDaysFilled(requirements), closed));
+        items.add(switched(qualityGate(inputs.gate()), closed));
+        items.add(integration(AdmissionItem.BUILD_PASSED, inputs.build(), closed, FIX_BUILD));
+        items.add(integration(AdmissionItem.SONAR_GATE_PASSED, inputs.sonar(), closed, FIX_SONAR));
+        items.add(integration(AdmissionItem.ARTIFACT_VERIFIED, inputs.artifact(), closed, FIX_ARTIFACT));
         return items;
     }
 
@@ -162,44 +196,6 @@ public final class AdmissionPolicy {
 
     // ------------------------------------------------------------------ 3
 
-    private AdmissionItem mrFilled(List<ReqFact> requirements) {
-        String code = AdmissionItem.MR_FILLED;
-        String name = AdmissionItem.nameOf(code);
-        List<String> missing = requirements.stream()
-                .filter(req -> !req.mrFilled())
-                .map(ReqFact::code)
-                .toList();
-        if (requirements.isEmpty()) {
-            return AdmissionItem.fail(code, name, "发布单未关联任何研发需求", "先关联研发需求");
-        }
-        if (missing.isEmpty()) {
-            return AdmissionItem.pass(code, name, requirements.size() + " 条研发需求的 MR 链接均已填写");
-        }
-        return AdmissionItem.fail(code, name, "未填 MR：" + join(missing),
-                "在研发需求详情补填代码合并请求（MR）链接");
-    }
-
-    // ------------------------------------------------------------------ 4
-
-    private AdmissionItem manDaysFilled(List<ReqFact> requirements) {
-        String code = AdmissionItem.MAN_DAYS_FILLED;
-        String name = AdmissionItem.nameOf(code);
-        List<String> missing = requirements.stream()
-                .filter(req -> !req.manDaysFilled())
-                .map(req -> req.code() + "（预估=" + plain(req.estimateDays()) + "，实际=" + plain(req.actualDays()) + "）")
-                .toList();
-        if (requirements.isEmpty()) {
-            return AdmissionItem.fail(code, name, "发布单未关联任何研发需求", "先关联研发需求");
-        }
-        if (missing.isEmpty()) {
-            return AdmissionItem.pass(code, name, requirements.size() + " 条研发需求的预估/实际人天均已填写");
-        }
-        return AdmissionItem.fail(code, name, "人天缺失或为 0：" + join(missing),
-                "在研发需求详情补填预估人天与实际人天（都必须大于 0）");
-    }
-
-    // ------------------------------------------------------------------ 5
-
     private AdmissionItem approvalsDone(List<ReqFact> requirements) {
         String code = AdmissionItem.REQ_APPROVALS_DONE;
         String name = AdmissionItem.nameOf(code);
@@ -217,6 +213,44 @@ public final class AdmissionPolicy {
         }
         return AdmissionItem.fail(code, name, "审批未通过：" + join(blocking),
                 "完成需求的评审入池审批与需求发布审批（审批中心可见在途单）");
+    }
+
+    // ------------------------------------------------------------------ 4
+
+    private AdmissionItem mrFilled(List<ReqFact> requirements) {
+        String code = AdmissionItem.MR_FILLED;
+        String name = AdmissionItem.nameOf(code);
+        List<String> missing = requirements.stream()
+                .filter(req -> !req.mrFilled())
+                .map(ReqFact::code)
+                .toList();
+        if (requirements.isEmpty()) {
+            return AdmissionItem.fail(code, name, "发布单未关联任何研发需求", "先关联研发需求");
+        }
+        if (missing.isEmpty()) {
+            return AdmissionItem.pass(code, name, requirements.size() + " 条研发需求的 MR 链接均已填写");
+        }
+        return AdmissionItem.fail(code, name, "未填 MR：" + join(missing),
+                "在研发需求详情补填代码合并请求（MR）链接");
+    }
+
+    // ------------------------------------------------------------------ 5
+
+    private AdmissionItem manDaysFilled(List<ReqFact> requirements) {
+        String code = AdmissionItem.MAN_DAYS_FILLED;
+        String name = AdmissionItem.nameOf(code);
+        List<String> missing = requirements.stream()
+                .filter(req -> !req.manDaysFilled())
+                .map(req -> req.code() + "（预估=" + plain(req.estimateDays()) + "，实际=" + plain(req.actualDays()) + "）")
+                .toList();
+        if (requirements.isEmpty()) {
+            return AdmissionItem.fail(code, name, "发布单未关联任何研发需求", "先关联研发需求");
+        }
+        if (missing.isEmpty()) {
+            return AdmissionItem.pass(code, name, requirements.size() + " 条研发需求的预估/实际人天均已填写");
+        }
+        return AdmissionItem.fail(code, name, "人天缺失或为 0：" + join(missing),
+                "在研发需求详情补填预估人天与实际人天（都必须大于 0）");
     }
 
     // ------------------------------------------------------------------ 6
@@ -257,25 +291,71 @@ public final class AdmissionPolicy {
                 fixHint);
     }
 
+    // ------------------------------------------------------------ 7 / 8 / 9
+
+    /** 项开关关闭 ⇒ CLOSED（不阻断、不计分母）；证据缺失 ⇒ FAIL（fail-closed）。 */
+    private static AdmissionItem switched(AdmissionItem item, Set<String> closed) {
+        if (closed.contains(item.code()) && !AdmissionItemPolicy.locked(item.code())) {
+            return AdmissionItem.closed(item.code(), item.name(),
+                    "该项已被管理员关闭，不参与本次准入判定（关闭原因：ITEM_OFF）", AdmissionViews.ITEM_OFF);
+        }
+        return item;
+    }
+
+    private static AdmissionItem integration(String code, AdmissionViews.Evidence evidence, Set<String> closed,
+                                             String fixHint) {
+        if (closed.contains(code)) {
+            return AdmissionItem.closed(code, AdmissionItem.nameOf(code),
+                    "该项已被管理员关闭，不参与本次准入判定（关闭原因：ITEM_OFF）", AdmissionViews.ITEM_OFF);
+        }
+        if (evidence == null) {
+            return AdmissionItem.fail(code, AdmissionItem.nameOf(code),
+                    "证据读取失败（EVIDENCE_UNAVAILABLE）：本次不放行", fixHint);
+        }
+        return AdmissionItem.of(code, evidence, fixHint);
+    }
+
     // ------------------------------------------------------------------ 工具
 
     /**
-     * 快照指纹：需求集合或任何参与判定的字段变了，旧快照即失效（详情页显示"需重新校验"）。
-     * 这是"先渲染旧结论再被 409 打回"的反面防线。
+     * 快照指纹（M7 起 v9）：需求事实 + 质量门 hash + ⑦⑧⑨ 证据 hash + 关闭项集合，
+     * 任何一处变化都会让旧快照变 stale（页面提示"重新校验"），而不是拿上一轮结论当现行结论。
      */
     public static String signature(List<ReqFact> requirements) {
         return signature(requirements, null);
     }
 
-    /**
-     * 六项版指纹：把第 6 项质量门的 {@code result_digest} 一并算进去，并加 {@code v6} 前缀。
-     *
-     * <p>M6 之前落库的 5 项指纹没有前缀，必然与新版不等 ⇒ 旧单永远被判 stale+legacy，
-     * 不会被误当成"当前结论"（否则新加的第 6 项会被旧快照掩盖）。</p>
-     */
     public static String signature(List<ReqFact> requirements, String gateHash) {
+        return signature(requirements, gateHash, null);
+    }
+
+    public static String signature(List<ReqFact> requirements, String gateHash, String integrationDigest) {
+        return "v9|" + blankTo(gateHash, "none") + "|" + blankTo(integrationDigest, "none") + "|"
+                + factsDigest(requirements);
+    }
+
+    /** 需求事实的摘要：详情页判断 {@code stale} 只比这一段（不重新取集成证据）。 */
+    public static String factsDigest(List<ReqFact> requirements) {
         String base = requirements == null || requirements.isEmpty() ? "empty" : factsSignature(requirements);
-        return "v6|" + (gateHash == null || gateHash.isBlank() ? "none" : gateHash) + "|" + base;
+        return sha256(base);
+    }
+
+    /** ⑦⑧⑨ 的证据摘要：只由这三项自己的 status/证据 hash 与关闭项集合决定。 */
+    public static String integrationDigest(List<AdmissionItem> items, Set<String> closedCodes) {
+        StringBuilder builder = new StringBuilder();
+        if (closedCodes != null) {
+            new TreeSet<>(closedCodes).forEach(code -> builder.append("off:").append(code).append(';'));
+        }
+        if (items != null) {
+            for (AdmissionItem item : items) {
+                if (!AdmissionItemPolicy.integrationItem(item.code())) {
+                    continue;
+                }
+                builder.append(item.code()).append(':').append(nvl(item.status())).append(':')
+                        .append(blankTo(item.evidenceHash(), "none")).append(';');
+            }
+        }
+        return sha256(builder.toString());
     }
 
     private static String factsSignature(List<ReqFact> requirements) {
@@ -311,13 +391,14 @@ public final class AdmissionPolicy {
         return index < 0 ? AdmissionItem.ORDER.size() : index;
     }
 
+    /** 阻断码：只有 FAIL 才算失败；SKIP/CLOSED 不计（PRD AC-8.3 / AC-8.5）。 */
     public static List<String> failedCodes(List<AdmissionItem> items) {
         if (items == null) {
             return List.of();
         }
         List<String> codes = new ArrayList<>();
         for (AdmissionItem item : items) {
-            if (!item.passed()) {
+            if (AdmissionItem.FAIL.equals(item.status())) {
                 codes.add(item.code());
             }
         }
@@ -328,9 +409,13 @@ public final class AdmissionPolicy {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("code", item.code());
         map.put("name", item.name());
+        map.put("order", item.order());
+        map.put("status", item.status());
         map.put("passed", item.passed());
         map.put("detail", item.detail());
         map.put("fixHint", item.fixHint());
+        map.put("reasonCode", item.reasonCode());
+        map.put("evidence", item.evidence());
         map.put("forced", item.forced());
         return map;
     }
@@ -344,6 +429,24 @@ public final class AdmissionPolicy {
             return String.join("、", new TreeSet<>(values));
         }
         return String.join("、", new TreeSet<>(values).stream().limit(limit).toList()) + " 等 " + values.size() + " 条";
+    }
+
+    private static String sha256(String text) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                builder.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 不可用", ex);
+        }
+    }
+
+    private static String blankTo(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private static String nvl(String value) {
