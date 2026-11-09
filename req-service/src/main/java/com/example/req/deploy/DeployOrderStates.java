@@ -58,7 +58,10 @@ public final class DeployOrderStates {
 
     public static List<String> allowedActions(String status) {
         if (canSubmit(status)) {
-            return List.of(ACTION_SUBMIT, ACTION_FORCE_RELEASE);
+            // AC-12: force-release is retired — the route stays (410/409 FORCE_RELEASE_RETIRED)
+            // but it must never be advertised as an available action. Single source of truth:
+            // the service no longer filters it out a second time.
+            return List.of(ACTION_SUBMIT);
         }
         if (canRecordExecution(status)) {
             return List.of(ACTION_EXECUTION);

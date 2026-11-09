@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# platform-perf.sh — AC-20 六项性能基线：p50/p95 + EXPLAIN + 阈值断言。
+# platform-perf.sh — AC-20 性能基线：p50/p95 + EXPLAIN + 阈值断言（r2 六项 + M6 质量四项）。
 # 数据规模由 /internal/seed?scale=N 造（10 万需求、1000 行用例导入）。
 # 结论写到 logs/teamflow/<runId>/perf-baseline.md，原始命令输出不落盘（宿主已截尾）。
 set -uo pipefail
@@ -176,17 +176,102 @@ else
     fail "批量导入失败 (HTTP ${HTTP_CODE})" "检查 /testcases/import 的载荷格式与事务边界"
 fi
 
+# ---------------------------------------------------------------- 7
+section "7) 质量门评估 P95 ≤ 500ms（5 条规则 + 报告 digest 比对）"
+PERF_REL="$(db_q "SELECT id FROM \`release\` WHERE tenant_id=(SELECT id FROM sys_tenant WHERE code='t1') ORDER BY id DESC LIMIT 1")"
+PERF_DEP=""
+if [[ -n "$PERF_REL" ]]; then
+    PERF_REQ="$(db_q "SELECT requirement_id FROM release_requirement WHERE release_id=${PERF_REL} LIMIT 1")"
+    [[ -n "$PERF_REQ" ]] || PERF_REQ="$(db_q "SELECT id FROM requirement WHERE tenant_id=(SELECT id FROM sys_tenant WHERE code='t1') LIMIT 1")"
+    api_call POST /api/req/deploy-orders "$(jq -cn --argjson r "$PERF_REL" --argjson q "${PERF_REQ:-1}" '{
+        releaseId:$r,env:"PROD",windowStart:"2026-12-20T10:00:00+08:00",
+        windowEnd:"2026-12-20T12:00:00+08:00",artifactVersion:"perf",
+        steps:[{name:"发布",order:1}],rollbackPlan:"回滚",impact:"无",ownerId:1,
+        requirementIds:[$q]}')"
+    PERF_DEP="$(jget_ "$HTTP_BODY" '.id')"
+fi
+if [[ -n "$PERF_DEP" && "$PERF_DEP" != "null" ]]; then
+    timed "qgate" 10 "${GATEWAY_URL}/api/deliver/quality-gates/${PERF_REL}/evaluate" \
+        -X POST -H 'Content-Type: application/json' \
+        -d "$(jq -cn --argjson d "$PERF_DEP" '{deployOrderId:$d,requirementIds:[]}')" "${AUTH[@]}"
+    assert_metric "qgate" 0.5 "质量门 5 规则求值（页面预评估）" "GateEvaluator 单次聚合 + digest 只算一次；禁止 N+1 查询用例"
+else
+    warn "无法创建发布单，跳过质量门性能基线"
+fi
+
+# ---------------------------------------------------------------- 8
+section "8) 报告生成 ≤ 5s（5000 用例 RELEASE 报告）"
+PERF_PLAN=""
+PERF_RPT=""
+if [[ -n "$PERF_REL" ]]; then
+    PERF_CASE_IDS="$(db_q "SELECT id FROM test_case WHERE tenant_id=(SELECT id FROM sys_tenant WHERE code='t1') AND deleted_at IS NULL ORDER BY id LIMIT 5000")"
+    PERF_CASE_COUNT="$(printf '%s\n' "$PERF_CASE_IDS" | grep -c . || true)"
+    if [[ "${PERF_CASE_COUNT:-0}" -ge 1000 ]]; then
+        api_call POST /api/deliver/test-plans "$(jq -cn --argjson r "$PERF_REL" --arg n "perf-报告计划-${RUN_TAG}" \
+            --argjson ids "$(printf '%s\n' "$PERF_CASE_IDS" | jq -s .)" \
+            '{releaseId:$r,name:$n,ownerId:1,windowStart:"2026-12-15",windowEnd:"2026-12-25",caseIds:$ids,gateMode:"STRICT"}')"
+        PERF_PLAN="$(jget_ "$HTTP_BODY" '.plan.id // .id')"
+    fi
+    if [[ -n "$PERF_PLAN" && "$PERF_PLAN" != "null" ]]; then
+        api_call POST "/api/deliver/test-plans/${PERF_PLAN}/submit-review" '{}'
+        api_call POST "/api/deliver/test-plans/${PERF_PLAN}/approve" '{"comment":"perf"}'
+        api_call POST "/api/deliver/test-plans/${PERF_PLAN}/start" '{}'
+        PERF_ROUND="$(db_q "SELECT id FROM test_plan_round WHERE plan_id=${PERF_PLAN} AND active=1")"
+        # 5000 条执行走 SQL 批量造（HTTP 逐条会让基线变成客户端循环耗时，测不到报告生成）
+        # 表上没有 created_at/updated_at，且 source 是 NOT NULL（MANUAL 走 ck_exec_auto 的人工分支）。
+        db_q "INSERT INTO test_execution (tenant_id, plan_id, round_id, case_id, case_version, requirement_id, source, result, executor_id, executed_at)
+              SELECT pc.tenant_id, pc.plan_id, ${PERF_ROUND:-NULL}, pc.case_id, pc.case_version, pc.requirement_id, 'MANUAL', 'PASS', 1, NOW(3)
+              FROM test_plan_case pc WHERE pc.plan_id=${PERF_PLAN}" >/dev/null
+        PERF_EXEC_N="$(db_q "SELECT COUNT(*) FROM test_execution WHERE plan_id=${PERF_PLAN}")"
+        if [[ "${PERF_EXEC_N:-0}" -lt 1 ]]; then
+            err "报告基线造数失败：test_execution 0 行（plan=${PERF_PLAN}），不得静默跳过"
+            exit 1
+        fi
+        db_q "UPDATE test_plan_case SET result='PASS', last_executed_at=NOW(3) WHERE plan_id=${PERF_PLAN}" >/dev/null
+        db_q "UPDATE test_plan_round SET exec_total=(SELECT COUNT(*) FROM test_plan_case WHERE plan_id=${PERF_PLAN}),
+                     exec_passed=(SELECT COUNT(*) FROM test_plan_case WHERE plan_id=${PERF_PLAN} AND result='PASS'),
+                     exec_failed=0, exec_blocked=0 WHERE id=${PERF_ROUND:-0}" >/dev/null
+        api_call POST "/api/deliver/test-plans/${PERF_PLAN}/rounds/${PERF_ROUND:-0}/close" '{"conclusion":"PASS"}'
+        T_RPT="$(curl -sS --max-time 60 -o "$TMP/report.json" -w '%{time_total}' \
+            -X POST "${GATEWAY_URL}/api/deliver/test-reports" \
+            -H 'Content-Type: application/json' -H "Authorization: Bearer ${API_TOKEN}" -H "X-Tenant-Id: ${API_TENANT}" \
+            -d "$(jq -cn --argjson r "$PERF_REL" '{scope:"RELEASE",releaseId:$r,note:"perf"}')" 2>/dev/null)"
+        printf '%s\n' "${T_RPT:-0}" >"$TMP/report.times"
+        PERF_RPT="$(jq -r '.id // empty' "$TMP/report.json" 2>/dev/null)"
+        if [[ -z "$PERF_RPT" ]]; then
+            err "报告生成失败（HTTP 响应见 ${TMP}/report.json），不得把失败当作性能达标"
+            exit 1
+        fi
+        assert_metric "report" 5 "报告生成 ${PERF_CASE_COUNT} 用例（8 段快照 + digest）" "一次聚合查询 + 单条 INSERT；禁止逐用例查询"
+    else
+        warn "无法创建 5000 用例计划，跳过报告生成基线"
+    fi
+else
+    warn "没有版本数据，跳过报告生成基线"
+fi
+
+# ---------------------------------------------------------------- 9
+section "9) 报告导出 XLSX ≤ 10s / PDF ≤ 15s"
+if [[ -n "$PERF_RPT" && "$PERF_RPT" != "null" ]]; then
+    timed "xlsx" 3 "${GATEWAY_URL}/api/deliver/test-reports/${PERF_RPT}/export?format=xlsx&version=1" "${AUTH[@]}"
+    assert_metric "xlsx" 10 "报告导出 XLSX（5000 用例）" "SXSSF 流式写 + 明细按需分页；不要一次性 load 全表"
+    timed "pdf" 3 "${GATEWAY_URL}/api/deliver/test-reports/${PERF_RPT}/export?format=pdf&version=1" "${AUTH[@]}"
+    assert_metric "pdf" 15 "报告导出 PDF（5000 用例）" "OpenPDF 直写 byte[]；中文字体用 CID 非嵌入"
+else
+    warn "没有可用报告，跳过导出基线"
+fi
+
 # ---------------------------------------------------------------- 报告
 {
     printf '# 性能基线（AC-20）\n\n'
     printf -- '- 时间：%s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf -- '- 规模：需求 %s 条；数据由 `/internal/seed?scale=%s` 生成\n' "$(db_count requirement "tenant_id=(SELECT id FROM sys_tenant WHERE code='t1')")" "$SCALE_REQS"
-    printf -- '- 采样：列表类 20 次、看板/准入/矩阵 10 次、上报 20 并发、导入 1 次\n\n'
+    printf -- '- 采样：列表类 20 次、看板/准入/矩阵 10 次、上报 20 并发、导入 1 次、质量门 10 次、报告/导出 1–3 次\n\n'
     printf '| 场景 | p50(s) | p95(s) | max(s) | 阈值(s) |\n| --- | --- | --- | --- | --- |\n'
     grep -h '^RESULT|' "$TMP/results.txt" 2>/dev/null | awk -F'|' '{printf "| %s | %s | %s | %s | %s |\n", $2, $3, $4, $5, $6}'
     printf '\n## EXPLAIN\n\n```\n'
     grep -h '^EXPLAIN|' "$TMP/results.txt" 2>/dev/null | sed 's/^EXPLAIN|[^|]*|//'
-    printf '```\n\n结论：%s\n' "$([[ "$FAIL" == "0" ]] && echo '六项全部达标' || echo "有 ${FAIL} 项超阈值，见上表")"
+    printf '```\n\n结论：%s\n' "$([[ "$FAIL" == "0" ]] && echo '全部达标' || echo "有 ${FAIL} 项超阈值，见上表")"
 } >"$REPORT"
 ok "基线报告: ${REPORT}"
 

@@ -1,6 +1,9 @@
 package com.example.req.deploy;
 
+import com.example.platform.contract.quality.GateSnapshot;
+
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -32,8 +35,62 @@ public final class DeployViews {
                             Long defectId, Integer durationMinutes) {
     }
 
-    /** 准入快照对外形态；{@code stale=true} 表示需求集合/状态已变，页面必须提示重新校验。 */
-    public record AdmissionSnapshot(List<AdmissionItem> items, LocalDateTime checkedAt, boolean stale) {
+    /**
+     * 质量门证据：判定当时那一份不可变快照的定位信息 + 规则明细。
+     *
+     * <p>只读副本，不再回查 deliver——回查会让详情页随新数据漂移（AC-7 回放针对的是快照本身）。
+     * {@code gateId}/{@code reportId} 由 deliver 内部端点可选出参，缺失时为 {@code null}（不影响判定）。</p>
+     */
+    public record GateEvidence(Long snapshotId, Long gateId, Long reportId, String result, String hash,
+                               Instant computedAt, List<GateSnapshot.GateRuleResult> rules) {
+
+        public static GateEvidence of(GateSnapshot snapshot, Long gateId, Long reportId) {
+            if (snapshot == null) {
+                return null;
+            }
+            return new GateEvidence(snapshot.snapshotId(), gateId, reportId, snapshot.result(), snapshot.hash(),
+                    snapshot.computedAt(), snapshot.rules());
+        }
+
+        /** 与 deliver 侧 {@code GateSnapshot#passed()} 同语义：PASS / PASS_WITH_WAIVER 都算通过。 */
+        public boolean passed() {
+            return GateSnapshot.PASS.equals(result) || GateSnapshot.PASS_WITH_WAIVER.equals(result);
+        }
+
+        public List<GateSnapshot.GateRuleResult> failedRules() {
+            if (rules == null || rules.isEmpty()) {
+                return List.of();
+            }
+            return rules.stream().filter(rule -> !rule.passed()).toList();
+        }
+    }
+
+    /**
+     * 准入快照对外形态；{@code stale=true} 表示需求集合/状态已变，页面必须提示重新校验。
+     *
+     * <p>{@code legacy=true} = 没有质量门结论的历史单据：M6 之前生成的五项快照，以及从未评估过
+     * （{@code admission_result_json} 为 NULL、{@code items} 为空）的旧单。页面只展示历史结论，
+     * 不伪造质量门 PASS；{@code gate} 是该次判定的质量门证据（legacy 单据为 {@code null}）。</p>
+     */
+    public record AdmissionSnapshot(List<AdmissionItem> items, LocalDateTime checkedAt, boolean stale,
+                                    String signature, boolean legacy, GateEvidence gate) {
+
+        public AdmissionSnapshot(List<AdmissionItem> items, LocalDateTime checkedAt, boolean stale) {
+            this(items, checkedAt, stale, null, legacyOf(items), null);
+        }
+
+        /**
+         * 六项之外的旧快照：<b>没有第 6 项就是历史结论</b>。
+         *
+         * <p>空集（NULL 快照、从未评估的旧单）同样成立——"还没评估过"与"评估时还没有质量门"
+         * 对读者是同一件事：没有质量门证据，只能按历史单据展示，不得伪造 PASS（R2 / AC-5）。</p>
+         */
+        public static boolean legacyOf(List<AdmissionItem> items) {
+            if (items == null || items.isEmpty()) {
+                return true;
+            }
+            return items.stream().noneMatch(item -> AdmissionItem.QUALITY_GATE.equals(item.code()));
+        }
     }
 
     public record OrderDetail(long id, String code, long releaseId, String releaseName, String env,
@@ -43,7 +100,15 @@ public final class DeployViews {
                               List<String> allowedActions, LocalDateTime createdAt, LocalDateTime updatedAt,
                               List<RequirementRow> requirements, AdmissionSnapshot admission,
                               ForcedRelease forcedReleaseDetail,
-                              Execution execution) {
+                              Execution execution,
+                              Long qualityGateSnapshotId, String gateResult) {
+    }
+
+    /**
+     * 提交参数（TECHNICAL §5.7）。{@code confirmNoGo=true} 表示 PMO 已知悉最新 NO-GO 评审风险、
+     * 二次确认后继续提交；缺省/空体按"未确认"处理，由服务端返回 409 NO_GO_CONFIRM_REQUIRED。
+     */
+    public record SubmitCmd(Boolean confirmNoGo) {
     }
 
     /** 提交结果：正常路径只回状态（审批实例 id 属实现细节，前端不需要）。 */
@@ -62,8 +127,18 @@ public final class DeployViews {
                               long total, long succeeded, long failed, long rolledBack) {
     }
 
-    /** 准入判定结果（带快照指纹，用于判断详情页展示的结论是否已过期）。 */
-    public record AdmissionResult(List<AdmissionItem> items, LocalDateTime checkedAt, String signature) {
+    /**
+     * 准入判定结果（带快照指纹，用于判断详情页展示的结论是否已过期）。
+     *
+     * <p>第 6 项质量门的证据随结果一起落 {@code admission_result_json}，
+     * 提交时据此写 {@code deploy_order.quality_gate*} 三列（AC-5.6）。</p>
+     */
+    public record AdmissionResult(List<AdmissionItem> items, LocalDateTime checkedAt, String signature,
+                                  GateEvidence gate) {
+
+        public AdmissionResult(List<AdmissionItem> items, LocalDateTime checkedAt, String signature) {
+            this(items, checkedAt, signature, null);
+        }
 
         public boolean allPassed() {
             return items != null && !items.isEmpty() && items.stream().allMatch(AdmissionItem::passed);

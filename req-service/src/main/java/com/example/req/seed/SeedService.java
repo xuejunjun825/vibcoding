@@ -104,6 +104,14 @@ public class SeedService {
         c.put("planCases", jdbc.queryForObject(
                 "SELECT COUNT(*) FROM test_plan_case WHERE tenant_id = ?", Long.class, tenantId));
         c.put("metricDefinitions", count("metric_definition", tenantId));
+        // 质量域（M6）：计数只加不改，platform-seed 的既有断言不受影响
+        c.put("testStrategies", count("test_strategy", tenantId));
+        c.put("testEnvs", count("test_env", tenantId));
+        c.put("testRounds", count("test_plan_round", tenantId));
+        c.put("planAssignments", count("plan_assignment", tenantId));
+        c.put("qualityGates", count("quality_gate", tenantId));
+        c.put("qualityGateRules", jdbc.queryForObject(
+                "SELECT COUNT(*) FROM quality_gate_rule WHERE tenant_id = ?", Long.class, tenantId));
         c.put("loginUsers", SeedResult.loginUsers());
         return c;
     }
@@ -335,6 +343,75 @@ public class SeedService {
                         "reopen_count", 1, "found_at", now.minusDays(3), "closed_at", now.minusDays(1),
                         "created_at", now, "updated_at", now));
         log.debug("seed: 打开中的高危缺陷 id={}", defectOpen);
+
+        // 质量域种子（M6 / V5）：SIT 环境 → 版本策略 → 计划挂策略与环境 → R1 轮次 → 分配 → 质量门与 5 条规则。
+        // 全部走 ensure（命中即返回、不覆盖）：老库上 V5 的回填已经建好策略与 R1，命中后保持原值；
+        // 新库上 V5 跑在 seed 之前、那时 plan 还不存在，所以计划挂接与 R1 归集必须在这里再补一次。
+        // 准出/准入条件的字面量必须与 V5__quality_management.sql 的默认值逐字一致（迁移是唯一 owner，这里只是补新库）。
+        long envId = ensure("test_env",
+                row("tenant_id", tenantId, "domain_id", domain1, "name", "SIT 采购测试环境"),
+                row("env_type", "TEST", "base_url", "http://sit.pur.example.com",
+                        "owner_id", users.get("qa1"), "status", "AVAILABLE", "vendor_id", null,
+                        "note", "质量门与执行轮次的默认环境",
+                        "created_by", users.get("admin"), "created_at", now, "updated_at", now));
+        long strategyId = ensure("test_strategy",
+                row("tenant_id", tenantId, "release_id", releaseId, "version_no", 1),
+                row("scope_json", "{\"coverage\":\"FULL\",\"regressionRounds\":2}",
+                        "risk_json", "{\"items\":[{\"risk\":\"批量导入性能\",\"level\":\"HIGH\"}]}",
+                        "env_ids_json", "[" + envId + "]",
+                        "round_plan_json", "{\"rounds\":[{\"no\":1,\"type\":\"FEATURE\"},"
+                                + "{\"no\":2,\"type\":\"REGRESSION\"}]}",
+                        "resource_note", "QA 2 人 + 1 套 SIT", "owner_id", users.get("qa1"),
+                        "status", "ACTIVE", "domain_id", domain1, "vendor_id", null,
+                        "created_by", users.get("admin"), "created_at", now, "updated_at", now));
+        jdbc.update("UPDATE test_plan SET strategy_id = ? WHERE id = ? AND strategy_id IS NULL",
+                strategyId, planId);
+        jdbc.update("UPDATE test_plan SET env_id = ? WHERE id = ? AND env_id IS NULL", envId, planId);
+        jdbc.update("UPDATE test_plan SET exit_criteria_json = ? WHERE id = ? AND exit_criteria_json IS NULL",
+                "{\"items\":[{\"key\":\"passRate\",\"op\":\">=\",\"value\":95},"
+                        + "{\"key\":\"openP0P1\",\"op\":\"==\",\"value\":0},"
+                        + "{\"key\":\"roundClosed\",\"op\":\"==\",\"value\":1}]}", planId);
+        jdbc.update("UPDATE test_plan SET entry_criteria_json = ? WHERE id = ? AND entry_criteria_json IS NULL",
+                "{\"items\":[{\"key\":\"strategyActive\",\"op\":\"==\",\"value\":1}]}", planId);
+
+        Map<String, Object> roundStats = jdbc.queryForMap(
+                "SELECT COUNT(*) AS total, COALESCE(SUM(result = 'PASS'), 0) AS passed,"
+                        + " COALESCE(SUM(result = 'FAIL'), 0) AS failed,"
+                        + " COALESCE(SUM(result = 'BLOCKED'), 0) AS blocked"
+                        + " FROM test_plan_case WHERE tenant_id = ? AND plan_id = ?", tenantId, planId);
+        ensure("test_plan_round",
+                row("tenant_id", tenantId, "plan_id", planId, "round_no", 1),
+                row("round_type", "FEATURE", "name", "R1 功能测试", "status", "CLOSED",
+                        "start_at", now.minusDays(2), "closed_at", now.minusDays(1),
+                        "exec_total", ((Number) roundStats.get("total")).intValue(),
+                        "exec_passed", ((Number) roundStats.get("passed")).intValue(),
+                        "exec_failed", ((Number) roundStats.get("failed")).intValue(),
+                        "exec_blocked", ((Number) roundStats.get("blocked")).intValue(),
+                        "active", null, "note", "种子轮次：存量执行归集",
+                        "created_by", users.get("qa1"), "created_at", now, "updated_at", now));
+        ensure("plan_assignment",
+                row("tenant_id", tenantId, "plan_id", planId, "executor_id", users.get("qa1"),
+                        "module_id", m3),
+                row("round_id", null, "planned_count", 12, "due_date", today.plusDays(5),
+                        "created_by", users.get("qa1"), "created_at", now, "updated_at", now));
+
+        long gateId = ensure("quality_gate",
+                row("tenant_id", tenantId, "release_id", releaseId),
+                row("report_id", null, "status", "NOT_EVALUATED", "ruleset_version", 1,
+                        "domain_id", domain1, "created_by", users.get("pm"),
+                        "created_at", now, "updated_at", now));
+        // 阈值口径见 TECHNICAL.md §4「门禁规则」；QG-04 是硬红线，enabled 恒为 1（禁用由服务端拒绝，种子不提供关闭开关）。
+        String[][] gateRules = {
+                {"QG-01", "1", "{\"coveragePercent\":100,\"requireSignedReport\":true}"},
+                {"QG-02", "1", "{\"maxAgeDays\":7,\"conclusions\":[\"PASS\",\"CONDITIONAL\"]}"},
+                {"QG-03", "1", "{\"minPassRate\":95,\"strictRequiresAll\":true}"},
+                {"QG-04", "1", "{\"maxOpenP0P1\":0}"},
+                {"QG-05", "0", "{\"sources\":[\"SONAR\",\"ARTIFACT\",\"BUILD\"]}"}};
+        for (String[] r : gateRules) {
+            ensure("quality_gate_rule",
+                    row("tenant_id", tenantId, "gate_id", gateId, "rule_code", r[0]),
+                    row("enabled", Integer.parseInt(r[1]), "threshold_json", r[2]));
+        }
 
         // 指标定义（公式与 contract 的 MetricFormulas 同名同口径）
         String[][] metrics = {

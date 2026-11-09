@@ -42,6 +42,12 @@ public class TestPlanEntity {
     @Column(name = "gate_mode", length = 8)
     private String gateMode;
 
+    @Column(name = "strategy_id")
+    private Long strategyId;
+
+    @Column(name = "env_id")
+    private Long envId;
+
     @Column(name = "domain_id")
     private Long domainId;
 
@@ -130,6 +136,24 @@ public class TestPlanEntity {
 
     public void setGateMode(String gateMode) {
         this.gateMode = gateMode;
+    }
+
+    /** AC-9: 计划绑定的测试策略（V5 增加 strategy_id，null = 未绑定）。 */
+    public Long getStrategyId() {
+        return strategyId;
+    }
+
+    public void setStrategyId(Long strategyId) {
+        this.strategyId = strategyId;
+    }
+
+    /** AC-9: 计划执行环境（V5 增加 env_id）；执行登记不必再旁路查该列。 */
+    public Long getEnvId() {
+        return envId;
+    }
+
+    public void setEnvId(Long envId) {
+        this.envId = envId;
     }
 
     public Long getDomainId() {

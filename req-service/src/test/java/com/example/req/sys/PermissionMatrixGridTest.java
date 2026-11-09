@@ -17,17 +17,19 @@ import org.junit.jupiter.api.Test;
 /**
  * AC-5: the matrix is asserted cell by cell, not spot-checked.
  *
- * <p>Every one of the 10 roles × 26 functions is covered, so a silently changed cell (the usual
- * way a permission bug ships) fails here instead of in production.</p>
+ * <p>Every one of the 10 roles × 41 functions is covered, so a silently changed cell (the usual
+ * way a permission bug ships) fails here instead of in production. The 26 r2 codes are asserted
+ * exactly as before; M6 appended 15 quality codes, which is why the expected grid size moved from
+ * 260 to 410.</p>
  */
 class PermissionMatrixGridTest {
 
     @Test
-    @DisplayName("10 roles × 26 functions: every cell exists and is defined exactly once")
+    @DisplayName("10 roles × 41 functions: every cell exists and is defined exactly once")
     void everyCellIsDefined() {
         List<PermissionMatrix.Cell> cells = PermissionMatrix.cells();
         int expected = PermissionMatrix.roles().size() * PermissionMatrix.functions().size();
-        assertEquals(260, expected, "the matrix is 10 roles × 26 functions");
+        assertEquals(410, expected, "the matrix is 10 roles × 41 functions");
         assertEquals(expected, cells.size(), "cells() must enumerate the whole grid");
         Set<String> seen = new HashSet<>();
         for (PermissionMatrix.Cell cell : cells) {
@@ -41,7 +43,7 @@ class PermissionMatrixGridTest {
     }
 
     @Test
-    @DisplayName("PLATFORM_ADMIN is ALLOW on all 26 functions; no other role holds tenant:manage")
+    @DisplayName("PLATFORM_ADMIN is ALLOW on all 41 functions; no other role holds tenant:manage")
     void platformAdminIsUnrestricted() {
         for (String function : PermissionMatrix.functions()) {
             assertEquals(Access.ALLOW, PermissionMatrix.accessFor("PLATFORM_ADMIN", function),
@@ -77,5 +79,38 @@ class PermissionMatrixGridTest {
         assertTrue(PermissionMatrix.functionsOf(List.of("PLATFORM_ADMIN")).size()
                 >= PermissionMatrix.functions().size() - 1);
         assertFalse(PermissionMatrix.functionsOf(List.of("MGMT")).contains("tenant:manage"));
+    }
+
+    @Test
+    @DisplayName("M6: waiver approval is MGMT+PMO, plan approval is QA+MGMT, signing is PRODUCT+QA+MGMT")
+    void qualityCells() {
+        // The three cells that make the quality loop a control rather than a self-service form.
+        // PRD §3.6: PMO 或平台管理员审批豁免；MGMT 保留治理侧审批权。
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("MGMT", "waiver:approve"));
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("PMO", "waiver:approve"));
+        for (String role : PermissionMatrix.roles()) {
+            if (!List.of("MGMT", "PMO", "PLATFORM_ADMIN").contains(role)) {
+                assertEquals(Access.DENY, PermissionMatrix.accessFor(role, "waiver:approve"),
+                        "waiver:approve must be DENY for " + role);
+            }
+        }
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("QA", "plan:approve"));
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("MGMT", "plan:approve"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("PMO", "plan:approve"),
+                "PMO reads plans but must not approve them");
+        for (String role : List.of("PRODUCT", "QA", "MGMT")) {
+            assertEquals(Access.ALLOW, PermissionMatrix.accessFor(role, "report:sign"));
+        }
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("DEV", "report:sign"));
+        // Execute and assign are QA-only, and every M6 code is defined for every role.
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("MGMT", "plan:execute"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("MGMT", "plan:assign"));
+        for (String function : List.of("strategy:manage", "plan:edit", "plan:approve",
+                "plan:execute", "plan:assign", "env:manage", "report:generate", "report:sign",
+                "gate:view", "waiver:apply", "waiver:approve", "review:manage",
+                "proddefect:report", "qualitymetric:view", "report:export")) {
+            assertTrue(PermissionMatrix.functions().contains(function), "missing code " + function);
+            assertNotNull(PermissionMatrix.accessFor("QA", function));
+        }
     }
 }

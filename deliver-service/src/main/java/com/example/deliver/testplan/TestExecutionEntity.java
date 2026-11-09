@@ -55,6 +55,14 @@ public class TestExecutionEntity {
     @Column(name = "evidence_file", length = 300)
     private String evidenceFile;
 
+    /** Round the execution belongs to; per-round views partition on this. */
+    @Column(name = "round_id")
+    private Long roundId;
+
+    /** Environment the case ran against, copied from the plan at execution time. */
+    @Column(name = "env_id")
+    private Long envId;
+
     @Column(name = "executor_id")
     private Long executorId;
 
@@ -161,6 +169,22 @@ public class TestExecutionEntity {
 
     public void setEvidenceFile(String evidenceFile) {
         this.evidenceFile = evidenceFile;
+    }
+
+    public Long getRoundId() {
+        return roundId;
+    }
+
+    public void setRoundId(Long roundId) {
+        this.roundId = roundId;
+    }
+
+    public Long getEnvId() {
+        return envId;
+    }
+
+    public void setEnvId(Long envId) {
+        this.envId = envId;
     }
 
     public Long getExecutorId() {

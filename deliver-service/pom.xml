@@ -15,6 +15,13 @@
     <description>Defect, task, sprint, test and gate service (8083). Reads requirements and
         releases through its own read model; never writes the requirement side's tables.</description>
 
+    <properties>
+        <!-- Report export (AC-4.4): POI writes the 8 sheets, OpenPDF the watermarked PDF.
+             Both are pinned here (and only here) so the root build stays the version matrix. -->
+        <poi.version>5.4.1</poi.version>
+        <openpdf.version>2.0.3</openpdf.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.example</groupId>
@@ -56,6 +63,18 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+        <!-- Test report export. XLSX = SXSSFWorkbook (streaming, 8 sheets), PDF = OpenPDF with a
+             non-embedded CID font (STSong-Light) so no font binary has to be committed. -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${poi.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.librepdf</groupId>
+            <artifactId>openpdf</artifactId>
+            <version>${openpdf.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

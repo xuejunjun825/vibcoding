@@ -42,6 +42,7 @@ run_step "r1 负向（verify-negative）"    bash "$ROOT/scripts/tests/verify-ne
 run_step "平台起栈（platform-up）"       bash "$ROOT/scripts/platform-up.sh"
 run_step "AC-1..AC-20（platform-verify）" bash "$ROOT/scripts/platform-verify.sh"
 run_step "平台负向（platform-test-negative）" bash "$ROOT/scripts/platform-test-negative.sh"
+run_step "M6 质量域验收（quality-verify q0..q7）" bash "$ROOT/scripts/quality-verify.sh"
 run_step "种子幂等 #1（platform-seed）"  bash "$ROOT/scripts/platform-seed.sh"
 run_step "种子幂等 #2（platform-seed）"  bash "$ROOT/scripts/platform-seed.sh"
 

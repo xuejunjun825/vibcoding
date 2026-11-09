@@ -132,16 +132,16 @@ fi
 API_TOKEN="$ADMIN_TOKEN"
 
 # ---------------------------------------------------------------- 9/10
-section "9) 准入 FAIL 直接 submit → 409；10) 空原因强制放行 → 400"
+section "9) 准入 FAIL 直接 submit → 409；10) 强制放行已退役 → 409"
 api_call POST /api/req/releases "{\"name\":\"neg-rel-${RUN_TAG}\",\"domainId\":${DOMAIN1},\"startDate\":\"2026-11-01\",\"endDate\":\"2026-11-30\",\"plannedReleaseDate\":\"2026-12-05\",\"gateMode\":\"STRICT\"}"
 REL="$(jget_ "$HTTP_BODY" '.id')"
 api_call POST /api/req/releases/${REL}/requirements "{\"requirementIds\":[${RD_ID}]}"
 api_call POST /api/req/deploy-orders "$(jq -cn --argjson r "$REL" --argjson q "$RD_ID" '{releaseId:$r,env:"UAT",windowStart:"2026-12-02T10:00:00+08:00",windowEnd:"2026-12-02T12:00:00+08:00",artifactVersion:"neg",steps:[{name:"发布",order:1}],rollbackPlan:"回滚",impact:"无",ownerId:1,requirementIds:[$q]}')"
 DEP="$(jget_ "$HTTP_BODY" '.id')"
 api_call POST "/api/req/deploy-orders/${DEP}/submit"
-deny "准入未过直接 submit → 409 ADMISSION_FAILED" 409 "ADMISSION_FAILED" "submit 必须服务端重算准入"
+deny "准入未过直接 submit → 409 QUALITY_GATE_FAILED" 409 "QUALITY_GATE_FAILED" "submit 必须服务端重算六项准入（第 6 项质量门先判）"
 api_call POST "/api/req/deploy-orders/${DEP}/force-release" '{"reason":"  "}'
-deny "空原因强制放行 → 400 REASON_REQUIRED" 400 "REASON_REQUIRED" "强制放行必须留痕"
+deny "强制放行已退役 → 409 FORCE_RELEASE_RETIRED" 409 "FORCE_RELEASE_RETIRED" "退役入口不得再接受任何原因"
 
 # ---------------------------------------------------------------- 11
 section "11) 第 4 层测试模块 → 400"

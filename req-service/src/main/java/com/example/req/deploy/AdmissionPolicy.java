@@ -2,6 +2,7 @@ package com.example.req.deploy;
 
 import com.example.platform.contract.GateBlocker;
 import com.example.platform.contract.GateDecision;
+import com.example.platform.contract.quality.GateSnapshot;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -12,10 +13,10 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * 五项准入的纯判定：输入是"已经取到的数据"，输出是固定顺序的清单。
+ * 准入的纯判定：输入是"已经取到的数据"，输出是固定顺序的清单（M6 起为六项）。
  *
  * <p>刻意不查询数据库、不调 HTTP——取数在 {@link AdmissionEvaluator}，
- * 这样五项规则可以逐条单测（含反面：服务不可用时必须 FAIL 而不是放行）。</p>
+ * 这样六项规则可以逐条单测（含反面：服务不可用时必须 FAIL 而不是放行）。</p>
  */
 public final class AdmissionPolicy {
 
@@ -23,6 +24,15 @@ public final class AdmissionPolicy {
     public static final Set<String> TEST_PASSED_STATUSES = Set.of("TEST_PASSED", "MERGED", "DONE");
 
     public static final String FIX_SERVICE_DOWN = "缺陷/门禁服务不可用，请稍后重试";
+
+    /** 第 6 项的质量门机器码：{@code detail} 里出现即表示"没拿到结论"，fail-closed。 */
+    public static final String GATE_UNAVAILABLE = "GATE_UNAVAILABLE";
+
+    /** 第 6 项：发布质量门。结论来自 deliver 的 {@code QualityGatePort}，req 不重算 5 条规则。 */
+    public static final String QUALITY_GATE = AdmissionItem.QUALITY_GATE;
+
+    public static final String FIX_GATE_UNAVAILABLE =
+            "质量门服务不可用，请稍后重试；持续失败请联系运维检查 deliver-service";
 
     public AdmissionPolicy() {
     }
@@ -55,19 +65,27 @@ public final class AdmissionPolicy {
     /**
      * @param gates            需求→门禁结论；{@code null} 表示门禁服务不可用（必须 FAIL）
      * @param openHighDefects  需求→未关闭 P0/P1 数；{@code null} 表示缺陷服务不可用（必须 FAIL）
+     * @param gate             第 6 项质量门证据；{@code null} 表示 deliver 未在预算内应答（必须 FAIL）
      */
     public record Inputs(List<ReqFact> requirements, Map<Long, GateDecision> gates,
-                         Map<Long, Integer> openHighDefects) {
+                         Map<Long, Integer> openHighDefects, DeployViews.GateEvidence gate) {
+
+        /** 五行版构造：无质量门证据（单测与历史调用点用），等价于第 6 项 GATE_UNAVAILABLE。 */
+        public Inputs(List<ReqFact> requirements, Map<Long, GateDecision> gates,
+                      Map<Long, Integer> openHighDefects) {
+            this(requirements, gates, openHighDefects, null);
+        }
     }
 
     public List<AdmissionItem> evaluate(Inputs inputs) {
         List<ReqFact> requirements = inputs.requirements() == null ? List.of() : inputs.requirements();
-        List<AdmissionItem> items = new ArrayList<>(5);
+        List<AdmissionItem> items = new ArrayList<>(6);
         items.add(testPassed(requirements, inputs.gates()));
         items.add(noOpenHighDefect(requirements, inputs.openHighDefects()));
         items.add(mrFilled(requirements));
         items.add(manDaysFilled(requirements));
         items.add(approvalsDone(requirements));
+        items.add(qualityGate(inputs.gate()));
         return items;
     }
 
@@ -201,6 +219,44 @@ public final class AdmissionPolicy {
                 "完成需求的评审入池审批与需求发布审批（审批中心可见在途单）");
     }
 
+    // ------------------------------------------------------------------ 6
+
+    /**
+     * 第 6 项：发布质量门（AC-5）。结论只透传 deliver 的求值结果，req 侧不重算 QG-01..QG-05，
+     * 否则两个服务的阈值与分母必然分叉。
+     *
+     * <p>fail-closed：{@code gate == null}（超时/异常/未应答）一律 FAIL 并带 {@link #GATE_UNAVAILABLE}，
+     * 绝不允许"查不到就视为通过"。</p>
+     */
+    private AdmissionItem qualityGate(DeployViews.GateEvidence gate) {
+        String code = QUALITY_GATE;
+        String name = AdmissionItem.nameOf(code);
+        if (gate == null) {
+            return AdmissionItem.fail(code, name,
+                    "质量门不可用（" + GATE_UNAVAILABLE + "）：报告/门禁服务未在预算内应答，本次不放行",
+                    FIX_GATE_UNAVAILABLE);
+        }
+        List<GateSnapshot.GateRuleResult> rules = gate.rules() == null ? List.of() : gate.rules();
+        if (gate.passed()) {
+            String waiver = GateSnapshot.PASS_WITH_WAIVER.equals(gate.result()) ? "（含规则级豁免）" : "";
+            return AdmissionItem.pass(code, name,
+                    rules.size() + " 条规则全部通过" + waiver + "，质量门快照 #" + gate.snapshotId());
+        }
+        List<GateSnapshot.GateRuleResult> failed = gate.failedRules();
+        List<String> detail = failed.stream()
+                .map(rule -> rule.code() + "=" + nvl(rule.actual()) + "（要求 " + nvl(rule.threshold()) + "）")
+                .toList();
+        String fixHint = failed.stream()
+                .map(GateSnapshot.GateRuleResult::fixHint)
+                .filter(hint -> hint != null && !hint.isBlank())
+                .findFirst()
+                .orElse("按门禁规则修复后重新生成报告并重新会签；P0/P1 与 QG-04 属红线，不可豁免");
+        return AdmissionItem.fail(code, name,
+                "质量门未通过（快照 #" + gate.snapshotId() + "）："
+                        + (detail.isEmpty() ? nvl(gate.result()) : String.join("、", detail)),
+                fixHint);
+    }
+
     // ------------------------------------------------------------------ 工具
 
     /**
@@ -208,9 +264,21 @@ public final class AdmissionPolicy {
      * 这是"先渲染旧结论再被 409 打回"的反面防线。
      */
     public static String signature(List<ReqFact> requirements) {
-        if (requirements == null || requirements.isEmpty()) {
-            return "empty";
-        }
+        return signature(requirements, null);
+    }
+
+    /**
+     * 六项版指纹：把第 6 项质量门的 {@code result_digest} 一并算进去，并加 {@code v6} 前缀。
+     *
+     * <p>M6 之前落库的 5 项指纹没有前缀，必然与新版不等 ⇒ 旧单永远被判 stale+legacy，
+     * 不会被误当成"当前结论"（否则新加的第 6 项会被旧快照掩盖）。</p>
+     */
+    public static String signature(List<ReqFact> requirements, String gateHash) {
+        String base = requirements == null || requirements.isEmpty() ? "empty" : factsSignature(requirements);
+        return "v6|" + (gateHash == null || gateHash.isBlank() ? "none" : gateHash) + "|" + base;
+    }
+
+    private static String factsSignature(List<ReqFact> requirements) {
         StringBuilder builder = new StringBuilder();
         for (ReqFact req : requirements) {
             builder.append(req.id()).append(':')

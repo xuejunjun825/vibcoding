@@ -15,7 +15,7 @@ const props = withDefaults(
     mode?: 'admission' | 'gate'
     readonly?: boolean
     title?: string
-    /** 最近一次提交被服务端拒绝（409 GATE_BLOCKED / ADMISSION_FAILED） */
+    /** 最近一次提交被服务端拒绝（409 GATE_BLOCKED / QUALITY_GATE_FAILED） */
     rejected?: boolean
     rejectedText?: string
     checkedAt?: string | null

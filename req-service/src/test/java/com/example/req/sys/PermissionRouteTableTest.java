@@ -75,4 +75,81 @@ class PermissionRouteTableTest {
         assertEquals(List.of("export:detail"),
                 PermissionRouteTable.requirementFor("GET", "/defects/export.csv").codes());
     }
+
+    /**
+     * AC-5 of r3: the quality rules only work because they sit above the release / plan fallbacks.
+     * Each assertion below would return the fallback code (plan:manage / release:plan) if a rule
+     * were appended at the bottom of the table instead of inserted before them.
+     */
+    @Test
+    void qualityActionsHitTheirOwnCodeBeforeTheFallbacks() {
+        assertEquals(List.of("plan:approve"),
+                PermissionRouteTable.requirementFor("POST", "/test-plans/12/approve").codes());
+        assertEquals(List.of("plan:edit"),
+                PermissionRouteTable.requirementFor("POST", "/test-plans/12/submit-review").codes());
+        assertEquals(List.of("plan:edit"),
+                PermissionRouteTable.requirementFor("POST", "/test-plans/12/archive").codes());
+        assertEquals(List.of("plan:assign"),
+                PermissionRouteTable.requirementFor("PUT", "/test-plans/12/assignments").codes());
+        assertEquals(List.of("plan:execute"),
+                PermissionRouteTable.requirementFor("POST", "/test-plans/12/execute").codes());
+        // The plan's own fallback still guards everything else, including reads.
+        assertEquals(List.of("plan:manage"),
+                PermissionRouteTable.requirementFor("GET", "/test-plans").codes());
+        assertEquals(List.of("plan:manage"),
+                PermissionRouteTable.requirementFor("GET", "/test-plans/12").codes());
+
+        assertEquals(List.of("report:sign"),
+                PermissionRouteTable.requirementFor("POST", "/test-reports/3/versions/2/signoff").codes());
+        assertEquals(List.of("report:export"),
+                PermissionRouteTable.requirementFor("GET", "/test-reports/3/export").codes());
+        assertEquals(List.of("report:generate"),
+                PermissionRouteTable.requirementFor("POST", "/test-reports").codes());
+
+        assertEquals(List.of("waiver:apply"),
+                PermissionRouteTable.requirementFor("POST", "/quality-gates/waivers").codes());
+        assertEquals(List.of("waiver:approve"),
+                PermissionRouteTable.requirementFor("POST", "/quality-gates/waivers/9/approve").codes());
+        assertEquals(List.of("waiver:approve"),
+                PermissionRouteTable.requirementFor("POST", "/quality-gates/waivers/9/revoke").codes());
+        assertEquals(List.of("gate:view"),
+                PermissionRouteTable.requirementFor("GET", "/quality-gates/9").codes());
+        assertEquals(List.of("plan:manage"),
+                PermissionRouteTable.requirementFor("PUT", "/quality-gates").codes());
+        assertEquals(List.of("plan:manage"),
+                PermissionRouteTable.requirementFor("PUT", "/releases/4/quality-gate").codes());
+
+        // Release-scoped quality routes must win over the blanket ^/releases fallback.
+        assertEquals(List.of("gate:view"),
+                PermissionRouteTable.requirementFor("GET", "/releases/4/quality-gate").codes());
+        assertEquals(List.of("qualitymetric:view"),
+                PermissionRouteTable.requirementFor("GET", "/releases/4/quality").codes());
+        assertEquals(List.of("review:manage"),
+                PermissionRouteTable.requirementFor("POST", "/releases/4/reviews").codes());
+        assertEquals(List.of("review:manage"),
+                PermissionRouteTable.requirementFor("PUT", "/releases/4/quality-settings").codes());
+        assertEquals(List.of("release:plan"),
+                PermissionRouteTable.requirementFor("GET", "/releases/4").codes());
+
+        assertEquals(List.of("qualitymetric:view"),
+                PermissionRouteTable.requirementFor("GET", "/metrics/quality").codes());
+        assertEquals(List.of("strategy:manage"),
+                PermissionRouteTable.requirementFor("GET", "/test-strategies").codes());
+        assertEquals(List.of("env:manage"),
+                PermissionRouteTable.requirementFor("POST", "/test-envs").codes());
+        assertNull(PermissionRouteTable.requirementFor("GET", "/test-envs"),
+                "environment reads stay open (scope-filtered), only mutations are guarded");
+        assertNull(PermissionRouteTable.requirementFor("GET", "/test-reports/3"),
+                "report reads stay open (scope-filtered), only generation is guarded");
+    }
+
+    /** First match wins: an approve path must never be reachable through the edit rule. */
+    @Test
+    void approveIsNotShadowedByTheLifecycleRule() {
+        PermissionRouteTable.Requirement approve =
+                PermissionRouteTable.requirementFor("POST", "/test-plans/7/approve");
+        assertNotNull(approve);
+        assertFalse(approve.codes().contains("plan:edit"),
+                "the approve rule must precede the submit-review|reject|… rule");
+    }
 }

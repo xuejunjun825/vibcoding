@@ -1,95 +1,227 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import {
-  addCasesToPlan,
-  defectFromExecution,
-  evaluateTestGate,
-  executeCase,
-  getTestPlan,
-  listTestCases,
-  planSummary,
-  removeCaseFromPlan,
-} from '@/api/deliver'
-import type {
-  ExecutionResult,
-  GateDecision,
-  PlanCaseRow,
-  PlanSummary,
-  TestCaseRow,
-  TestPlanDetail,
-} from '@/api/types'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { defectFromExecution, executeCase, getTestPlan } from '@/api/deliver'
+import { planApi, roundApi, envApi } from '@/api/quality'
+import { listUsers, type UserRow } from '@/api/admin'
 import { usePermission } from '@/composables/usePermission'
 import { useDictStore } from '@/stores/dict'
+import type { PlanCounts, PlanDetail, RoundDetail, RoundView, TestPlanDetail } from '@/api/types'
+import StatusPill from '@/components/StatusPill.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
-import GateChecklist from '@/components/GateChecklist.vue'
 import PassRateRing from '@/components/PassRateRing.vue'
-import StatusPill from '@/components/StatusPill.vue'
-import { formatDateTime } from '@/utils/format'
+import RoundSwitcher from '@/components/quality/RoundSwitcher.vue'
+import { formatDateTime, formatNumber, formatPercent } from '@/utils/format'
 import '@/views/deliver/shared.css'
 
 /**
- * 计划执行（DESIGN P11 / AC-16、AC-17）。
- * - 每条用例钉住 caseVersion，执行只写执行记录，不改用例主表；
- * - 通过率环/覆盖率来自服务端 planSummary，前端不重算；
- * - 门禁按需求评估，服务端是唯一判定者（前端只渲染 items/blockers）。
+ * 执行台（DESIGN Q5 / AC-2）。
+ *
+ * 事实来源全部在服务端：
+ * - 轮次列表、轮次作用域与轮次计数来自 `roundApi`；
+ * - 通过率/覆盖率不在这里做除法，直接显示服务端 `counts.passRate/coverage`；
+ * - 登记结果只走 `POST /test-plans/{id}/execute`，由服务端判定“是否有进行中轮次”、
+ *   “用例是否在本轮作用域内”，前端不做合法性预判（409 原样呈现）。
  */
+interface ExecRow {
+  caseId: number
+  caseCode: string
+  title?: string | null
+  caseVersion?: number | null
+  result?: string | null
+  executedAt?: string | null
+  executorId?: number | null
+  note?: string | null
+}
+
+interface UnmetLike {
+  key?: string
+  label?: string
+  actual?: string
+  expected?: string
+  fixHint?: string
+}
+
+const RESULTS = [
+  { value: 'PASS', label: '通过' },
+  { value: 'FAIL', label: '失败' },
+  { value: 'BLOCKED', label: '阻塞' },
+  { value: 'SKIP', label: '跳过' },
+]
+
+const BUCKETS = [
+  { key: 'all', label: '全部' },
+  { key: 'NOT_RUN', label: '未执行' },
+  { key: 'FAIL', label: '失败' },
+  { key: 'BLOCKED', label: '阻塞' },
+  { key: 'PASS', label: '通过' },
+]
+
 const route = useRoute()
 const router = useRouter()
-const { can } = usePermission()
 const dict = useDictStore()
+const { can } = usePermission()
 
-const canManage = computed(() => can('plan:manage'))
 const planId = computed(() => Number(route.params.id))
-
-const detail = ref<TestPlanDetail | null>(null)
-const loading = ref(false)
-const error = ref<{ message: string; code?: string; status?: number } | null>(null)
-
-const drafts = reactive<Record<number, { result: ExecutionResult; note: string }>>({})
-const savingCase = ref<number | null>(null)
-const executionIds = reactive<Record<number, number>>({})
-const filter = ref<'all' | 'pending' | 'failed'>('all')
-
-const cases = computed(() => detail.value?.cases ?? [])
-const summary = computed<PlanSummary | null>(() => detail.value?.summary ?? null)
-const plan = computed(() => detail.value?.plan ?? null)
-
-const visibleCases = computed(() => {
-  if (filter.value === 'pending') return cases.value.filter((item) => item.result === 'NOT_RUN')
-  if (filter.value === 'failed') return cases.value.filter((item) => item.result === 'FAIL')
-  return cases.value
+const roundId = computed(() => {
+  const raw = route.query.round
+  return raw ? Number(raw) : null
 })
+const mode = computed<'round' | 'total'>(() => (route.query.mode === 'total' ? 'total' : 'round'))
 
-const pendingCount = computed(() => cases.value.filter((item) => item.result === 'NOT_RUN').length)
-const failedCount = computed(() => cases.value.filter((item) => item.result === 'FAIL').length)
+const plan = ref<PlanDetail | null>(null)
+const m5 = ref<TestPlanDetail | null>(null)
+const rounds = ref<RoundView[]>([])
+const roundDetail = ref<RoundDetail | null>(null)
+const users = ref<UserRow[]>([])
+const loading = ref(false)
+const saving = ref(false)
+const error = ref<{ message: string; code?: string; status?: number } | null>(null)
+const conflict = ref<{ title: string; code?: string; message: string; allowedNext: string[]; unmet: UnmetLike[] } | null>(null)
+const bucket = ref('all')
+const keyword = ref('')
+const drafts = reactive<Record<number, { result: string; note: string }>>({})
+const executionIds = reactive<Record<number, number>>({})
+const selected = ref<ExecRow[]>([])
 
-const gateMode = computed(() => plan.value?.gateMode ?? 'STRICT')
-const gateRule = computed(() =>
-  gateMode.value === 'STRICT'
-    ? '严格：计划内必须全部通过（未执行 / 失败 / 阻塞 / 跳过 都阻断）'
-    : '宽松：仅失败阻断，阻塞与跳过须填写原因',
+const status = computed(() => String(plan.value?.status ?? '').toUpperCase())
+const activeRound = computed(() => rounds.value.find((round) => round.active) ?? null)
+const selectedRound = computed(() => rounds.value.find((round) => round.id === roundId.value) ?? null)
+const roundLocked = computed(() => mode.value === 'round' && selectedRound.value?.status === 'CLOSED')
+const counts = computed<PlanCounts | null>(() => {
+  if (mode.value === 'round') return roundDetail.value?.counts ?? null
+  const summary = m5.value?.summary
+  if (!summary) return null
+  return {
+    total: summary.planned,
+    executed: summary.executed,
+    passed: summary.passed,
+    failed: summary.failed,
+    blocked: summary.blocked,
+    notRun: summary.notRun,
+    passRate: summary.passRate,
+    coverage: summary.coverage,
+  }
+})
+const execAllowed = computed(
+  () => status.value === 'IN_PROGRESS' && !!activeRound.value && can('plan:execute') && !roundLocked.value,
 )
 
-function syncDrafts(): void {
-  for (const key of Object.keys(drafts)) delete drafts[Number(key)]
-  for (const item of cases.value) {
-    drafts[item.caseId] = { result: item.result ?? 'NOT_RUN', note: item.note ?? '' }
+const versionMap = computed(() => {
+  const map = new Map<number, number>()
+  for (const row of m5.value?.cases ?? []) map.set(row.caseId, row.caseVersion)
+  return map
+})
+
+const executorName = (id?: number | null): string =>
+  id ? users.value.find((user) => user.id === id)?.name || `#${id}` : '—'
+
+const rows = computed<ExecRow[]>(() => {
+  if (mode.value === 'round') {
+    return (roundDetail.value?.cases ?? []).map((row) => ({
+      caseId: row.caseId,
+      caseCode: row.caseCode,
+      title: row.title,
+      caseVersion: versionMap.value.get(row.caseId) ?? null,
+      result: row.result ?? 'NOT_RUN',
+      executedAt: row.executedAt,
+      executorId: row.executorId,
+      note: row.note,
+    }))
+  }
+  return (m5.value?.cases ?? []).map((row) => ({
+    caseId: row.caseId,
+    caseCode: row.caseCode,
+    title: row.title,
+    caseVersion: row.caseVersion,
+    result: row.result ?? 'NOT_RUN',
+    executedAt: row.executedAt,
+    executorId: null,
+    note: row.note,
+  }))
+})
+
+const filtered = computed(() => {
+  const word = keyword.value.trim().toLowerCase()
+  return rows.value.filter((row) => {
+    const byBucket = bucket.value === 'all' || (row.result || 'NOT_RUN') === bucket.value
+    if (!byBucket) return false
+    if (!word) return true
+    return (
+      row.caseCode.toLowerCase().includes(word) ||
+      String(row.title ?? '').toLowerCase().includes(word)
+    )
+  })
+})
+
+function bucketCount(key: string): number {
+  if (key === 'all') return rows.value.length
+  return rows.value.filter((row) => (row.result || 'NOT_RUN') === key).length
+}
+
+const progress = computed(() => {
+  const total = rows.value.length
+  const done = rows.value.filter((row) => (row.result || 'NOT_RUN') !== 'NOT_RUN').length
+  return { total, done }
+})
+
+function draftOf(row: ExecRow): { result: string; note: string } {
+  if (!drafts[row.caseId]) {
+    drafts[row.caseId] = { result: row.result || 'NOT_RUN', note: String(row.note ?? '') }
+  }
+  return drafts[row.caseId]
+}
+
+function onResultChange(row: ExecRow, value: string): void {
+  draftOf(row).result = value
+}
+
+function onNoteInput(row: ExecRow, value: string): void {
+  draftOf(row).note = value
+}
+
+const dirtyRows = computed(() =>
+  rows.value.filter((row) => {
+    const draft = drafts[row.caseId]
+    if (!draft) return false
+    if (draft.result === 'NOT_RUN') return false
+    return draft.result !== (row.result || 'NOT_RUN') || draft.note !== String(row.note ?? '')
+  }),
+)
+
+/* ---------------- 加载 ---------------- */
+
+function raiseConflict(title: string, err: unknown): void {
+  const typed = err as { code?: string; message?: string; detail?: Record<string, unknown> }
+  const detail = typed.detail ?? {}
+  const unmet = Array.isArray(detail.unmet) ? (detail.unmet as UnmetLike[]) : []
+  conflict.value = {
+    title,
+    code: typed.code,
+    message: typed.message || '操作未完成',
+    allowedNext: Array.isArray(detail.allowedNext) ? (detail.allowedNext as string[]) : (plan.value?.allowedNext ?? []),
+    unmet,
   }
 }
 
-async function load(): Promise<void> {
-  if (!planId.value) return
+async function loadAll(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    detail.value = await getTestPlan(planId.value)
-    syncDrafts()
+    const [detail, planDetail, roundList] = await Promise.all([
+      getTestPlan(planId.value),
+      planApi.detail(planId.value).catch(() => null),
+      roundApi.list(planId.value).catch(() => [] as RoundView[]),
+    ])
+    m5.value = detail
+    plan.value = planDetail
+    rounds.value = roundList
+    await loadRound()
   } catch (err) {
     error.value = {
-      message: (err as Error).message || '计划加载失败',
+      message: (err as Error).message || '执行台加载失败',
       code: (err as { code?: string }).code,
       status: (err as { status?: number }).status,
     }
@@ -98,590 +230,938 @@ async function load(): Promise<void> {
   }
 }
 
-async function refreshSummary(): Promise<void> {
+async function loadRound(): Promise<void> {
+  roundDetail.value = null
+  if (!roundId.value) return
   try {
-    const data = await planSummary(planId.value)
-    if (detail.value) detail.value.summary = data
-  } catch {
-    /* 汇总刷新失败不覆盖已有数据 */
-  }
-}
-
-/* ---------------- 执行登记 ---------------- */
-
-async function saveExecution(item: PlanCaseRow): Promise<void> {
-  const draft = drafts[item.caseId]
-  if (!draft) return
-  if (draft.result === 'BLOCKED' || draft.result === 'SKIP') {
-    if (!draft.note.trim()) {
-      ElMessage.warning('阻塞 / 跳过必须填写原因（门禁宽松模式也会校验）')
-      return
-    }
-  }
-  savingCase.value = item.caseId
-  try {
-    const { executionId } = await executeCase(planId.value, {
-      caseId: item.caseId,
-      result: draft.result,
-      note: draft.note.trim() || undefined,
-    })
-    executionIds[item.caseId] = executionId
-    item.result = draft.result
-    item.note = draft.note
-    item.executedAt = new Date().toISOString()
-    await refreshSummary()
-    ElMessage.success(`已登记 ${item.caseCode}：${dict.label('execution', draft.result)}`)
+    roundDetail.value = await roundApi.detail(planId.value, roundId.value)
   } catch (err) {
-    const apiError = err as { status?: number; message?: string }
-    ElMessage.error(
-      apiError.status === 409
-        ? apiError.message || '计划已锁定或执行被拒绝（409）'
-        : apiError.message || '执行登记失败',
-    )
-  } finally {
-    savingCase.value = null
+    raiseConflict('轮次数据加载失败', err)
   }
 }
 
-function onResultChange(item: PlanCaseRow): void {
-  const draft = drafts[item.caseId]
-  if (!draft) return
-  if (draft.result === 'NOT_RUN') {
-    draft.result = item.result
-    ElMessage.info('「未执行」不是执行结果，请选择 通过 / 失败 / 阻塞 / 跳过')
+function selectRound(id: number): void {
+  void router.replace({ query: { ...route.query, round: id } })
+}
+
+function setMode(next: 'round' | 'total'): void {
+  void router.replace({ query: { ...route.query, mode: next } })
+}
+
+function clearDrafts(): void {
+  for (const key of Object.keys(drafts)) delete drafts[Number(key)]
+}
+
+/* ---------------- 登记结果 ---------------- */
+
+async function saveRow(row: ExecRow): Promise<boolean> {
+  const draft = draftOf(row)
+  if (draft.result === 'NOT_RUN') return true
+  try {
+    const result = await executeCase(planId.value, {
+      caseId: row.caseId,
+      result: draft.result,
+      note: draft.note || undefined,
+    })
+    executionIds[row.caseId] = result.executionId
+    return true
+  } catch (err) {
+    raiseConflict(`用例 ${row.caseCode} 登记失败`, err)
+    return false
+  }
+}
+
+async function saveOne(row: ExecRow): Promise<void> {
+  saving.value = true
+  try {
+    const ok = await saveRow(row)
+    if (ok) {
+      delete drafts[row.caseId]
+      ElMessage.success(`${row.caseCode} 已保存`)
+      await refreshCounters()
+    }
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveAll(): Promise<void> {
+  const pending = [...dirtyRows.value]
+  if (!pending.length) {
+    ElMessage.info('没有待保存的登记')
     return
   }
-  void saveExecution(item)
+  saving.value = true
+  let okCount = 0
+  let failed = 0
+  try {
+    for (const row of pending) {
+      const ok = await saveRow(row)
+      if (ok) {
+        delete drafts[row.caseId]
+        okCount += 1
+      } else {
+        failed += 1
+      }
+    }
+    if (okCount) ElMessage.success(`已保存 ${okCount} 条登记`)
+    if (failed) ElMessage.warning(`${failed} 条未保存，见下方冲突清单`)
+    await refreshCounters()
+  } finally {
+    saving.value = false
+  }
 }
 
-async function convertToDefect(item: PlanCaseRow): Promise<void> {
-  const executionId = executionIds[item.caseId]
+async function refreshCounters(): Promise<void> {
+  await Promise.all([
+    loadRound(),
+    getTestPlan(planId.value).then((detail) => {
+      m5.value = detail
+    }),
+    planApi.detail(planId.value).then((detail) => {
+      plan.value = detail
+    }),
+    roundApi.list(planId.value).then((list) => {
+      rounds.value = list
+    }),
+  ])
+}
+
+/* ---------------- 批量 ---------------- */
+
+async function batchPass(): Promise<void> {
+  const targets = (selected.value.length ? selected.value : filtered.value).filter(
+    (row) => (row.result || 'NOT_RUN') === 'NOT_RUN',
+  )
+  if (!targets.length) {
+    ElMessage.info('没有未执行的用例可批量通过')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将把 ${targets.length} 条未执行用例登记为通过，失败行不会被覆盖。`,
+      '批量通过',
+      { confirmButtonText: '批量通过', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  saving.value = true
+  let okCount = 0
+  let failed = 0
+  try {
+    for (const row of targets) {
+      try {
+        const result = await executeCase(planId.value, { caseId: row.caseId, result: 'PASS' })
+        executionIds[row.caseId] = result.executionId
+        delete drafts[row.caseId]
+        okCount += 1
+      } catch (err) {
+        failed += 1
+        raiseConflict(`用例 ${row.caseCode} 未登记`, err)
+      }
+    }
+    if (okCount) ElMessage.success(`已批量通过 ${okCount} 条`)
+    if (failed) ElMessage.warning(`${failed} 条未保存，见上方冲突清单`)
+    await refreshCounters()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function batchSkip(): Promise<void> {
+  const targets = selected.value.filter((row) => (row.result || 'NOT_RUN') === 'NOT_RUN')
+  if (!targets.length) {
+    ElMessage.info('请先勾选未执行的用例')
+    return
+  }
+  let note = ''
+  try {
+    const result = await ElMessageBox.prompt('批量跳过需要统一原因（会写入每条执行记录）', '批量跳过', {
+      inputPlaceholder: '例如：本轮环境未就绪',
+      confirmButtonText: '批量跳过',
+      cancelButtonText: '取消',
+      inputValidator: (value: string) => (value && value.trim().length >= 2 ? true : '原因至少 2 个字'),
+    })
+    note = result.value
+  } catch {
+    return
+  }
+  saving.value = true
+  let okCount = 0
+  try {
+    for (const row of targets) {
+      try {
+        const result = await executeCase(planId.value, { caseId: row.caseId, result: 'SKIP', note })
+        executionIds[row.caseId] = result.executionId
+        delete drafts[row.caseId]
+        okCount += 1
+      } catch (err) {
+        raiseConflict(`用例 ${row.caseCode} 未跳过`, err)
+      }
+    }
+    if (okCount) ElMessage.success(`已跳过 ${okCount} 条`)
+    await refreshCounters()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function toDefect(row: ExecRow): Promise<void> {
+  const executionId = executionIds[row.caseId]
   if (!executionId) {
-    ElMessage.warning('请先登记失败结果，再转缺陷（转缺陷需要本次执行记录的 ID）')
+    ElMessage.warning('请先在本轮保存该用例的失败结果，再转缺陷')
     return
   }
   try {
     const defect = await defectFromExecution(executionId)
-    ElMessage.success(`已创建缺陷 ${defect.code}`)
-    const target = router.resolve({ name: 'defect-detail', params: { id: defect.id } })
-    if (!target.matched.some((record) => record.name === 'catch-all')) {
-      void router.push({ name: 'defect-detail', params: { id: defect.id } })
-    }
+    ElMessage.success(`已生成缺陷 ${defect.code ?? ''}`)
+    void router.push({ name: 'defect-detail', params: { id: defect.id } })
   } catch (err) {
-    ElMessage.error((err as Error).message || '转缺陷失败')
+    raiseConflict('转缺陷未完成', err)
   }
 }
 
-const removeTarget = ref<PlanCaseRow | null>(null)
-const removing = ref(false)
+/* ---------------- 轮次与状态 ---------------- */
 
-async function confirmRemove(): Promise<void> {
-  const target = removeTarget.value
-  if (!target) return
-  removing.value = true
+async function startPlan(): Promise<void> {
   try {
-    await removeCaseFromPlan(planId.value, target.caseId)
-    removeTarget.value = null
-    await load()
-    ElMessage.success('已从计划移除（用例库不受影响）')
+    plan.value = await planApi.action(planId.value, 'start', {})
+    conflict.value = null
+    ElMessage.success('计划已开始执行')
   } catch (err) {
-    ElMessage.error((err as Error).message || '移除失败')
+    raiseConflict('开始执行未完成', err)
+  }
+}
+
+async function openFirstRound(): Promise<void> {
+  try {
+    const created = await roundApi.open(planId.value, {
+      roundType: 'FEATURE',
+      name: 'R1',
+      scopeMode: 'CURRENT',
+    })
+    rounds.value = await roundApi.list(planId.value)
+    selectRound(created.id)
+    ElMessage.success(`第 ${created.roundNo} 轮已开启`)
+  } catch (err) {
+    raiseConflict('开启轮次未完成', err)
+  }
+}
+
+const closeDialog = reactive({ visible: false, conclusion: 'PASS', note: '', running: false, unexecuted: [] as number[] })
+
+function openCloseRound(): void {
+  closeDialog.conclusion = 'PASS'
+  closeDialog.note = ''
+  closeDialog.unexecuted = []
+  closeDialog.visible = true
+}
+
+async function submitCloseRound(): Promise<void> {
+  if (!selectedRound.value) return
+  closeDialog.running = true
+  try {
+    await roundApi.close(planId.value, selectedRound.value.id, {
+      conclusion: closeDialog.conclusion,
+      note: closeDialog.note || undefined,
+    })
+    closeDialog.visible = false
+    ElMessage.success('轮次已关闭')
+    await refreshCounters()
+  } catch (err) {
+    const typed = err as { detail?: Record<string, unknown> }
+    const ids = typed.detail?.unexecutedCaseIds
+    if (Array.isArray(ids)) closeDialog.unexecuted = ids as number[]
+    raiseConflict('关闭轮次未完成', err)
   } finally {
-    removing.value = false
+    closeDialog.running = false
   }
 }
 
-/* ---------------- 纳入用例 ---------------- */
+const envDialog = reactive({ visible: false, envId: undefined as number | undefined, reason: '', running: false })
+const envOptions = ref<Array<{ id: number; name: string; status: string }>>([])
 
-const addVisible = ref(false)
-const addLoading = ref(false)
-const addKeyword = ref('')
-const candidates = ref<TestCaseRow[]>([])
-const selectedCaseIds = ref<number[]>([])
-
-async function searchCases(): Promise<void> {
-  addLoading.value = true
+async function openEnvDialog(): Promise<void> {
+  envDialog.envId = plan.value?.env?.id ?? undefined
+  envDialog.reason = ''
+  envDialog.visible = true
+  if (envOptions.value.length) return
   try {
-    const data = await listTestCases({ keyword: addKeyword.value || undefined, page: 1, size: 50 })
-    const existing = new Set(cases.value.map((item) => item.caseId))
-    candidates.value = (data.items ?? []).filter((item) => !existing.has(item.id))
+    const page = await envApi.page({ page: 1, size: 100 })
+    envOptions.value = (page.items ?? []).map((env) => ({
+      id: env.id,
+      name: env.name,
+      status: String(env.status ?? ''),
+    }))
   } catch {
-    candidates.value = []
-  } finally {
-    addLoading.value = false
+    envOptions.value = []
   }
 }
 
-function openAdd(): void {
-  selectedCaseIds.value = []
-  addKeyword.value = ''
-  addVisible.value = true
-  void searchCases()
-}
-
-async function submitAdd(): Promise<void> {
-  if (!selectedCaseIds.value.length) {
-    ElMessage.warning('请选择要纳入的用例')
-    return
-  }
+async function submitEnv(): Promise<void> {
+  envDialog.running = true
   try {
-    await addCasesToPlan(planId.value, selectedCaseIds.value)
-    addVisible.value = false
-    ElMessage.success(`已纳入 ${selectedCaseIds.value.length} 条用例（钉住当前版本）`)
-    await load()
+    plan.value = await planApi.update(planId.value, {
+      envId: envDialog.envId ?? null,
+      reason: envDialog.reason || undefined,
+    })
+    envDialog.visible = false
+    ElMessage.success('测试环境已更新')
   } catch (err) {
-    ElMessage.error((err as Error).message || '纳入失败')
+    raiseConflict('环境变更未完成', err)
+  } finally {
+    envDialog.running = false
   }
 }
 
-/* ---------------- 门禁评估 ---------------- */
+watch(roundId, () => {
+  clearDrafts()
+  void loadRound()
+})
 
-const requirementId = ref<number | undefined>(
-  route.query.requirementId ? Number(route.query.requirementId) : undefined,
+watch(
+  () => mode.value,
+  () => {
+    clearDrafts()
+    selected.value = []
+  },
 )
-const gateDecision = ref<GateDecision | null>(null)
-const gateLoading = ref(false)
-const gateError = ref('')
-
-async function checkGate(): Promise<void> {
-  if (!requirementId.value) {
-    ElMessage.warning('门禁按需求评估，请填写需求 ID')
-    return
-  }
-  gateLoading.value = true
-  gateError.value = ''
-  try {
-    gateDecision.value = await evaluateTestGate(requirementId.value)
-  } catch (err) {
-    gateDecision.value = null
-    gateError.value = (err as Error).message || '门禁评估失败'
-  } finally {
-    gateLoading.value = false
-  }
-}
-
-function backToList(): void {
-  void router.push({ name: 'test-plans' })
-}
 
 onMounted(async () => {
-  await load()
-  if (requirementId.value) await checkGate()
+  await loadAll()
+  try {
+    users.value = (await listUsers({ page: 1, size: 200 })).items ?? []
+  } catch {
+    users.value = []
+  }
+  if (!roundId.value) {
+    const fallback = activeRound.value ?? rounds.value[rounds.value.length - 1]
+    if (fallback) selectRound(fallback.id)
+  }
 })
 </script>
 
 <template>
-  <div class="dl-page">
+  <div class="dl-page exec-page">
     <header class="dl-head">
       <div class="dl-head__title">
-        <button type="button" class="dl-head__back" @click="backToList">← 测试计划</button>
-        <h1 class="t-page-title">{{ plan?.name || `计划 #${planId}` }}</h1>
-        <span v-if="plan" class="t-code">{{ plan.code }}</span>
-        <StatusPill v-if="plan?.status" kind="execution" :value="plan.status" size="sm" />
+        <button type="button" class="dl-head__back" @click="router.push({ name: 'test-plan-detail', params: { id: planId } })">
+          ← 计划详情
+        </button>
+        <div class="exec-title">
+          <h1 class="t-page-title">{{ plan?.code || m5?.plan.code || '计划' }} · {{ plan?.name || m5?.plan.name || '' }}</h1>
+          <StatusPill v-if="plan" kind="plan" :value="plan.status" />
+        </div>
       </div>
       <div class="dl-head__actions">
-        <el-button :disabled="!canManage" @click="openAdd">纳入用例</el-button>
-        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button size="small" :disabled="!plan" @click="openEnvDialog">
+          环境 {{ plan?.env?.name || '未设置' }}
+        </el-button>
+        <el-button size="small" :disabled="!execAllowed || saving" @click="batchSkip">批量跳过</el-button>
+        <el-button size="small" type="primary" :disabled="!execAllowed || saving" @click="batchPass">批量通过</el-button>
+        <el-button size="small" :disabled="!selectedRound || selectedRound.status === 'CLOSED'" @click="openCloseRound">
+          关闭轮次
+        </el-button>
       </div>
     </header>
 
-    <div class="dl-meta plan-meta">
-      <span>版本：{{ plan?.releaseId ? `#${plan.releaseId}` : '—' }}</span>
-      <span>负责人：{{ plan?.ownerName || '—' }}</span>
-      <span>窗口：{{ plan?.windowStart || '—' }} ~ {{ plan?.windowEnd || '—' }}</span>
-    </div>
+    <ErrorState v-if="error" :message="error.message" :code="error.code" :status="error.status" @retry="loadAll" />
 
-    <ErrorState v-if="error" :message="error.message" :code="error.code" :status="error.status" @retry="load" />
-    <EmptyState
-      v-else-if="!loading && !detail"
-      title="计划不存在或无权访问"
-      description="确认计划属于你有权限的业务域"
-      icon="lock"
-      action-text="返回计划列表"
-      @action="backToList"
-    />
     <template v-else>
-      <section class="surface surface--pad plan-top">
-        <PassRateRing
-          :passed="summary?.passed ?? 0"
-          :planned="summary?.planned ?? 0"
-          :coverage="summary?.coverage ?? 0"
-        />
-        <div class="plan-stats">
-          <div class="dl-stat">
-            <span class="dl-stat__label">已执行</span>
-            <span class="dl-stat__value">{{ summary?.executed ?? 0 }} / {{ summary?.planned ?? 0 }}</span>
-          </div>
-          <div class="dl-stat">
-            <span class="dl-stat__label">失败</span>
-            <span class="dl-stat__value ink-danger">{{ summary?.failed ?? 0 }}</span>
-          </div>
-          <div class="dl-stat">
-            <span class="dl-stat__label">阻塞 / 跳过</span>
-            <span class="dl-stat__value ink-warning">{{ (summary?.blocked ?? 0) + (summary?.skip ?? 0) }}</span>
-          </div>
-          <div class="dl-stat">
-            <span class="dl-stat__label">未执行</span>
-            <span class="dl-stat__value">{{ summary?.notRun ?? 0 }}</span>
-          </div>
-          <div class="dl-stat">
-            <span class="dl-stat__label">覆盖率</span>
-            <span class="dl-stat__value">{{ Math.round(Number(summary?.coverage ?? 0) * 100) }}%</span>
+      <!-- 说明条：没有进行中轮次 / 计划未开始 / 轮次已关闭，各给一条明确出路 -->
+      <div v-if="status === 'APPROVED'" class="notice notice--info">
+        <span>计划已批准但尚未开始执行，开始后才能登记结果。</span>
+        <el-button size="small" type="primary" :disabled="!can('plan:execute')" @click="startPlan">开始执行</el-button>
+      </div>
+      <div v-else-if="status === 'IN_PROGRESS' && !activeRound" class="notice notice--info">
+        <span>还没有进行中的轮次。</span>
+        <el-button size="small" type="primary" :disabled="!can('plan:execute')" @click="openFirstRound">开启 R1</el-button>
+      </div>
+      <div v-else-if="roundLocked" class="readonly-banner" role="status">
+        R{{ selectedRound?.roundNo }} 已关闭 · 只读（切到进行中的轮次或累计视图查看）
+      </div>
+
+      <div v-if="conflict" class="dl-conflict exec-conflict" role="alert">
+        <div class="exec-conflict__head">
+          <strong>{{ conflict.title }}</strong>
+          <span v-if="conflict.code" class="exec-conflict__code">{{ conflict.code }}</span>
+          <span class="exec-conflict__spacer" />
+          <button type="button" class="exec-conflict__close" aria-label="关闭提示" @click="conflict = null">×</button>
+        </div>
+        <p class="exec-conflict__msg">{{ conflict.message }}</p>
+        <ul v-if="conflict.unmet.length" class="exec-conflict__list">
+          <li v-for="(item, index) in conflict.unmet" :key="`${item.key}-${index}`">
+            <span>{{ item.label || item.key }}</span>
+            <span>实际 {{ item.actual }}</span>
+            <span>要求 {{ item.expected }}</span>
+            <span class="exec-conflict__hint">{{ item.fixHint }}</span>
+          </li>
+        </ul>
+        <div v-if="conflict.allowedNext.length" class="exec-conflict__next">
+          <span>当前可执行：</span>
+          <el-button
+            v-for="action in conflict.allowedNext"
+            :key="action"
+            link
+            type="primary"
+            size="small"
+            @click="action === 'start' ? startPlan() : undefined"
+          >
+            {{ dict.actionLabel(action, 'plan') }}
+          </el-button>
+        </div>
+      </div>
+
+      <!-- 统计行 -->
+      <section class="exec-stats" v-loading="loading">
+        <div class="exec-stats__ring">
+          <PassRateRing :passed="counts?.passed ?? 0" :planned="counts?.total ?? 0" />
+          <div class="exec-stats__ring-cap">
+            服务端通过率 <b>{{ formatPercent(counts?.passRate ?? null) }}</b>
+            <template v-if="counts?.coverage !== null && counts?.coverage !== undefined">
+              · 覆盖率 {{ formatPercent(counts.coverage) }}
+            </template>
           </div>
         </div>
-        <div class="plan-gate">
-          <div class="dl-mode" :class="gateMode === 'STRICT' ? 'is-strict' : 'is-loose'">
-            门禁 · {{ gateMode === 'STRICT' ? '严格' : '宽松' }}
+        <div class="exec-stats__tiles">
+          <div class="exec-tile">
+            <span class="exec-tile__label">未执行</span>
+            <span class="exec-tile__value">{{ formatNumber(counts?.notRun ?? 0) }}</span>
           </div>
-          <p class="dl-hint">{{ gateRule }}</p>
-          <div class="gate-check">
-            <el-input-number
-              v-model="requirementId"
-              :min="1"
-              :controls="false"
-              placeholder="需求 ID"
-              style="width: 110px"
-            />
-            <el-button :loading="gateLoading" @click="checkGate">评估该需求门禁</el-button>
+          <div class="exec-tile exec-tile--danger">
+            <span class="exec-tile__label">失败</span>
+            <span class="exec-tile__value">{{ formatNumber(counts?.failed ?? 0) }}</span>
           </div>
-          <p v-if="gateError" class="ink-danger gate-error">{{ gateError }}</p>
+          <div class="exec-tile exec-tile--warning">
+            <span class="exec-tile__label">阻塞</span>
+            <span class="exec-tile__value">{{ formatNumber(counts?.blocked ?? 0) }}</span>
+          </div>
+          <div class="exec-tile">
+            <span class="exec-tile__label">执行进度</span>
+            <span class="exec-tile__value">{{ progress.done }}/{{ progress.total }}</span>
+          </div>
         </div>
       </section>
 
-      <section v-if="gateDecision" class="surface surface--pad">
-        <GateChecklist
-          :items="gateDecision.items ?? []"
-          mode="gate"
-          :rejected="gateDecision.passed === false"
-          :rejected-text="gateDecision.reason || '门禁未通过：计划内仍有未通过用例'"
-        />
-        <div v-if="gateDecision.blockers?.length" class="blockers">
-          <div class="dl-toolbar__title">阻断项（服务端判定）</div>
-          <ul>
-            <li v-for="(blocker, index) in gateDecision.blockers" :key="index">
-              <span class="t-code">{{ blocker.caseCode || `#${blocker.caseId}` }}</span>
-              <span>{{ blocker.name || blocker.note || blocker.detail || '未通过' }}</span>
-              <StatusPill v-if="blocker.result" kind="execution" :value="blocker.result" size="sm" />
-            </li>
-          </ul>
+      <!-- 轮次条 -->
+      <section class="exec-rounds">
+        <RoundSwitcher :rounds="rounds" :model-value="roundId" @update:model-value="selectRound" />
+        <div class="segmented" role="group" aria-label="用例视图">
+          <button type="button" :class="{ 'is-active': mode === 'round' }" @click="setMode('round')">分轮次</button>
+          <button type="button" :class="{ 'is-active': mode === 'total' }" @click="setMode('total')">累计</button>
         </div>
+        <span class="dl-filters__spacer" />
+        <el-input v-model="keyword" size="small" placeholder="搜索用例编号/标题" clearable class="exec-search" />
       </section>
 
-      <section class="surface plan-table">
-        <div class="dl-toolbar">
-          <div class="dl-chips">
-            <button type="button" class="dl-chip" :class="{ 'is-active': filter === 'all' }" @click="filter = 'all'">
-              全部 {{ cases.length }}
-            </button>
-            <button type="button" class="dl-chip" :class="{ 'is-active': filter === 'pending' }" @click="filter = 'pending'">
-              未执行 {{ pendingCount }}
-            </button>
-            <button type="button" class="dl-chip" :class="{ 'is-active': filter === 'failed', '--warn': failedCount > 0 }" @click="filter = 'failed'">
-              失败 {{ failedCount }}
-            </button>
-          </div>
-          <div class="dl-filters__spacer" />
-          <span class="dl-hint">执行只写记录，不改用例主表；用例版本钉在纳入计划的那一刻</span>
-        </div>
+      <!-- 左侧状态分组 + 右侧执行表 -->
+      <div class="exec-split">
+        <aside class="exec-tree" aria-label="用例状态分组">
+          <button
+            v-for="item in BUCKETS"
+            :key="item.key"
+            type="button"
+            class="exec-tree__item"
+            :class="{ 'is-active': bucket === item.key }"
+            @click="bucket = item.key"
+          >
+            <span>{{ item.label }}</span>
+            <span class="exec-tree__count">{{ bucketCount(item.key) }}</span>
+          </button>
+        </aside>
 
-        <EmptyState
-          v-if="!loading && !cases.length"
-          title="计划里还没有用例"
-          description="从用例库纳入用例后即可开始执行；纳入时会钉住当前版本"
-          icon="file"
-          compact
-          :action-text="canManage ? '纳入用例' : undefined"
-          @action="openAdd"
-        />
-
-        <table v-else class="exec-table">
-          <thead>
-            <tr>
-              <th style="width: 120px">用例</th>
-              <th>标题</th>
-              <th style="width: 70px">版本</th>
-              <th style="width: 140px">结果</th>
-              <th style="width: 220px">备注</th>
-              <th style="width: 150px">执行时间</th>
-              <th style="width: 170px">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in visibleCases" :key="item.caseId" :class="{ 'is-failed': item.result === 'FAIL' }">
-              <td><span class="t-code">{{ item.caseCode }}</span></td>
-              <td class="exec-title">
-                {{ item.title || '—' }}
-                <span v-if="item.result === 'FAIL'" class="fail-flag">失败</span>
-              </td>
-              <td><span class="t-code">v{{ item.caseVersion }}</span></td>
-              <td>
-                <el-select
-                  v-model="drafts[item.caseId].result"
-                  size="small"
-                  :disabled="!canManage"
-                  style="width: 110px"
-                  @change="onResultChange(item)"
-                >
-                  <el-option v-for="result in ['NOT_RUN', 'PASS', 'FAIL', 'BLOCKED', 'SKIP']" :key="result" :label="dict.label('execution', result)" :value="result" />
-                </el-select>
-              </td>
-              <td>
-                <el-input
-                  v-model="drafts[item.caseId].note"
-                  size="small"
-                  maxlength="200"
-                  :disabled="!canManage"
-                  placeholder="阻塞 / 跳过必填原因"
-                />
-              </td>
-              <td class="t-aux">{{ item.executedAt ? formatDateTime(item.executedAt) : '—' }}</td>
-              <td>
-                <div class="row-actions exec-actions">
-                  <el-button
-                    link
-                    type="primary"
-                    :loading="savingCase === item.caseId"
-                    :disabled="!canManage"
-                    @click="saveExecution(item)"
-                  >
-                    保存
-                  </el-button>
-                  <el-button
-                    v-if="item.result === 'FAIL'"
-                    link
-                    type="danger"
-                    :disabled="!canManage"
-                    @click="convertToDefect(item)"
-                  >
-                    转缺陷
-                  </el-button>
-                  <el-button link :disabled="!canManage" @click="removeTarget = item">移除</el-button>
+        <section class="exec-main" v-loading="loading">
+          <el-table :data="filtered" row-key="caseId" size="small" height="calc(100vh - 420px)" @selection-change="selected = $event">
+            <el-table-column type="selection" width="40" />
+            <el-table-column label="用例" min-width="260">
+              <template #default="{ row }">
+                <div class="exec-case">
+                  <span class="t-code">{{ row.caseCode }}</span>
+                  <span v-if="row.caseVersion" class="exec-case__ver">v{{ row.caseVersion }}</span>
+                  <span class="exec-case__title">{{ row.title || '—' }}</span>
                 </div>
-              </td>
-            </tr>
-            <tr v-if="!visibleCases.length">
-              <td colspan="7" class="dl-hint" style="padding: 16px">当前筛选下没有用例</td>
-            </tr>
-          </tbody>
-        </table>
+              </template>
+            </el-table-column>
+            <el-table-column label="结果" width="130">
+              <template #default="{ row }">
+                <el-select
+                  :model-value="draftOf(row).result"
+                  size="small"
+                  :disabled="!execAllowed"
+                  @update:model-value="onResultChange(row, $event)"
+                >
+                  <el-option label="未执行" value="NOT_RUN" />
+                  <el-option v-for="item in RESULTS" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="备注" min-width="180">
+              <template #default="{ row }">
+                <el-input
+                  :model-value="draftOf(row).note"
+                  size="small"
+                  placeholder="失败必填原因"
+                  :disabled="!execAllowed"
+                  @update:model-value="onNoteInput(row, $event)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column label="执行人" width="110">
+              <template #default="{ row }">{{ executorName(row.executorId) }}</template>
+            </el-table-column>
+            <el-table-column label="时间" width="150">
+              <template #default="{ row }"><span class="muted">{{ formatDateTime(row.executedAt) }}</span></template>
+            </el-table-column>
+            <el-table-column label="操作" width="150" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="draftOf(row).result !== 'NOT_RUN'"
+                  link
+                  type="primary"
+                  size="small"
+                  :disabled="!execAllowed || saving"
+                  @click="saveOne(row)"
+                >
+                  保存
+                </el-button>
+                <el-button
+                  v-if="(row.result || '') === 'FAIL'"
+                  link
+                  type="danger"
+                  size="small"
+                  @click="toDefect(row)"
+                >
+                  转缺陷
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
 
-        <div class="dl-sticky">
-          <div class="sticky-stats">
-            <span>通过率 <strong>{{ Math.round(Number(summary?.passRate ?? 0) * 100) }}%</strong></span>
-            <span>覆盖率 <strong>{{ Math.round(Number(summary?.coverage ?? 0) * 100) }}%</strong></span>
-            <span class="t-aux">未执行 {{ summary?.notRun ?? 0 }}</span>
-          </div>
-          <el-button type="primary" :loading="loading" @click="load">刷新汇总</el-button>
-        </div>
-      </section>
+          <EmptyState
+            v-if="!filtered.length"
+            compact
+            :title="rows.length ? '这个筛选下没有用例' : '这一轮还没有用例'"
+            :description="rows.length ? '换个状态分组或清空搜索词' : '开启轮次时按作用域固化用例'"
+            icon="filter"
+          />
+        </section>
+      </div>
+
+      <!-- sticky 底条 -->
+      <div class="exec-sticky dl-sticky" role="status">
+        <span>当前 {{ progress.done }}/{{ progress.total }}</span>
+        <span v-if="dirtyRows.length" class="exec-sticky__dirty">未保存 {{ dirtyRows.length }}</span>
+        <span v-else class="exec-sticky__clean">已全部保存</span>
+        <span class="exec-sticky__spacer" />
+        <el-button size="small" :disabled="!dirtyRows.length || saving" @click="saveAll" :loading="saving">
+          保存全部
+        </el-button>
+      </div>
     </template>
 
-    <el-dialog v-model="addVisible" title="纳入用例" width="720px" :close-on-click-modal="false">
-      <div class="dl-filters">
-        <el-input
-          v-model="addKeyword"
-          placeholder="搜索编号 / 标题"
-          clearable
-          style="width: 240px"
-          @keyup.enter="searchCases"
-        />
-        <el-button :loading="addLoading" @click="searchCases">搜索</el-button>
+    <el-dialog v-model="closeDialog.visible" title="关闭轮次" width="480px" :close-on-click-modal="false">
+      <p class="dialog-hint">关闭后本轮只读；有未执行用例时服务端会拒绝并列出用例编号。</p>
+      <el-form label-position="top">
+        <el-form-item label="轮次结论">
+          <el-select v-model="closeDialog.conclusion" style="width: 100%">
+            <el-option label="通过" value="PASS" />
+            <el-option label="有条件通过" value="CONDITIONAL" />
+            <el-option label="不通过" value="FAIL" />
+            <el-option label="取消" value="CANCELLED" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input v-model="closeDialog.note" type="textarea" :rows="3" maxlength="200" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <div v-if="closeDialog.unexecuted.length" class="dl-conflict" role="alert">
+        <strong>还有 {{ closeDialog.unexecuted.length }} 条用例未执行</strong>
+        <div class="unexecuted-chips">
+          <span v-for="id in closeDialog.unexecuted" :key="id" class="unexecuted-chip">#{{ id }}</span>
+        </div>
       </div>
-      <el-table
-        v-loading="addLoading"
-        :data="candidates"
-        row-key="id"
-        max-height="360"
-        @selection-change="(rows: TestCaseRow[]) => (selectedCaseIds = rows.map((row) => row.id))"
-      >
-        <el-table-column type="selection" width="44" />
-        <el-table-column prop="code" label="编号" width="110">
-          <template #default="{ row }"><span class="t-code">{{ row.code }}</span></template>
-        </el-table-column>
-        <el-table-column prop="title" label="标题" min-width="220" show-overflow-tooltip />
-        <el-table-column label="当前版本" width="90">
-          <template #default="{ row }"><span class="t-code">v{{ row.currentVersion ?? 1 }}</span></template>
-        </el-table-column>
-      </el-table>
-      <p class="dl-hint">纳入时会钉住用例当前版本；之后用例升级不影响本计划的执行口径。</p>
       <template #footer>
-        <el-button @click="addVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="!selectedCaseIds.length" @click="submitAdd">
-          纳入 {{ selectedCaseIds.length }} 条
-        </el-button>
+        <el-button @click="closeDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="closeDialog.running" @click="submitCloseRound">关闭轮次</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog
-      :model-value="Boolean(removeTarget)"
-      title="从计划移除用例"
-      width="440px"
-      @update:model-value="(value: boolean) => !value && (removeTarget = null)"
-    >
-      <p class="dl-hint">
-        将从本计划移除 {{ removeTarget?.caseCode }}（v{{ removeTarget?.caseVersion }}）。用例库与历史执行记录不受影响。
-      </p>
+    <el-dialog v-model="envDialog.visible" title="测试环境" width="420px" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-form-item label="环境">
+          <el-select v-model="envDialog.envId" clearable style="width: 100%" placeholder="选择环境">
+            <el-option v-for="env in envOptions" :key="env.id" :label="env.name" :value="env.id" />
+          </el-select>
+          <p v-if="!envOptions.length" class="dialog-hint">环境台账还没有可用环境，先在「测试环境」页新建。</p>
+        </el-form-item>
+        <el-form-item label="变更原因">
+          <el-input v-model="envDialog.reason" type="textarea" :rows="2" maxlength="120" placeholder="已批准计划必须说明原因" />
+        </el-form-item>
+      </el-form>
       <template #footer>
-        <el-button @click="removeTarget = null">取消</el-button>
-        <el-button type="danger" :loading="removing" @click="confirmRemove">确认移除</el-button>
+        <el-button @click="envDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="envDialog.running" @click="submitEnv">保存</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.plan-meta {
-  display: flex;
-  gap: 18px;
-  margin: -4px 0 12px;
-  flex-wrap: wrap;
-}
-
-.plan-top {
-  display: grid;
-  grid-template-columns: 140px 1fr 300px;
-  gap: 24px;
-  align-items: center;
-}
-
-.plan-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(90px, 1fr));
-  gap: 12px 12px;
-}
-
-.plan-gate {
-  border-left: 1px solid var(--divider);
-  padding-left: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.dl-mode {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: var(--r-pill);
-  font-size: 12px;
-  width: fit-content;
-}
-
-.dl-mode.is-strict {
-  background: var(--danger-bg);
-  color: var(--danger-ink);
-}
-
-.dl-mode.is-loose {
-  background: var(--warning-bg);
-  color: var(--warning-ink);
-}
-
-.gate-check {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.gate-error {
-  margin: 0;
-  font-size: 12px;
-}
-
-.blockers {
-  margin-top: 12px;
-  border-top: 1px solid var(--divider);
-  padding-top: 10px;
-}
-
-.blockers ul {
-  margin: 6px 0 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-body);
-}
-
-.blockers li {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.plan-table {
-  margin-top: 12px;
-}
-
-.exec-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.exec-table th {
-  height: 40px;
-  padding: 0 12px;
-  background: var(--bg-table-head);
-  color: var(--text-muted-aa);
-  font-size: 12px;
-  font-weight: 500;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-}
-
-.exec-table td {
-  height: 44px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--divider);
-  vertical-align: middle;
-}
-
-.exec-table tr.is-failed td {
-  background: #fffafa;
+.exec-page {
+  padding-bottom: 64px;
 }
 
 .exec-title {
-  color: var(--text-title);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.fail-flag {
-  margin-left: 6px;
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--r-card);
+  background: var(--color-primary-light);
+  color: #1a4fae;
+  font-size: 13px;
+}
+
+.readonly-banner {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  margin-bottom: 12px;
+  padding: 0 12px;
+  border-radius: var(--r-ctl);
+  background: var(--color-info-bg);
+  color: var(--text-body);
+  font-size: 12px;
+}
+
+.exec-conflict {
+  margin-bottom: 12px;
+}
+
+.exec-conflict__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.exec-conflict__code {
   padding: 0 6px;
-  border-radius: var(--r-pill);
-  background: var(--danger-bg);
+  border-radius: var(--r-cell);
+  background: rgba(217, 54, 62, 0.08);
   color: var(--danger-ink);
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
-.exec-actions {
-  opacity: 1;
+.exec-conflict__spacer {
+  flex: 1;
 }
 
-.dl-sticky {
+.exec-conflict__close {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--r-cell);
+  background: transparent;
+  color: var(--text-muted-aa);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.exec-conflict__msg {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.exec-conflict__list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.exec-conflict__list li {
+  display: grid;
+  grid-template-columns: 1fr 110px 120px 1fr;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px dashed rgba(217, 54, 62, 0.24);
+  font-size: 12px;
+}
+
+.exec-conflict__hint {
+  color: var(--text-muted-aa);
+}
+
+.exec-conflict__next {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+/* 统计行：环 + 4 个数字块 */
+.exec-stats {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.exec-stats__ring {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.exec-stats__ring-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-muted-aa);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.exec-stats__ring-cap b {
+  color: var(--text-title);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.exec-stats__tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.exec-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.exec-tile--danger .exec-tile__value {
+  color: var(--danger-ink);
+}
+
+.exec-tile--warning .exec-tile__value {
+  color: #b26a00;
+}
+
+.exec-tile__label {
+  color: var(--text-muted-aa);
+  font-size: 12px;
+}
+
+.exec-tile__value {
+  color: var(--text-title);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 26px;
+}
+
+.exec-rounds {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.exec-search {
+  width: 220px;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--bg-table-head);
+}
+
+.segmented button {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-body);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.segmented button.is-active {
+  background: var(--bg-card);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.exec-split {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.exec-tree {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--bg-card);
+}
+
+.exec-tree__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--text-body);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color var(--t-color) var(--ease);
+}
+
+.exec-tree__item:hover {
+  background: var(--bg-hover);
+}
+
+.exec-tree__item.is-active {
+  background: var(--bg-selected);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.exec-tree__count {
+  color: var(--text-muted-aa);
+  font-variant-numeric: tabular-nums;
+}
+
+.exec-main {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.exec-case {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.exec-case__ver {
+  padding: 0 4px;
+  border-radius: var(--r-cell);
+  background: var(--bg-table-head);
+  color: var(--text-muted-aa);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.exec-case__title {
+  color: var(--text-body);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exec-sticky {
   position: sticky;
   bottom: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  height: 48px;
+  padding: 0 16px;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
   background: var(--bg-card);
-  border-top: 1px solid var(--border);
-}
-
-.sticky-stats {
-  display: flex;
-  gap: 18px;
-  font-size: 12px;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.04);
+  font-size: 13px;
   color: var(--text-body);
 }
 
-.sticky-stats strong {
-  color: var(--text-title);
-  font-size: 14px;
+.exec-sticky__dirty {
+  color: #b26a00;
+  font-weight: 600;
+}
+
+.exec-sticky__clean {
+  color: var(--text-muted-aa);
+}
+
+.exec-sticky__spacer {
+  flex: 1;
+}
+
+.muted {
+  color: var(--text-muted-aa);
+  font-size: 12px;
+}
+
+.dialog-hint {
+  margin: 0 0 8px;
+  color: var(--text-muted-aa);
+  font-size: 12px;
+}
+
+.unexecuted-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.unexecuted-chip {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-cell);
+  background: var(--bg-card);
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+@media (max-width: 1080px) {
+  .exec-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .exec-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

@@ -341,7 +341,7 @@ section "AC-5 权限矩阵：接口生成探测矩阵，逐格断言 2xx/403"
 api_call GET /api/req/admin/permissions
 expect "GET /admin/permissions 200" 200
 FN_COUNT="$(jlen "$HTTP_BODY" '.functions')"
-expect_num "权限矩阵暴露 26 个函数码" "${FN_COUNT:-0}" eq 26 "PermissionMatrix 必须与 TECHNICAL §5.3 一致"
+expect_num "权限矩阵暴露 41 个函数码" "${FN_COUNT:-0}" eq 41 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码）"
 ROLE_COUNT="$(jlen "$HTTP_BODY" '.roles')"
 expect_num "权限矩阵暴露 10 个角色" "${ROLE_COUNT:-0}" eq 10 "建租户预置的 10 角色"
 ROLE_CODES="$(db_q "SELECT GROUP_CONCAT(DISTINCT code ORDER BY code) FROM sys_role WHERE tenant_id=$(tenant_id)")"
@@ -583,7 +583,7 @@ else
 fi
 
 # =====================================================================
-section "AC-12 发布单五项准入：服务端重算、FAIL 409、强制放行受控"
+section "AC-12 发布单六项准入：服务端重算、FAIL 409、强制放行已退役"
 REL_RD="$(db_q "SELECT requirement_id FROM release_requirement WHERE release_id=${REL_ID} ORDER BY requirement_id LIMIT 1")"
 [[ -n "$REL_RD" ]] || REL_RD="$RD_A"
 api_call POST /api/req/deploy-orders "$(jq -cn --argjson r "$REL_ID" --argjson q "$REL_RD" '{
@@ -596,22 +596,19 @@ expect "创建发布单 201" 201
 DEP_ID="$(jget "$HTTP_BODY" '.id')"
 
 api_call POST "/api/req/deploy-orders/${DEP_ID}/submit"
-expect "准入不满足时提交 → 409 ADMISSION_FAILED" 409 "ADMISSION_FAILED"
-expect "409 detail.items 含全部 5 项（前端可常驻展示）" 409 "MAN_DAYS_FILLED"
+# M6 起第 6 项质量门先于 5 项准入判定：没有已会签报告时 QUALITY_GATE_FAILED 才是正确拒绝。
+expect "准入不满足时提交 → 409 QUALITY_GATE_FAILED（第 6 项质量门）" 409 "QUALITY_GATE_FAILED"
+expect "409 detail.items 含全部 6 项（前端可常驻展示）" 409 "MAN_DAYS_FILLED"
 
+# AC-6.6：force-release 保留路由签名但恒 409 FORCE_RELEASE_RETIRED（不再接受任何原因）。
 api_call POST "/api/req/deploy-orders/${DEP_ID}/force-release" '{"reason":""}'
-expect "空原因强制放行 → 400 REASON_REQUIRED" 400 "REASON_REQUIRED"
+expect "空原因强制放行 → 409 FORCE_RELEASE_RETIRED（入口已退役）" 409 "FORCE_RELEASE_RETIRED"
 api_call POST "/api/req/deploy-orders/${DEP_ID}/force-release" '{"reason":"验证-受控放行"}'
-if [[ "$HTTP_CODE" == "200" ]]; then
-    pass "带原因强制放行 200"
-    AUDITED="$(db_count audit_log "biz_type='deploy_order' AND biz_id=${DEP_ID} AND action LIKE '%FORCE%'")"
-    expect_num "强制放行写审计" "${AUDITED:-0}" ge 1 "受控动作必须留痕（AC-12）"
-else
-    fail "强制放行失败 (HTTP ${HTTP_CODE})" "强制放行是独立受控入口，仅 PMO/管理员 + 非空原因"
-fi
+expect "带原因强制放行同样 409 FORCE_RELEASE_RETIRED（不得绕过质量门）" 409 "FORCE_RELEASE_RETIRED"
+expect_num "退役入口未落强制标记" "$(db_count deploy_order "id=${DEP_ID} AND forced_release=1")" eq 0 "强制放行不得再改单据"
 
-# D-09 正向用例（五项全满足 → submit 200）需要「计划内用例真实 PASS + 需求链审批 APPROVED」，
-# 只能在 AC-16 的测试计划/执行夹具搭好之后跑；这里只保留“只断言 409 会掩盖门禁 500”的提示。
+# D-09 正向用例（六项全满足 → submit 200）需要「计划内用例真实 PASS + 需求链审批 APPROVED
+# + 已会签报告」；夹具在 AC-16 的 D-09 段完整走一遍。
 
 # =====================================================================
 section "AC-13 缺陷：派生归属、状态机、看板与明细复算"
@@ -727,6 +724,13 @@ expect "STRICT 下 NOT_RUN 阻断（passed=false）" 200 '"passed":false'
 # D-01 跨服务门禁：内部端点带 token 必须 200（不能因 /internal/** 放行就没有 TenantContext），
 # 且门禁已通过的需求 test_pass 必须真的 200——只断言 409 会让"门禁 500"永远绿。
 OK_RD="$RD_A"
+# M6 计划七态：DRAFT 不能直接执行，必须 submit-review → approve → start。
+api_call POST "/api/deliver/test-plans/${PLAN_ID}/submit-review" '{}'
+expect "计划提交评审 200" 200
+api_call POST "/api/deliver/test-plans/${PLAN_ID}/approve" '{"comment":"验证"}'
+expect "计划批准 200" 200
+api_call POST "/api/deliver/test-plans/${PLAN_ID}/start" '{}'
+expect "计划开始执行 200" 200
 api_call POST "/api/deliver/test-plans/${PLAN_ID}/execute" "$(jq -cn --argjson c "$CASE_ID" '{caseId:$c,result:"PASS",note:"D-01 正向"}')"
 expect "计划内用例执行 PASS 201（门禁转绿）" 201
 INT_GATE_CODE="$(curl -sS --max-time 10 -o /tmp/gate-int.$$ -w '%{http_code}' \
@@ -806,12 +810,31 @@ api_call POST /api/deliver/test-plans "$(jq -cn --argjson r "$D9_REL" --arg n "�
   releaseId:$r, name:$n, ownerId:1, windowStart:"2026-11-20", windowEnd:"2026-11-28", caseIds:[$c]}')"
 expect "准入正向计划 201" 201
 D9_PLAN="$(jget "$HTTP_BODY" '.plan.id')"
+api_call POST "/api/deliver/test-plans/${D9_PLAN}/submit-review" '{}'
+api_call POST "/api/deliver/test-plans/${D9_PLAN}/approve" '{"comment":"准入正向"}'
+api_call POST "/api/deliver/test-plans/${D9_PLAN}/start" '{}'
 api_call POST "/api/deliver/test-plans/${D9_PLAN}/execute" "$(jq -cn --argjson c "$D9_CASE" '{caseId:$c,result:"PASS",note:"准入正向"}')"
 expect "准入正向执行 PASS 201" 201
 api_call POST "/api/req/requirements/${D9_RD}/actions" '{"action":"start_dev"}'
 api_call POST "/api/req/requirements/${D9_RD}/actions" '{"action":"submit_test"}'
 api_call POST "/api/req/requirements/${D9_RD}/actions" '{"action":"test_pass"}'
 expect "准入正向 RD 门禁通过 test_pass 200" 200
+# 第 6 项质量门要求「已会签报告」：关轮 → 计划完成 → RELEASE 报告 → 三级会签。
+D9_ROUND="$(db_q "SELECT id FROM test_plan_round WHERE plan_id=${D9_PLAN} AND active=1")"
+api_call POST "/api/deliver/test-plans/${D9_PLAN}/rounds/${D9_ROUND}/close" '{"conclusion":"PASS","note":"准入正向"}'
+expect "准入正向关轮 200" 200
+api_call POST "/api/deliver/test-plans/${D9_PLAN}/complete" '{}'
+expect "准入正向计划完成 200" 200
+api_call POST /api/deliver/test-reports "$(jq -cn --argjson r "$D9_REL" '{scope:"RELEASE",releaseId:$r,note:"准入正向报告"}')"
+expect "准入正向报告生成 201" 201
+D9_RPT="$(jget "$HTTP_BODY" '.id')"
+for D9_SIGN_USER in qa1 pm tl1; do
+    login_as "$D9_SIGN_USER" "Passw0rd!" || warn "${D9_SIGN_USER} 登录失败（报告会签）"
+    api_call POST "/api/deliver/test-reports/${D9_RPT}/versions/1/signoff" '{"decision":"APPROVE","comment":"准入正向会签"}'
+    expect "准入正向报告会签（${D9_SIGN_USER}）200" 200
+done
+API_TOKEN="$ADMIN_TOKEN"
+API_TENANT="${SAVED_TENANT:-$API_TENANT}"
 api_call POST /api/req/deploy-orders "$(jq -cn --argjson r "$D9_REL" --argjson q "$D9_RD" '{
   releaseId:$r, env:"PROD", windowStart:"2026-12-02T22:00:00+08:00",
   windowEnd:"2026-12-02T23:00:00+08:00", artifactVersion:"v1.0.1",
@@ -821,7 +844,7 @@ api_call POST /api/req/deploy-orders "$(jq -cn --argjson r "$D9_REL" --argjson q
 expect "准入正向发布单 201" 201
 D9_DEP="$(jget "$HTTP_BODY" '.id')"
 api_call POST "/api/req/deploy-orders/${D9_DEP}/submit"
-expect "五项全满足 → 提交 200（D-09 正向）" 200
+expect "六项全满足 → 提交 200（D-09 正向）" 200
 expect_num "发布单离开 DRAFT" "$(db_count deploy_order "id=${D9_DEP} AND status <> 'DRAFT'")" ge 1 "提交必须真正推进状态"
 
 # =====================================================================
@@ -880,7 +903,7 @@ section "AC-18 指标定义与口径同源"
 api_call GET /api/deliver/metrics/definitions
 expect "指标定义 200" 200
 DEF_N="$(jlen "$HTTP_BODY" '.items // .')"
-expect_num "4 条指标定义（含公式/版本/生效日）" "${DEF_N:-0}" eq 4 "种子必须写 4 条 metric_definition"
+expect_num "9 条指标定义（M6 新增 5 项质量指标）" "${DEF_N:-0}" eq 9 "种子必须写 9 条 metric_definition"
 api_call GET "/api/deliver/defects/board?domainId=1"
 DENSITY="$(jget "$HTTP_BODY" '.metrics.density')"
 D_TOTAL="$(db_count defect "tenant_id=$(tenant_id) AND domain_id=1")"

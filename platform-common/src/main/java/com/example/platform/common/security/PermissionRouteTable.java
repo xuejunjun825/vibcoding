@@ -5,7 +5,7 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * Path + method → function code, as specified in TECHNICAL §5.3.
+ * Path + method → function code, as specified in TECHNICAL §5.3 (r2) and §5.4 (M6 quality).
  *
  * <p>It exists because the controllers were written (in parallel tasks) without
  * {@code @RequiresPermission}; putting the mapping in the platform layer gives <b>one</b>
@@ -15,6 +15,11 @@ import java.util.regex.Pattern;
  * <p>Only paths that actually perform a guarded action are listed. Everything else is readable by
  * any authenticated caller and narrowed by {@code ScopeSql}/{@code ScopeGuard} instead — closing
  * reads by role would break the "vendor reads the requirement assigned to it" flow.</p>
+ *
+ * <p><b>Order is semantic, not cosmetic:</b> the table is first-match-wins, so every M6 rule sits
+ * above the {@code ^/releases}, {@code ^/deploy-orders} and {@code ^/test-plans} fallbacks, and
+ * the waiver routes sit above {@code ^/quality-gates(/.*)?$}. Adding a rule at the bottom is
+ * therefore a silent no-op — {@code PermissionRouteTableTest} asserts each quality action by name.</p>
  */
 public final class PermissionRouteTable {
 
@@ -49,6 +54,39 @@ public final class PermissionRouteTable {
             rule(null, "^/requirements/\\d+/deliver$", false, "req:deliver"),
             rule(null, "^/requirements/\\d+/quick-test$", false, "test:quick"),
             rule("POST", "^/requirements/\\d+/actions$", false, "req:review"),
+
+            // ---- M6 quality domain ----
+            // MUST stay above the release / test-plan fallbacks below: first match wins, so an
+            // /test-plans/{id}/approve that fell through to plan:manage would let a PMO approve a
+            // plan, and /releases/{id}/quality would be swallowed by release:plan.
+            rule("POST", "^/test-plans/\\d+/approve$", false, "plan:approve"),
+            rule("POST", "^/test-plans/\\d+/(submit-review|reject|start|complete|close|archive)$",
+                    false, "plan:edit"),
+            rule("POST", "^/test-plans/\\d+/assignments(/.*)?$", false, "plan:assign"),
+            rule("PUT", "^/test-plans/\\d+/assignments(/.*)?$", false, "plan:assign"),
+            rule("POST", "^/test-plans/\\d+/execute$", false, "plan:execute"),
+            // Opening/closing a round is execution work, not plan administration (AC-2): without
+            // these two rules the requests fall through to plan:manage and a plan:execute-only
+            // QA account gets a 403 on the very action listed in the matrix.
+            rule("POST", "^/test-plans/\\d+/rounds$", false, "plan:execute"),
+            rule("POST", "^/test-plans/\\d+/rounds/\\d+/close$", false, "plan:execute"),
+            rule(null, "^/test-strategies(/.*)?$", false, "strategy:manage"),
+            rule("POST", "^/test-envs(/.*)?$", false, "env:manage"),
+            rule("PUT", "^/test-envs(/.*)?$", false, "env:manage"),
+            rule("DELETE", "^/test-envs(/.*)?$", false, "env:manage"),
+            rule("POST", "^/test-reports/\\d+/versions/\\d+/signoff$", false, "report:sign"),
+            rule("GET", "^/test-reports/\\d+/export$", false, "report:export"),
+            rule("POST", "^/test-reports(/.*)?$", false, "report:generate"),
+            rule("PUT", "^/(quality-gates|releases/\\d+/quality-gate)$", false, "plan:manage"),
+            rule("POST", "^/quality-gates/waivers$", false, "waiver:apply"),
+            rule("POST", "^/quality-gates/waivers/\\d+/(approve|reject|revoke)$", false,
+                    "waiver:approve"),
+            rule("GET", "^/releases/\\d+/quality-gate$", false, "gate:view"),
+            rule(null, "^/quality-gates(/.*)?$", false, "gate:view"),
+            rule(null, "^/metrics/quality$", false, "qualitymetric:view"),
+            rule(null, "^/releases/\\d+/quality$", false, "qualitymetric:view"),
+            rule(null, "^/releases/\\d+/reviews(/.*)?$", false, "review:manage"),
+            rule(null, "^/releases/\\d+/quality-settings$", false, "review:manage"),
 
             // ---- releases / deployment ----
             rule(null, "^/releases(/.*)?$", false, "release:plan"),

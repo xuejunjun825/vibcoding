@@ -4,6 +4,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 /**
  * Wire shapes for the defect endpoints. Records only — the persistence entity never leaves the
  * service layer, so adding a column cannot accidentally expose it.
@@ -13,7 +15,12 @@ public final class DefectViews {
     private DefectViews() {
     }
 
-    /** Create request. Deliberately has no domain/vendor field: those are derived (AC-13). */
+    /**
+     * Create request. Deliberately has no domain/vendor field: those are derived (AC-13).
+     *
+     * <p>{@code source} 缺省 {@code MANUAL}；{@code PROD} 表示生产逃逸提报，必须能关联到版本
+     * （请求里的 releaseId 或需求自身的版本），否则无法划定观察窗，服务端返回 400。</p>
+     */
     public record CreateDefect(Long requirementId,
                                Long releaseId,
                                Long testCaseId,
@@ -25,7 +32,9 @@ public final class DefectViews {
                                String severity,
                                String priority,
                                Long handlerId,
-                               LocalDate expectedFixDate) {
+                               LocalDate expectedFixDate,
+                               String source,
+                               String foundPhase) {
     }
 
     /** {@code action} is accepted in either case; the service normalises before the lookup. */
@@ -65,7 +74,11 @@ public final class DefectViews {
                              LocalDateTime foundAt,
                              LocalDateTime closedAt,
                              List<String> allowedActions,
-                             List<HistoryView> history) {
+                             List<HistoryView> history,
+                             String source,
+                             String foundPhase,
+                             @JsonProperty("isEscape") boolean isEscape,
+                             LocalDateTime escapeWindowEnd) {
     }
 
     /**

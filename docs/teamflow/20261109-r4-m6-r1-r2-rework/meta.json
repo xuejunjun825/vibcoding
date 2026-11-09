@@ -1,0 +1,7 @@
+{
+  "reqId": "req-4",
+  "runId": "tf-mw8i22bb-uu7e5w",
+  "title": "修复 M6 验收遗留的 R1 与 R2 两条缺陷（先修再合并）：R1（P2，阻塞 AC-1.4）发布单创建未校验测试计划批准状态——未批准的 DRAFT/PEN",
+  "mode": "lite",
+  "createdAt": 1794182703682
+}

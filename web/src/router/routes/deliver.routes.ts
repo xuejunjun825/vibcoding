@@ -1,5 +1,9 @@
 import type { RouteRecordRaw } from 'vue-router'
 
+// 与 quality.routes.ts 共用同一个惰性视图解析器：同批次页面（T10/T11）尚未落地时
+// 不能让静态 import 把 vue-tsc 直接打红，页面真缺时导航抛可读错误（响亮失败）。
+import { lazyView } from './quality.routes'
+
 /**
  * 交付域 + 系统管理路由（T9）。
  *
@@ -52,6 +56,24 @@ const deliverRoutes: RouteRecordRaw[] = [
     name: 'test-plans',
     component: () => import('@/views/deliver/TestPlansView.vue'),
     meta: { title: '测试计划', navKey: 'test-plans' },
+  },
+  {
+    path: '/test-plans/:id(\\d+)',
+    name: 'test-plan-detail',
+    // M6 计划详情（六 tab）：数据走 `/lifecycle`，不再是 M5 的用例编辑视图
+    component: lazyView('deliver/TestPlanDetailView.vue'),
+    meta: {
+      title: '计划详情',
+      navKey: 'test-plans',
+      parentPath: '/test-plans',
+      functionCode: ['plan:edit', 'plan:approve', 'plan:execute', 'plan:assign', 'case:manage'],
+    },
+  },
+  {
+    path: '/workbench',
+    name: 'workbench',
+    component: lazyView('deliver/WorkbenchView.vue'),
+    meta: { title: '工作台', navKey: 'workbench', functionCode: ['plan:execute', 'case:manage'] },
   },
   {
     path: '/test-plans/:id(\\d+)/execute',

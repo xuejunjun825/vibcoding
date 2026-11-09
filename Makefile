@@ -3,7 +3,7 @@ SHELL := /bin/bash
 
 .PHONY: help dev-up dev-down verify build lint test test-negative nacos-status clean distclean \
         platform-up platform-down platform-web platform-verify platform-test-negative \
-        platform-seed platform-unit platform-perf
+        platform-seed platform-unit platform-perf quality-verify quality-e2e
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
@@ -55,8 +55,17 @@ platform-seed: ## 幂等种子：连跑两遍断言计数不变（AC-19）
 platform-unit: ## 契约/状态机/权限矩阵/公式/ScopeSql 单元测试
 	@./scripts/platform-unit.sh
 
-platform-perf: ## AC-20 六项性能基线（p50/p95 + EXPLAIN）
+platform-perf: ## AC-20 性能基线（r2 六项 + M6 质量四项，p50/p95 + EXPLAIN）
 	@./scripts/platform-perf.sh
+
+quality-verify: ## M6 质量域验收 q0..q7（PASS==TOTAL 守卫；先 make platform-up）
+	@./scripts/quality-verify.sh
+
+quality-e2e: ## M6 质量域浏览器 E2E（Playwright/Node；服务未起则 SKIP）
+	@bash -c 'if ! curl -fsS -o /dev/null --max-time 3 "$${WEB_URL:-http://127.0.0.1:5173}/"; then \
+	    echo "[SKIP] web 未启动（$${WEB_URL:-http://127.0.0.1:5173}/），跳过 quality-e2e：make platform-up 后再跑"; \
+	    exit 0; fi; \
+	  node web/e2e/quality.spec.mjs'
 
 clean: ## 清理 Maven 产物与运行态 pid（请先 make dev-down；保留 .nacos 缓存）
 	@bash -c 'source ./scripts/lib.sh; \

@@ -90,6 +90,28 @@ public class DefectEntity {
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
 
+    /**
+     * 缺陷来源：{@code MANUAL}（人工提报）/ {@code TEST}（执行失败转入）/ {@code PROD}（生产逃逸提报）。
+     * 只有 PROD 参与逃逸判定；缺省 MANUAL 与迁移回填一致。
+     */
+    @Column(name = "source", nullable = false, length = 8)
+    private String source;
+
+    /** 发现阶段（自由文本，≤16 字）：DEV/TEST/UAT/PROD 等，用于版本质量按阶段切片。 */
+    @Column(name = "found_phase", length = 16)
+    private String foundPhase;
+
+    /**
+     * 是否发生在发布后观察窗内（0/1）。<b>只在 INSERT 时判定一次</b>：窗口终点同时固化到
+     * {@link #escapeWindowEnd}，之后改 {@code release.observation_hours} 不会改写历史（AC-8.3）。
+     */
+    @Column(name = "is_escape", nullable = false)
+    private Integer isEscape = 0;
+
+    /** 判定时使用的观察窗终点；未判为逃逸或没有成功发布时为空。 */
+    @Column(name = "escape_window_end")
+    private LocalDateTime escapeWindowEnd;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -276,6 +298,38 @@ public class DefectEntity {
 
     public void setClosedAt(LocalDateTime closedAt) {
         this.closedAt = closedAt;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
+    }
+
+    public String getFoundPhase() {
+        return foundPhase;
+    }
+
+    public void setFoundPhase(String foundPhase) {
+        this.foundPhase = foundPhase;
+    }
+
+    public Integer getIsEscape() {
+        return isEscape;
+    }
+
+    public void setIsEscape(Integer isEscape) {
+        this.isEscape = isEscape;
+    }
+
+    public LocalDateTime getEscapeWindowEnd() {
+        return escapeWindowEnd;
+    }
+
+    public void setEscapeWindowEnd(LocalDateTime escapeWindowEnd) {
+        this.escapeWindowEnd = escapeWindowEnd;
     }
 
     public LocalDateTime getCreatedAt() {

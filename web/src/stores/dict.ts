@@ -13,7 +13,24 @@ export interface StatusMeta {
   tone: Tone
 }
 
-export type StatusKind = 'requirement' | 'defect' | 'approval' | 'execution' | 'release' | 'deploy'
+export type StatusKind =
+  | 'requirement'
+  | 'defect'
+  | 'approval'
+  | 'execution'
+  | 'release'
+  | 'deploy'
+  // M6 质量域（TECHNICAL §7.3：10 个新 kind，状态文案唯一来源）
+  | 'strategy'
+  | 'plan'
+  | 'planRound'
+  | 'report'
+  | 'signoff'
+  | 'gate'
+  | 'rule'
+  | 'waiver'
+  | 'review'
+  | 'env'
 
 const REQUIREMENT: Record<string, StatusMeta> = {
   // BUS
@@ -82,6 +99,102 @@ const DEPLOY: Record<string, StatusMeta> = {
   ROLLED_BACK: { label: '已回滚', tone: 'warning' },
 }
 
+/** 测试策略：同 Release 多版本，ACTIVE 唯一，旧版 RETIRED */
+const STRATEGY: Record<string, StatusMeta> = {
+  DRAFT: { label: '草稿', tone: 'neutral' },
+  ACTIVE: { label: '生效中', tone: 'success' },
+  RETIRED: { label: '已退役', tone: 'neutral' },
+}
+
+/** 测试计划（StateTables.PLAN 权威；动作码是连字符 submit-review） */
+const PLAN: Record<string, StatusMeta> = {
+  DRAFT: { label: '草稿', tone: 'neutral' },
+  PENDING_REVIEW: { label: '待审批', tone: 'warning' },
+  APPROVED: { label: '已批准', tone: 'info' },
+  IN_PROGRESS: { label: '执行中', tone: 'primary' },
+  COMPLETED: { label: '已完成', tone: 'success' },
+  CLOSED: { label: '已关闭', tone: 'neutral' },
+  ARCHIVED: { label: '已归档', tone: 'neutral' },
+}
+
+/**
+ * 轮次：状态（PLANNING/RUNNING/CLOSED）与关闭结论（PASS/FAIL/CONDITIONAL/CANCELLED）
+ * 共用一张表 —— 两者取值不重叠，抽屉里 `label('planRound', round.conclusion)` 直接可用。
+ * IN_PROGRESS / DONE 是 R1 归集前旧数据的写法，保留别名不丢中文。
+ */
+const PLAN_ROUND: Record<string, StatusMeta> = {
+  PLANNING: { label: '待开始', tone: 'info' },
+  RUNNING: { label: '进行中', tone: 'primary' },
+  IN_PROGRESS: { label: '进行中', tone: 'primary' },
+  CLOSED: { label: '已关闭', tone: 'neutral' },
+  DONE: { label: '已完成', tone: 'success' },
+  PASS: { label: '通过', tone: 'success' },
+  FAIL: { label: '不通过', tone: 'danger' },
+  CONDITIONAL: { label: '有条件通过', tone: 'warning' },
+  CANCELLED: { label: '已取消', tone: 'neutral' },
+}
+
+/** 报告：状态 + 版本结论共用 */
+const REPORT: Record<string, StatusMeta> = {
+  SIGNING: { label: '会签中', tone: 'warning' },
+  SIGNED: { label: '已生效', tone: 'success' },
+  REJECTED: { label: '已驳回', tone: 'danger' },
+  SUPERSEDED: { label: '已被替代', tone: 'neutral' },
+  PASS: { label: '通过', tone: 'success' },
+  FAIL: { label: '不通过', tone: 'danger' },
+  CONDITIONAL: { label: '有条件通过', tone: 'warning' },
+}
+
+/** 会签：三级顺序（测试负责人 → 质量 → 发布经理），逐级放行 */
+const SIGNOFF: Record<string, StatusMeta> = {
+  PENDING: { label: '待签署', tone: 'neutral' },
+  APPROVED: { label: '已签署', tone: 'success' },
+  SIGNED: { label: '已签署', tone: 'success' },
+  REJECTED: { label: '已驳回', tone: 'danger' },
+}
+
+/** 质量门整体结论（NOT_EVALUATED = 从未求值，fail-closed 不当作通过） */
+const GATE: Record<string, StatusMeta> = {
+  PASS: { label: '通过', tone: 'success' },
+  PASS_WITH_WAIVER: { label: '豁免通过', tone: 'warning' },
+  FAIL: { label: '不通过', tone: 'danger' },
+  NOT_EVALUATED: { label: '未求值', tone: 'neutral' },
+}
+
+/** 单条规则结果：SKIPPED 只允许出现在 enabled=false 的集成门禁上 */
+const RULE: Record<string, StatusMeta> = {
+  PASS: { label: '通过', tone: 'success' },
+  FAIL: { label: '不通过', tone: 'danger' },
+  WAIVED: { label: '已豁免', tone: 'warning' },
+  SKIPPED: { label: '未启用', tone: 'neutral' },
+}
+
+/** 豁免：StateTables 用 ACTIVE，DESIGN 文案写 APPROVED，两种都收 */
+const WAIVER: Record<string, StatusMeta> = {
+  PENDING: { label: '待审批', tone: 'warning' },
+  ACTIVE: { label: '生效中', tone: 'info' },
+  APPROVED: { label: '已批准', tone: 'success' },
+  REJECTED: { label: '已拒绝', tone: 'danger' },
+  EXPIRED: { label: '已过期', tone: 'neutral' },
+  REVOKED: { label: '已撤销', tone: 'neutral' },
+}
+
+/** Go/No-Go：RECORDED/CONFIRMED 是记录状态，GO/CONDITIONAL/NO_GO 才是决策 */
+const REVIEW: Record<string, StatusMeta> = {
+  RECORDED: { label: '已记录', tone: 'info' },
+  CONFIRMED: { label: '已确认', tone: 'success' },
+  GO: { label: 'GO', tone: 'success' },
+  CONDITIONAL: { label: '有条件 GO', tone: 'warning' },
+  NO_GO: { label: 'NO-GO', tone: 'danger' },
+}
+
+/** 环境台账：MAINTENANCE 期间允许执行但要提示，DISABLED 不可被新计划引用 */
+const ENV: Record<string, StatusMeta> = {
+  AVAILABLE: { label: '可用', tone: 'success' },
+  MAINTENANCE: { label: '维护中', tone: 'warning' },
+  DISABLED: { label: '已停用', tone: 'neutral' },
+}
+
 const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   requirement: REQUIREMENT,
   defect: DEFECT,
@@ -89,6 +202,16 @@ const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   execution: EXECUTION,
   release: RELEASE,
   deploy: DEPLOY,
+  strategy: STRATEGY,
+  plan: PLAN,
+  planRound: PLAN_ROUND,
+  report: REPORT,
+  signoff: SIGNOFF,
+  gate: GATE,
+  rule: RULE,
+  waiver: WAIVER,
+  review: REVIEW,
+  env: ENV,
 }
 
 /** 流转动作中文标签（与 TECHNICAL §3.3 的状态表一一对应） */
@@ -122,10 +245,55 @@ export const ACTION_LABELS: Record<string, string> = {
   transfer: '转办',
   urge: '催办',
   skip: '跳过',
+  // —— M6 质量域（StateTables 的动作码是连字符，别写成下划线）——
+  'submit-review': '提交审批',
+  'close-round': '关闭轮次',
+  'force-release': '强制放行',
+  'assign-cases': '分配用例',
+  sign: '签署',
+  supersede: '作废并替代',
+  pass: '判定通过',
+  pass_with_waiver: '豁免通过',
+  fail: '判定不通过',
+  replay: '回放快照',
+  evaluate: '重新求值',
+  activate: '激活',
+  retire: '退役',
+  generate: '生成报告',
+  export: '导出',
+  apply: '申请豁免',
+  expire: '置为过期',
+  revoke: '撤销',
+  confirm: '二次确认',
+  complete: '完成计划',
+  archive: '归档',
 }
 
-/** 危险动作：二次确认 + 必填原因 */
-export const DANGER_ACTIONS = new Set(['close', 'close_duplicate', 'reject', 'withdraw', 'force_release'])
+/**
+ * 同名动作在不同对象的语义不同（缺陷的 start 是“开始处理”，计划/轮次是“开始执行”）。
+ * 页面按 `actionLabel(action, kind)` 取词，不传 kind 时回落到全局表。
+ */
+const ACTION_OVERRIDES: Partial<Record<StatusKind, Record<string, string>>> = {
+  plan: { start: '开始执行', close: '关闭计划', approve: '批准计划', reject: '驳回计划' },
+  planRound: { start: '开始轮次', close: '关闭轮次' },
+  strategy: { activate: '激活版本', retire: '退役版本' },
+  report: { generate: '生成版本', sign: '签署', reject: '驳回版本' },
+  gate: { evaluate: '重新求值', replay: '回放' },
+  waiver: { approve: '批准豁免', reject: '拒绝豁免', revoke: '撤销豁免' },
+  review: { confirm: '二次确认', create: '记录评审' },
+}
+
+/** 危险动作：二次确认 + 必填原因（force-release 已退役，仍按危险动作渲染只读提示） */
+export const DANGER_ACTIONS = new Set([
+  'close',
+  'close_duplicate',
+  'reject',
+  'withdraw',
+  'force_release',
+  'force-release',
+  'revoke',
+  'archive',
+])
 
 const PRIORITY: Record<string, { label: string; color: string; hint: string }> = {
   P0: { label: 'P0', color: '#D9363E', hint: '阻塞' },
@@ -156,8 +324,13 @@ export const useDictStore = defineStore('dict', () => {
     return meta(kind, value).tone
   }
 
-  function actionLabel(action: string): string {
-    return ACTION_LABELS[action] ?? action.replace(/_/g, ' ')
+  /**
+   * 动作码 → 中文。质量域的动作码是连字符（submit-review），两类分隔符都要吃，
+   * 否则未登记的动作会在按钮上露出英文。
+   */
+  function actionLabel(action: string, kind?: StatusKind): string {
+    const scoped = kind ? ACTION_OVERRIDES[kind]?.[action] : undefined
+    return scoped ?? ACTION_LABELS[action] ?? action.replace(/[_-]/g, ' ')
   }
 
   function priority(value: string | null | undefined) {

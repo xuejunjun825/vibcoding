@@ -1,11 +1,14 @@
 package com.example.deliver.defect;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -14,6 +17,7 @@ import com.example.deliver.defect.DefectViews.DefectFilter;
 import com.example.deliver.defect.DefectViews.DefectView;
 import com.example.deliver.defect.DefectViews.HistoryView;
 import com.example.deliver.defect.DefectViews.TransitionCmd;
+import com.example.deliver.reqread.ReleaseWindowReadModel;
 import com.example.deliver.reqread.ReqReadModel;
 import com.example.deliver.reqread.RequirementSnapshot;
 import com.example.deliver.support.Visibility;
@@ -24,6 +28,7 @@ import com.example.platform.common.notify.NotificationWriter;
 import com.example.platform.common.scope.ScopedJdbc;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
+import com.example.platform.contract.PermissionMatrix;
 import com.example.platform.contract.ScopeTier;
 import com.example.platform.contract.StateTables;
 import org.springframework.stereotype.Service;
@@ -41,10 +46,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefectService {
 
     private static final Set<String> SEVERITIES = Set.of("P0", "P1", "P2", "P3");
+    /** 缺陷来源；与 {@code defect.source VARCHAR(8)} 的取值域一致。 */
+    private static final Set<String> SOURCES = Set.of("MANUAL", "TEST", "PROD");
+    private static final String SOURCE_PROD = "PROD";
+    /** 生产缺陷提报的功能码；DENY 的角色连提报入口都不该有（服务层再判一次）。 */
+    private static final String PROD_DEFECT_FUNCTION = "proddefect:report";
 
     private final DefectRepository defects;
     private final DefectHistoryRepository history;
     private final ReqReadModel readModel;
+    private final ReleaseWindowReadModel releaseWindows;
     private final CodeGenerator codeGenerator;
     private final AuditService audit;
     private final NotificationWriter notifications;
@@ -53,6 +64,7 @@ public class DefectService {
     public DefectService(DefectRepository defects,
                          DefectHistoryRepository history,
                          ReqReadModel readModel,
+                         ReleaseWindowReadModel releaseWindows,
                          CodeGenerator codeGenerator,
                          AuditService audit,
                          NotificationWriter notifications,
@@ -60,6 +72,7 @@ public class DefectService {
         this.defects = defects;
         this.history = history;
         this.readModel = readModel;
+        this.releaseWindows = releaseWindows;
         this.codeGenerator = codeGenerator;
         this.audit = audit;
         this.notifications = notifications;
@@ -72,8 +85,25 @@ public class DefectService {
         String title = requireText(cmd.title(), "title");
         String severity = normaliseSeverity(cmd.severity());
         String priority = normaliseSeverity(cmd.priority() == null ? severity : cmd.priority());
+        String source = normaliseSource(cmd.source());
+        String foundPhase = trimToNull(cmd.foundPhase());
+        if (foundPhase != null && foundPhase.length() > 16) {
+            throw new ApiException(400, "VALIDATION_FAILED", "foundPhase 不能超过 16 字",
+                    Map.of("field", "foundPhase", "max", 16));
+        }
 
         RequirementSnapshot requirement = requireRequirement(cmd.requirementId());
+        Long releaseId = cmd.releaseId() != null ? cmd.releaseId() : requirement.releaseId();
+        if (SOURCE_PROD.equals(source)) {
+            requireProdDefectPermission(scope);
+            // 生产缺陷必须显式指明版本：需求上的版本只说明"在哪个版本做"，发布观察窗
+            // 只能按缺陷自己声明的版本算——回退需求版本会把窗口算到别的发布上。
+            if (cmd.releaseId() == null || releaseId == null) {
+                throw new ApiException(400, "PROD_DEFECT_RELEASE_REQUIRED",
+                        "生产缺陷必须关联版本（releaseId）：没有版本就没有观察窗，无法判定是否逃逸",
+                        Map.of("field", "releaseId"));
+            }
+        }
 
         DefectEntity entity = new DefectEntity();
         entity.setTenantId(scope.tenantId());
@@ -82,7 +112,7 @@ public class DefectService {
         entity.setDomainId(requirement.domainId());
         entity.setVendorId(requirement.vendorId());
         entity.setRequirementId(requirement.id());
-        entity.setReleaseId(cmd.releaseId() != null ? cmd.releaseId() : requirement.releaseId());
+        entity.setReleaseId(releaseId);
         entity.setTestCaseId(cmd.testCaseId());
         entity.setTestCaseVersion(cmd.testCaseVersion());
         entity.setTestExecutionId(cmd.testExecutionId());
@@ -96,16 +126,23 @@ public class DefectService {
         entity.setHandlerId(cmd.handlerId());
         entity.setReopenCount(0);
         entity.setExpectedFixDate(cmd.expectedFixDate());
-        entity.setFoundAt(LocalDateTime.now());
+        entity.setSource(source);
+        entity.setFoundPhase(foundPhase);
+        LocalDateTime foundAt = LocalDateTime.now();
+        entity.setFoundAt(foundAt);
         entity.setCreatedBy(scope.userId());
         entity.setUpdatedBy(scope.userId());
+        // 逃逸判定只在 INSERT 这一刻发生；窗口终点一起固化，之后改配置不改写历史（AC-8.3）。
+        applyEscapeVerdict(entity, source, releaseId, foundAt);
         defects.save(entity);
 
         record(entity, "create", null, "NEW", scope.userId(), null);
         audit.record("DEFECT_CREATE", "DEFECT", entity.getId(), Map.of(
                 "code", entity.getCode(),
                 "domainId", entity.getDomainId(),
-                "vendorId", String.valueOf(entity.getVendorId())));
+                "vendorId", String.valueOf(entity.getVendorId()),
+                "source", source,
+                "isEscape", Integer.valueOf(1).equals(entity.getIsEscape())));
         if (entity.getHandlerId() != null) {
             notifyHandler(entity, "新缺陷指派", "缺陷 " + entity.getCode() + " 已指派给你：" + title);
         }
@@ -141,7 +178,9 @@ public class DefectService {
                 cmd == null ? null : cmd.severity(),
                 cmd == null ? null : cmd.priority(),
                 cmd == null ? null : cmd.handlerId(),
-                cmd == null ? null : cmd.expectedFixDate());
+                cmd == null ? null : cmd.expectedFixDate(),
+                "TEST",
+                cmd == null ? null : cmd.foundPhase());
         return create(merged);
     }
 
@@ -317,7 +356,61 @@ public class DefectService {
                 entity.getFoundAt(),
                 entity.getClosedAt(),
                 new ArrayList<>(StateTables.actions(StateTables.DEFECT, entity.getStatus())),
-                entries);
+                entries,
+                entity.getSource(),
+                entity.getFoundPhase(),
+                Integer.valueOf(1).equals(entity.getIsEscape()),
+                entity.getEscapeWindowEnd());
+    }
+
+    /**
+     * 一次判定：PROD 缺陷是否落在"最早成功发布结束 + 观察窗小时数"之内。
+     *
+     * <p>窗口起点取 {@code deploy_order.execution_result='SUCCESS'} 的最早结束时间（版本表没有
+     * 结束时间），经 {@link ReleaseWindowReadModel} 这一唯一跨域只读入口取得。边界按严格小于：
+     * 恰好在 T+观察窗 那一刻发现的缺陷不算逃逸。没有成功发布时窗口不存在，判 0 且窗口终点留空。</p>
+     */
+    private void applyEscapeVerdict(DefectEntity entity, String source, Long releaseId, LocalDateTime foundAt) {
+        entity.setIsEscape(0);
+        entity.setEscapeWindowEnd(null);
+        if (!SOURCE_PROD.equals(source) || releaseId == null) {
+            return;
+        }
+        Instant windowEnd = releaseWindows.window(releaseId).windowEnd();
+        if (windowEnd == null) {
+            return;
+        }
+        boolean escaped = foundAt.atZone(ZoneId.systemDefault()).toInstant().isBefore(windowEnd);
+        entity.setIsEscape(escaped ? 1 : 0);
+        if (escaped) {
+            entity.setEscapeWindowEnd(LocalDateTime.ofInstant(windowEnd, ZoneId.systemDefault()));
+        }
+    }
+
+    private static void requireProdDefectPermission(DataScope scope) {
+        PermissionMatrix.Access access = PermissionMatrix.accessOf(PROD_DEFECT_FUNCTION, TenantContext.roles());
+        if (access == PermissionMatrix.Access.DENY) {
+            throw new ApiException(403, "SCOPE_DENIED", "你没有生产缺陷提报权限",
+                    Map.of("function", PROD_DEFECT_FUNCTION));
+        }
+    }
+
+    private String normaliseSource(String value) {
+        String normalised = value == null || value.isBlank()
+                ? "MANUAL" : value.trim().toUpperCase(Locale.ROOT);
+        if (!SOURCES.contains(normalised)) {
+            throw new ApiException(400, "VALIDATION_FAILED", "source 只能是 MANUAL / TEST / PROD",
+                    Map.of("field", "source", "value", String.valueOf(value)));
+        }
+        return normalised;
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String requireText(String value, String field) {

@@ -66,7 +66,16 @@ public class AuditService {
         }
         DataScope scope = TenantContext.require();
         TenantContext.Principal principal = TenantContext.principal();
-        Long userId = principal != null ? principal.userId() : (scope.userId() > 0 ? scope.userId() : null);
+        // Never mix Long and long in one ternary: the conditional's result type becomes long and
+        // a null branch is unboxed -> NPE on internal (no JWT) requests. Branch explicitly.
+        Long userId;
+        if (principal != null) {
+            userId = principal.userId();
+        } else if (scope.userId() > 0) {
+            userId = scope.userId();
+        } else {
+            userId = null;
+        }
         jdbc.update("INSERT INTO audit_log (tenant_id, user_id, action, biz_type, biz_id,"
                         + " detail_json, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(3))",
                 scope.tenantId(), userId, action, bizType, bizId, json(detail), ip());

@@ -7,17 +7,30 @@ import {
   addRequirementsToRelease,
   getRelease,
   listRequirements,
+  listReviews,
   removeRequirementFromRelease,
   requestReleaseApproval,
 } from '@/api/req'
-import type { ReleaseDetail, ReleaseRow, RequirementRow } from '@/api/types'
+import { gateApi, releaseQualityApi } from '@/api/quality'
+import type {
+  GateDetail,
+  GateSnapshot,
+  ReleaseDetail,
+  ReleaseQuality,
+  ReleaseRow,
+  RequirementRow,
+  ReviewRow,
+} from '@/api/types'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PriorityDot from '@/components/PriorityDot.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import ConclusionBar from '@/components/quality/ConclusionBar.vue'
+import DigestChip from '@/components/quality/DigestChip.vue'
+import QualityGatePanel from '@/components/quality/QualityGatePanel.vue'
 import { usePermission } from '@/composables/usePermission'
-import { formatDate, formatDays } from '@/utils/format'
+import { formatDate, formatDays, formatDateTime, formatPercent } from '@/utils/format'
 import { childInfo, messageOf, requirementPath, typeLabel, usePlatformDict } from '@/views/req/platform'
 
 /**
@@ -72,6 +85,129 @@ const stats = computed(() => {
 const donePercent = computed(() => (stats.value.total > 0 ? Math.round((stats.value.done / stats.value.total) * 100) : 0))
 const riskItems = computed<RequirementRow[]>(() => detail.value?.riskItems ?? [])
 
+/* ---------------- 质量门 / 发布评审 / 版本质量（M6 T11） ---------------- */
+
+type ReleaseTab = 'overview' | 'gate' | 'review' | 'quality'
+
+const activeTab = ref<ReleaseTab>('overview')
+const gateDetail = ref<GateDetail | null>(null)
+const gateLoading = ref(false)
+const gateError = ref('')
+const gateLoaded = ref(false)
+const reviewRows = ref<ReviewRow[]>([])
+const reviewLoading = ref(false)
+const reviewLoaded = ref(false)
+const quality = ref<ReleaseQuality | null>(null)
+const qualityLoading = ref(false)
+const qualityError = ref('')
+const qualityLoaded = ref(false)
+const qualityFocus = ref<'gate' | 'reports' | 'defects' | 'escape' | null>(null)
+
+const latestSnapshot = computed<GateSnapshot | null>(() => {
+  const list = gateDetail.value?.snapshots ?? []
+  return list.length ? list[list.length - 1] : null
+})
+const gateRulesSummary = computed(() => {
+  const rules = gateDetail.value?.rules ?? []
+  if (!rules.length) return '未配置'
+  const failed = rules.filter((rule) => rule.status === 'FAIL').length
+  return failed ? `${rules.length - failed}/${rules.length} 通过` : `${rules.length}/${rules.length} 通过`
+})
+const qualityCounts = computed(() => quality.value?.counts ?? {})
+const snapshotHistory = computed(() => [...(gateDetail.value?.snapshots ?? [])].reverse().slice(0, 10))
+const latestReview = computed(() => reviewRows.value.find((row) => row.status === 'RECORDED' || row.status === 'CONFIRMED') ?? reviewRows.value[0] ?? null)
+
+async function loadGatePanel(): Promise<void> {
+  if (gateLoaded.value || gateLoading.value) return
+  gateLoading.value = true
+  gateError.value = ''
+  try {
+    gateDetail.value = await gateApi.byRelease(releaseId.value)
+    gateLoaded.value = true
+  } catch (err) {
+    gateError.value = messageOf(err)
+  } finally {
+    gateLoading.value = false
+  }
+}
+
+async function loadReviewsPanel(): Promise<void> {
+  if (reviewLoaded.value || reviewLoading.value) return
+  reviewLoading.value = true
+  try {
+    const page = await listReviews(releaseId.value, { page: 1, size: 20 })
+    reviewRows.value = page.items ?? []
+    reviewLoaded.value = true
+  } catch (err) {
+    actionError.value = messageOf(err)
+  } finally {
+    reviewLoading.value = false
+  }
+}
+
+async function loadQualityPanel(): Promise<void> {
+  if (qualityLoaded.value || qualityLoading.value) return
+  qualityLoading.value = true
+  qualityError.value = ''
+  try {
+    quality.value = await releaseQualityApi.quality(releaseId.value)
+    qualityLoaded.value = true
+  } catch (err) {
+    qualityError.value = messageOf(err)
+  } finally {
+    qualityLoading.value = false
+  }
+}
+
+function switchTab(tab: ReleaseTab): void {
+  activeTab.value = tab
+  qualityFocus.value = null
+  if (tab === 'gate') void loadGatePanel()
+  if (tab === 'review') void loadReviewsPanel()
+  if (tab === 'quality') void loadQualityPanel()
+}
+
+function focusQuality(section: 'gate' | 'reports' | 'defects' | 'escape'): void {
+  qualityFocus.value = section
+  const target = document.getElementById(`release-quality-${section}`)
+  target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function rulePassText(snapshot: GateSnapshot): string {
+  const failed = snapshot.rules.filter((rule) => rule.status === 'FAIL').length
+  return failed ? `${snapshot.rules.length - failed}/${snapshot.rules.length} 通过` : `${snapshot.rules.length}/${snapshot.rules.length} 通过`
+}
+
+function reviewDecisionTone(decision?: string): 'success' | 'warning' | 'danger' {
+  if (decision === 'GO') return 'success'
+  if (decision === 'CONDITIONAL') return 'warning'
+  return 'danger'
+}
+
+const GATE_LABEL: Record<string, string> = {
+  PASS: '通过',
+  PASS_WITH_WAIVER: '带豁免通过',
+  FAIL: '未通过',
+  NOT_EVALUATED: '未评估',
+}
+function gateLabel(status?: string): string {
+  return GATE_LABEL[String(status ?? '')] ?? (status || '未评估')
+}
+function gateTone(status?: string): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (status === 'PASS') return 'success'
+  if (status === 'FAIL') return 'danger'
+  if (status === 'PASS_WITH_WAIVER') return 'warning'
+  return 'neutral'
+}
+const REVIEW_LABEL: Record<string, string> = { GO: 'GO', CONDITIONAL: 'CONDITIONAL', NO_GO: 'NO-GO' }
+function reviewLabel(decision?: string): string {
+  return REVIEW_LABEL[String(decision ?? '')] ?? (decision || '—')
+}
+
+function openReport(row: { id: number }): void {
+  void router.push({ name: 'test-report-detail', params: { id: row.id } })
+}
+
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
@@ -87,7 +223,16 @@ async function load(): Promise<void> {
 }
 
 onMounted(load)
-watch(releaseId, load)
+watch(releaseId, () => {
+  gateLoaded.value = false
+  gateDetail.value = null
+  reviewLoaded.value = false
+  reviewRows.value = []
+  qualityLoaded.value = false
+  quality.value = null
+  activeTab.value = 'overview'
+  void load()
+})
 
 const addOpen = ref(false)
 const addIds = ref<number[]>([])
@@ -296,6 +441,58 @@ function statusOfMilestone(status?: string): string {
         <button type="button" class="link" @click="actionError = ''">关闭</button>
       </div>
 
+      <nav class="release-tabs" role="tablist" aria-label="版本详情视图">
+        <button
+          type="button"
+          role="tab"
+          class="release-tab"
+          :class="{ 'is-active': activeTab === 'overview' }"
+          :aria-selected="activeTab === 'overview'"
+          @click="switchTab('overview')"
+        >
+          概览
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="release-tab"
+          :class="{ 'is-active': activeTab === 'gate' }"
+          :aria-selected="activeTab === 'gate'"
+          @click="switchTab('gate')"
+        >
+          质量门
+          <span
+            v-if="gateDetail"
+            class="release-tab__dot"
+            :class="`is-${gateTone(gateDetail.status)}`"
+            aria-hidden="true"
+          />
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="release-tab"
+          :class="{ 'is-active': activeTab === 'review' }"
+          :aria-selected="activeTab === 'review'"
+          @click="switchTab('review')"
+        >
+          发布评审
+          <span v-if="latestReview" class="release-tab__badge">{{ reviewLabel(latestReview.decision) }}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="release-tab"
+          :class="{ 'is-active': activeTab === 'quality' }"
+          :aria-selected="activeTab === 'quality'"
+          @click="switchTab('quality')"
+        >
+          版本质量
+        </button>
+      </nav>
+
+      <div v-if="activeTab === 'overview'" class="release-tab-panel">
+
       <div class="stats">
         <div class="stat">
           <span class="stat__label">需求总数</span>
@@ -416,6 +613,279 @@ function statusOfMilestone(status?: string): string {
             <p v-else class="muted small">没有识别到风险项。</p>
           </section>
         </aside>
+      </div>
+      </div>
+
+      <div v-else-if="activeTab === 'gate'" class="release-tab-panel">
+        <div class="tab-toolbar">
+          <p class="tab-toolbar__hint">门禁结果只读展示；规则配置、预评估与豁免申请在质量门详情中操作。</p>
+          <div class="tab-toolbar__actions">
+            <el-button size="small" :loading="gateLoading" @click="loadGatePanel">刷新</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              @click="router.push({ name: 'quality-gate-detail', params: { releaseId } })"
+            >
+              打开质量门详情
+            </el-button>
+          </div>
+        </div>
+
+        <ErrorState v-if="gateError" title="质量门加载失败" :message="gateError" compact @retry="loadGatePanel" />
+        <div v-else-if="gateLoading && !gateDetail" class="skeleton" style="height: 280px" />
+        <template v-else-if="gateDetail">
+          <ConclusionBar
+            :tone="gateTone(gateDetail.status)"
+            :title="gateDetail.status === 'NOT_EVALUATED' ? '质量门未评估' : gateLabel(gateDetail.status)"
+            :hint="
+              gateDetail.status === 'NOT_EVALUATED'
+                ? '发布单提交时会按 5 条规则实时求值并固化快照'
+                : `规则 ${gateRulesSummary} · ${gateDetail.evaluatedAt ? `评估于 ${formatDateTime(gateDetail.evaluatedAt)}` : '尚未固化快照'}`
+            "
+          >
+            <DigestChip :hash="latestSnapshot?.hash" label="最新快照" />
+          </ConclusionBar>
+
+          <QualityGatePanel
+            mode="gate"
+            :title="`门禁规则 · 规则集 v${gateDetail.rulesetVersion ?? 1}`"
+            :rules="gateDetail.rules"
+            :waivers="gateDetail.waivers"
+            :result="gateDetail.status"
+            :evaluated-at="gateDetail.evaluatedAt"
+            :snapshot-id="latestSnapshot?.snapshotId"
+            :hash="latestSnapshot?.hash"
+            readonly
+          />
+
+          <section class="surface surface--pad">
+            <header class="section-head">
+              <h2 class="section-title">快照历史</h2>
+              <span class="t-aux">快照不可变，回放用于核对当时的规则与报告版本</span>
+            </header>
+            <EmptyState
+              v-if="snapshotHistory.length === 0"
+              compact
+              title="还没有固化快照"
+              description="发布单提交时才会固化质量门快照。"
+              icon="file"
+            />
+            <el-table v-else :data="snapshotHistory" size="small">
+              <el-table-column label="评估时间" width="150">
+                <template #default="{ row }">{{ formatDateTime(row.computedAt) }}</template>
+              </el-table-column>
+              <el-table-column label="结果" width="128">
+                <template #default="{ row }"><StatusPill kind="gate" :value="row.result" size="sm" /></template>
+              </el-table-column>
+              <el-table-column label="规则" width="110">
+                <template #default="{ row }">{{ rulePassText(row) }}</template>
+              </el-table-column>
+              <el-table-column label="报告版本" width="100">
+                <template #default="{ row }">
+                  <span class="muted">{{ row.reportVersionId ? `#${row.reportVersionId}` : '—' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="快照 hash" min-width="130">
+                <template #default="{ row }"><DigestChip :hash="row.hash" /></template>
+              </el-table-column>
+              <el-table-column label="快照" width="90" align="right">
+                <template #default="{ row }">
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    @click="router.push({ name: 'quality-gate-detail', params: { releaseId }, query: { snapshot: String(row.snapshotId) } })"
+                  >
+                    #{{ row.snapshotId }}
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </section>
+        </template>
+      </div>
+
+      <div v-else-if="activeTab === 'review'" class="release-tab-panel">
+        <div class="tab-toolbar">
+          <p class="tab-toolbar__hint">Go/No-Go 记录由 PMO 在发布评审页生成；该页会引用质量门快照与已会签报告。</p>
+          <el-button
+            size="small"
+            type="primary"
+            @click="router.push({ name: 'release-go-no-go', params: { id: releaseId } })"
+          >
+            进入发布评审
+          </el-button>
+        </div>
+
+        <div v-if="reviewLoading" class="skeleton" style="height: 200px" />
+        <EmptyState
+          v-else-if="reviewRows.length === 0"
+          title="还没有发布评审记录"
+          description="质量门通过后，由 PMO 在发布评审页生成 Go/No-Go 记录。"
+          action-text="进入发布评审"
+          icon="inbox"
+          @action="router.push({ name: 'release-go-no-go', params: { id: releaseId } })"
+        />
+        <template v-else>
+          <ConclusionBar
+            v-if="latestReview"
+            :tone="reviewDecisionTone(latestReview.decision)"
+            :title="`${reviewLabel(latestReview.decision)} · ${latestReview.status === 'CONFIRMED' ? '已确认' : '待确认'}`"
+            :hint="`评审时间 ${formatDateTime(latestReview.meetingAt)}${latestReview.conditions ? ` · 附条件/风险：${latestReview.conditions}` : ''}`"
+          />
+          <section class="surface surface--flush">
+            <el-table :data="reviewRows" size="small">
+              <el-table-column label="评审时间" width="150">
+                <template #default="{ row }">{{ formatDateTime(row.meetingAt) }}</template>
+              </el-table-column>
+              <el-table-column label="决策" width="128">
+                <template #default="{ row }">{{ reviewLabel(row.decision) }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="110">
+                <template #default="{ row }">{{ row.status === 'CONFIRMED' ? '已确认' : '待确认' }}</template>
+              </el-table-column>
+              <el-table-column label="附条件/风险" min-width="200" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.conditions || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="门禁已评估" width="100">
+                <template #default="{ row }">{{ row.gateEvaluated ? '是' : '否（预评审）' }}</template>
+              </el-table-column>
+              <el-table-column label="生成时间" width="150">
+                <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+              </el-table-column>
+            </el-table>
+          </section>
+        </template>
+      </div>
+
+      <div v-else class="release-tab-panel">
+        <ErrorState v-if="qualityError" title="版本质量加载失败" :message="qualityError" compact @retry="loadQualityPanel" />
+        <div v-else-if="qualityLoading && !quality" class="skeleton" style="height: 260px" />
+        <template v-else-if="quality">
+          <div class="quality-cards">
+            <button type="button" class="quality-card" @click="focusQuality('defects')">
+              <span class="quality-card__label">未关闭 P0/P1</span>
+              <strong class="quality-card__value">{{ quality.openP0P1.length }}</strong>
+            </button>
+            <button type="button" class="quality-card" @click="focusQuality('reports')">
+              <span class="quality-card__label">报告版本</span>
+              <strong class="quality-card__value">{{ quality.reports.length }}</strong>
+            </button>
+            <button type="button" class="quality-card" @click="focusQuality('gate')">
+              <span class="quality-card__label">门禁记录</span>
+              <strong class="quality-card__value">{{ quality.gateHistory.length }}</strong>
+            </button>
+            <button type="button" class="quality-card" @click="focusQuality('escape')">
+              <span class="quality-card__label">逃逸缺陷</span>
+              <strong class="quality-card__value">{{ quality.escapeDefects.length }}</strong>
+            </button>
+            <button type="button" class="quality-card" @click="focusQuality('escape')">
+              <span class="quality-card__label">回滚次数</span>
+              <strong class="quality-card__value">{{ qualityCounts.rollback ?? 0 }}</strong>
+            </button>
+          </div>
+
+          <div class="quality-rates">
+            <span>FPY <strong>{{ formatPercent(qualityCounts.fpy ?? null) }}</strong></span>
+            <span>逃逸率 <strong>{{ formatPercent(qualityCounts.escape ?? null) }}</strong></span>
+            <span>发布后缺陷 <strong>{{ qualityCounts.postRelease ?? 0 }}</strong></span>
+            <span>回滚率 <strong>{{ formatPercent(qualityCounts.rollback ?? null) }}</strong></span>
+          </div>
+
+          <section id="release-quality-gate" class="surface surface--pad">
+            <header class="section-head">
+              <h2 class="section-title">质量门历史</h2>
+              <span class="count-badge">{{ quality.gateHistory.length }}</span>
+            </header>
+            <EmptyState v-if="quality.gateHistory.length === 0" compact title="没有门禁快照" description="发布单提交后按 5 条规则固化。" icon="file" />
+            <el-table v-else :data="quality.gateHistory" size="small">
+              <el-table-column label="评估时间" width="150">
+                <template #default="{ row }">{{ formatDateTime(row.computedAt) }}</template>
+              </el-table-column>
+              <el-table-column label="结果" width="128">
+                <template #default="{ row }"><StatusPill kind="gate" :value="row.result" size="sm" /></template>
+              </el-table-column>
+              <el-table-column label="规则" width="110">
+                <template #default="{ row }">{{ rulePassText(row) }}</template>
+              </el-table-column>
+              <el-table-column label="快照 hash" min-width="140">
+                <template #default="{ row }"><DigestChip :hash="row.hash" /></template>
+              </el-table-column>
+            </el-table>
+          </section>
+
+          <section id="release-quality-reports" class="surface surface--pad">
+            <header class="section-head">
+              <h2 class="section-title">已会签报告</h2>
+              <span class="count-badge">{{ quality.reports.length }}</span>
+            </header>
+            <EmptyState v-if="quality.reports.length === 0" compact title="没有报告版本" description="在测试报告中心生成并完成三级会签。" icon="file" />
+            <el-table v-else :data="quality.reports" size="small" @row-click="openReport">
+              <el-table-column label="编号" width="140">
+                <template #default="{ row }"><span class="mono code-link">{{ row.code }}</span></template>
+              </el-table-column>
+              <el-table-column label="当前版本" width="90">
+                <template #default="{ row }">v{{ row.currentVersion }}</template>
+              </el-table-column>
+              <el-table-column label="结论" width="120">
+                <template #default="{ row }"><StatusPill kind="report" :value="row.conclusion" size="sm" /></template>
+              </el-table-column>
+              <el-table-column label="通过率" width="96">
+                <template #default="{ row }">{{ formatPercent(row.passRate) }}</template>
+              </el-table-column>
+              <el-table-column label="覆盖率" width="96">
+                <template #default="{ row }">{{ formatPercent(row.coverage) }}</template>
+              </el-table-column>
+              <el-table-column label="生成时间" min-width="150">
+                <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+              </el-table-column>
+            </el-table>
+          </section>
+
+          <section id="release-quality-defects" class="surface surface--pad">
+            <header class="section-head">
+              <h2 class="section-title">未关闭 P0/P1</h2>
+              <span class="count-badge count-badge--danger">{{ quality.openP0P1.length }}</span>
+            </header>
+            <EmptyState v-if="quality.openP0P1.length === 0" compact title="没有未关闭 P0/P1" description="QG-04 通过，仍需在发布后跟踪生产缺陷。" icon="chart" />
+            <el-table v-else :data="quality.openP0P1" size="small">
+              <el-table-column label="编号" width="130">
+                <template #default="{ row }"><span class="mono">{{ row.code ?? `#${row.defectId ?? row.id}` }}</span></template>
+              </el-table-column>
+              <el-table-column label="标题" min-width="200" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.title || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="严重级" width="90">
+                <template #default="{ row }">{{ row.severity || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="110">
+                <template #default="{ row }">{{ row.status || '—' }}</template>
+              </el-table-column>
+            </el-table>
+          </section>
+
+          <section id="release-quality-escape" class="surface surface--pad">
+            <header class="section-head">
+              <h2 class="section-title">逃逸到生产的缺陷</h2>
+              <span class="count-badge">{{ quality.escapeDefects.length }}</span>
+            </header>
+            <EmptyState v-if="quality.escapeDefects.length === 0" compact title="没有逃逸缺陷" description="观察窗内的生产缺陷会在创建时判定并落库。" icon="chart" />
+            <el-table v-else :data="quality.escapeDefects" size="small">
+              <el-table-column label="编号" width="130">
+                <template #default="{ row }"><span class="mono">{{ row.code ?? `#${row.defectId ?? row.id}` }}</span></template>
+              </el-table-column>
+              <el-table-column label="标题" min-width="200" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.title || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="严重级" width="90">
+                <template #default="{ row }">{{ row.severity || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="发现时间" width="150">
+                <template #default="{ row }">{{ formatDateTime(row.foundAt) }}</template>
+              </el-table-column>
+            </el-table>
+          </section>
+        </template>
       </div>
     </template>
 
@@ -751,5 +1221,131 @@ function statusOfMilestone(status?: string): string {
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .quality-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.release-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.release-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font-size: 13px;
+  color: var(--text-body);
+  cursor: pointer;
+  transition: color var(--t-color), border-color var(--t-color);
+}
+.release-tab:hover {
+  color: var(--color-primary);
+  background: var(--bg-hover);
+}
+.release-tab.is-active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+}
+.release-tab__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-weak);
+}
+.release-tab__dot.is-success {
+  background: var(--color-success);
+}
+.release-tab__dot.is-warning {
+  background: var(--color-warning);
+}
+.release-tab__dot.is-danger {
+  background: var(--color-danger);
+}
+.release-tab__badge {
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--color-info-bg);
+  color: var(--text-body);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.release-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tab-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tab-toolbar__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+  line-height: 1.6;
+}
+.tab-toolbar__actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+.quality-cards {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+.quality-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--bg-card);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-color), background var(--t-color);
+}
+.quality-card:hover {
+  border-color: var(--color-primary);
+  background: var(--bg-hover);
+}
+.quality-card__label {
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+.quality-card__value {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-title);
+  font-variant-numeric: tabular-nums;
+}
+.quality-rates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--bg-card);
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+.quality-rates strong {
+  margin-left: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-title);
 }
 </style>

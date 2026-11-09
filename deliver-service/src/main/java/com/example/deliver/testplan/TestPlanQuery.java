@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.example.deliver.quality.aggregate.PlanAggregate;
+import com.example.deliver.quality.aggregate.QualityAggregator;
 import com.example.deliver.support.Rows;
 import com.example.deliver.testcase.TestCaseViews;
 import com.example.platform.common.scope.PageResponse;
@@ -38,9 +40,11 @@ public class TestPlanQuery {
             """;
 
     private final ScopedJdbc jdbc;
+    private final QualityAggregator aggregator;
 
-    public TestPlanQuery(ScopedJdbc jdbc) {
+    public TestPlanQuery(ScopedJdbc jdbc, QualityAggregator aggregator) {
         this.jdbc = jdbc;
+        this.aggregator = aggregator;
     }
 
     public PageResponse<TestPlanViews.PlanHeader> page(Long releaseId, String status, String keyword,
@@ -100,26 +104,15 @@ public class TestPlanQuery {
     }
 
     public TestPlanViews.PlanSummary summary(long planId) {
-        String sql = """
-                SELECT COUNT(*) AS planned,
-                       COALESCE(SUM(pc.result <> 'NOT_RUN'), 0) AS executed,
-                       COALESCE(SUM(pc.result = 'PASS'), 0) AS passed,
-                       COALESCE(SUM(pc.result = 'FAIL'), 0) AS failed,
-                       COALESCE(SUM(pc.result = 'BLOCKED'), 0) AS blocked,
-                       COALESCE(SUM(pc.result = 'SKIP'), 0) AS skip,
-                       COALESCE(SUM(pc.result = 'NOT_RUN'), 0) AS not_run
-                FROM test_plan_case pc
-                JOIN test_plan p ON p.id = pc.plan_id
-                WHERE /*scope:p*/ AND pc.plan_id = :planId
-                """;
-        Map<String, Object> row = jdbc.one(sql, Map.of("planId", planId));
-        long planned = Rows.toLong(Rows.object(row, "planned"), 0L);
-        long executed = Rows.toLong(Rows.object(row, "executed"), 0L);
-        long passed = Rows.toLong(Rows.object(row, "passed"), 0L);
-        long failed = Rows.toLong(Rows.object(row, "failed"), 0L);
-        long blocked = Rows.toLong(Rows.object(row, "blocked"), 0L);
-        long skip = Rows.toLong(Rows.object(row, "skip"), 0L);
-        long notRun = Rows.toLong(Rows.object(row, "not_run"), 0L);
+        // 计划进度、报告、门禁同源：计数只允许经 QualityAggregator，禁止在本类重写一遍 SUM。
+        PlanAggregate p = aggregator.aggregatePlan(planId);
+        long planned = p.total();
+        long executed = p.executed();
+        long passed = p.passed();
+        long failed = p.failed();
+        long blocked = p.blocked();
+        long skip = p.skipped();
+        long notRun = p.notRun();
         return new TestPlanViews.PlanSummary(planned, executed, passed, failed, blocked, skip, notRun,
                 MetricFormulas.passRate(passed, planned),
                 MetricFormulas.executedPassRate(passed, executed),

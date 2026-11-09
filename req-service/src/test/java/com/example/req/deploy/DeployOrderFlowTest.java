@@ -7,6 +7,7 @@ import com.example.platform.common.notify.NotificationWriter;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
 import com.example.platform.contract.ScopeTier;
+import com.example.platform.contract.quality.GateSnapshot;
 import com.example.req.approval.ApprovalEngine;
 import com.example.req.approval.ApprovalException;
 import com.example.req.approval.ApprovalInstance;
@@ -17,6 +18,8 @@ import com.example.req.requirement.RequirementRepository;
 import com.example.req.release.ReleaseEntity;
 import com.example.req.release.ReleaseRepository;
 import com.example.req.release.ReleaseService;
+import com.example.req.review.ReleaseReviewService;
+import com.example.req.review.ReleaseReviewViews;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -63,6 +66,7 @@ class DeployOrderFlowTest {
     private RequirementRepository requirementRepository;
     private ReleaseRepository releaseRepository;
     private ReleaseService releaseService;
+    private ReleaseReviewService releaseReviewService;
     private AdmissionEvaluator admissionEvaluator;
     private CodeGenerator codeGenerator;
     private AuditService auditService;
@@ -82,6 +86,7 @@ class DeployOrderFlowTest {
         requirementRepository = mock(RequirementRepository.class);
         releaseRepository = mock(ReleaseRepository.class);
         releaseService = mock(ReleaseService.class);
+        releaseReviewService = mock(ReleaseReviewService.class);
         admissionEvaluator = mock(AdmissionEvaluator.class);
         codeGenerator = mock(CodeGenerator.class);
         auditService = mock(AuditService.class);
@@ -93,7 +98,8 @@ class DeployOrderFlowTest {
         when(provider.getIfAvailable()).thenReturn(engine);
 
         service = new DeployOrderService(repository, orderRequirementRepository, requirementRepository,
-                releaseRepository, releaseService, admissionEvaluator, codeGenerator, auditService,
+                releaseRepository, releaseService, releaseReviewService, admissionEvaluator,
+                mock(DeployPlanGuard.class), codeGenerator, auditService,
                 notificationWriter, approverDirectory, instanceRepository, new ObjectMapper(), provider);
 
         order = new DeployOrderEntity();
@@ -145,6 +151,22 @@ class DeployOrderFlowTest {
         return new DeployViews.AdmissionResult(items, LocalDateTime.now(), allPassed ? "sig-ok" : "sig-bad");
     }
 
+    /** 第 6 项证据：PASS 时 5 条规则全过；FAIL 时 QG-01 不达标（88.0% < 95%）。 */
+    private static DeployViews.GateEvidence gate(String result) {
+        boolean pass = "PASS".equals(result);
+        List<GateSnapshot.GateRuleResult> rules = List.of(
+                new GateSnapshot.GateRuleResult("QG-01", pass ? "PASS" : "FAIL", true,
+                        pass ? "97.0%" : "88.0%", "≥95%", pass ? null : "补齐失败用例后重新生成报告"),
+                new GateSnapshot.GateRuleResult("QG-05", "PASS", true, "三级会签", "三级会签", null));
+        return new DeployViews.GateEvidence(9001L, 7001L, 501L, result, "digest-" + result.toLowerCase(),
+                java.time.Instant.parse("2026-11-09T02:00:00Z"), rules);
+    }
+
+    private static DeployViews.AdmissionResult withGate(DeployViews.AdmissionResult base,
+                                                        DeployViews.GateEvidence gate) {
+        return new DeployViews.AdmissionResult(base.items(), base.checkedAt(), base.signature(), gate);
+    }
+
     @Test
     @DisplayName("准入未过：409 ADMISSION_FAILED + detail.items 五项，状态不动，不发起审批")
     void submitBlockedByAdmission() {
@@ -161,6 +183,29 @@ class DeployOrderFlowTest {
         assertEquals(5, detailItems.size(), "detail.items 必须原样给前端渲染清单");
         assertEquals(DeployOrderStates.DRAFT, order.getStatus());
         verify(engine, never()).start(any());
+    }
+
+    @Test
+    @DisplayName("最新 NO-GO 评审：未二次确认 409 NO_GO_CONFIRM_REQUIRED，确认后继续准入")
+    void noGoRequiresConfirmation() {
+        when(releaseReviewService.latest(RELEASE_ID)).thenReturn(new ReleaseReviewViews.ReviewRow(
+                9L, RELEASE_ID, ORDER_ID, null, null, null, null, "NO_GO", null, false,
+                "RECORDED", USER, LocalDateTime.now(), null, null));
+
+        ApiException denied = assertThrows(ApiException.class, () -> service.submit(ORDER_ID));
+        assertEquals(409, denied.status());
+        assertEquals(DeployErrors.NO_GO_CONFIRM_REQUIRED, denied.code());
+        verify(admissionEvaluator, never()).evaluateAndStore(any());
+        assertEquals(DeployOrderStates.DRAFT, order.getStatus());
+
+        TenantContext.setPrincipal(new TenantContext.Principal(
+                USER, "pmo", "PMO", "t1", "演示租户", List.of("PMO"), Set.of(3L), null));
+        when(admissionEvaluator.evaluateAndStore(order)).thenReturn(result(true));
+        when(admissionEvaluator.allPassed(any())).thenReturn(true);
+
+        DeployViews.SubmitResult submitted = service.submit(ORDER_ID, new DeployViews.SubmitCmd(true));
+        assertEquals(DeployOrderStates.PENDING_APPROVAL, submitted.status());
+        verify(auditService).record(eq("NO_GO_CONFIRM"), eq("deploy_order"), eq(ORDER_ID), any());
     }
 
     @Test
@@ -194,53 +239,71 @@ class DeployOrderFlowTest {
     }
 
     @Test
-    @DisplayName("强制放行原因空白：400 REASON_REQUIRED，且不查权限")
-    void forceReleaseRequiresReason() {
-        ApiException ex = assertThrows(ApiException.class, () -> service.forceRelease(ORDER_ID, "   "));
+    @DisplayName("强制放行已退役：恒 409 FORCE_RELEASE_RETIRED，不写强制标记、不改状态，审计 retired")
+    void forceReleaseRetired() {
+        ApiException ex = assertThrows(ApiException.class, () -> service.forceRelease(ORDER_ID, "  紧急上线  "));
 
-        assertEquals(400, ex.status());
-        assertEquals("REASON_REQUIRED", ex.code());
-        verifyNoInteractions(approverDirectory);
+        assertEquals(409, ex.status());
+        assertEquals(DeployOrderService.FORCE_RELEASE_RETIRED, ex.code());
+        assertEquals(DeployOrderService.FORCE_RELEASE_HINT, ex.detail().get("hint"));
         assertFalse(order.isForcedRelease());
-        assertEquals(DeployOrderStates.DRAFT, order.getStatus());
-    }
-
-    @Test
-    @DisplayName("非 PMO/管理员强制放行：403 并留 PERMISSION_DENY 审计")
-    void forceReleaseDeniedForNonPmo() {
-        when(approverDirectory.hasAnyRole(eq(TENANT), eq(USER), any())).thenReturn(false);
-
-        ApiException ex = assertThrows(ApiException.class, () -> service.forceRelease(ORDER_ID, "上线窗口不足"));
-
-        assertEquals(403, ex.status());
-        assertEquals("FORBIDDEN", ex.code());
-        verify(auditService).recordInNewTx(eq("PERMISSION_DENY"), eq("deploy_order"), eq(ORDER_ID), any());
-        assertFalse(order.isForcedRelease());
-    }
-
-    @Test
-    @DisplayName("PMO 强制放行：写原因/人/时间，审计 ADMISSION_FORCE，通知域负责人")
-    void forceReleaseByPmoAuditsAndNotifies() {
-        when(approverDirectory.hasAnyRole(eq(TENANT), eq(USER), any())).thenReturn(true);
-        when(approverDirectory.domainOwners(TENANT, List.of(3L))).thenReturn(List.of(99L));
-        when(admissionEvaluator.parse(any())).thenReturn(result(false));
-
-        DeployViews.OrderDetail detail = service.forceRelease(ORDER_ID, "  验证-受控放行  ");
-
-        assertTrue(order.isForcedRelease());
-        assertEquals("验证-受控放行", order.getForceReleaseReason());
-        assertEquals(DeployOrderStates.APPROVED, order.getStatus());
-        assertEquals(USER, order.getForceBy());
-        assertTrue(order.getForceAt() != null);
-        assertEquals("验证-受控放行", detail.forcedReleaseDetail().reason());
+        assertEquals(DeployOrderStates.DRAFT, order.getStatus(), "退役后不再有任何状态写入");
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<Map<String, Object>> detailCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(auditService).record(eq("ADMISSION_FORCE"), eq("deploy_order"), eq(ORDER_ID), detailCaptor.capture());
-        assertEquals("验证-受控放行", detailCaptor.getValue().get("reason"));
-        assertEquals(List.of(AdmissionItem.MAN_DAYS_FILLED), detailCaptor.getValue().get("overriddenItems"));
-        verify(notificationWriter).send(eq(99L), eq("DEPLOY_FORCE_RELEASE"), anyString(), anyString(),
-                eq("deploy_order"), eq(ORDER_ID));
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).recordInNewTx(eq("deploy.force-release.retired"), eq("deploy_order"),
+                eq(ORDER_ID), captor.capture());
+        assertEquals("紧急上线", captor.getValue().get("reason"));
+        assertEquals(true, captor.getValue().get("retired"));
+        verifyNoInteractions(notificationWriter);
+
+        // 空原因同样 409：退役是路由级语义，与参数/角色无关（旧脚本不必先补原因才知道入口已下线）
+        assertEquals(409, assertThrows(ApiException.class,
+                () -> service.forceRelease(ORDER_ID, "   ")).status());
+        verifyNoInteractions(approverDirectory);
+    }
+
+    @Test
+    @DisplayName("质量门未过：409 QUALITY_GATE_FAILED + detail.failedRules/snapshotId，状态不动、不发起审批")
+    void submitBlockedByQualityGate() {
+        when(admissionEvaluator.evaluateAndStore(order)).thenReturn(withGate(result(true), gate("FAIL")));
+
+        DeployOrderService.QualityGateFailedException ex = assertThrows(
+                DeployOrderService.QualityGateFailedException.class, () -> service.submit(ORDER_ID));
+
+        assertEquals(409, ex.status());
+        assertEquals("QUALITY_GATE_FAILED", ex.code());
+        assertEquals(9001L, ex.detail().get("snapshotId"));
+        assertEquals("FAIL", ex.detail().get("result"));
+        @SuppressWarnings("unchecked")
+        List<com.example.platform.contract.quality.GateSnapshot.GateRuleResult> failed =
+                (List<com.example.platform.contract.quality.GateSnapshot.GateRuleResult>) ex.detail().get("failedRules");
+        assertEquals(1, failed.size());
+        assertEquals("QG-01", failed.get(0).code());
+        assertTrue(ex.getMessage().contains("QG-01"), ex.getMessage());
+        assertEquals(DeployOrderStates.DRAFT, order.getStatus());
+        assertTrue(order.getQualityGateSnapshotId() == null, "拦下时不得固化快照列");
+        verify(engine, never()).start(any());
+    }
+
+    @Test
+    @DisplayName("质量门通过：提交通过并固化 snapshot/gate/report 三列（AC-5.6）")
+    void submitPersistsQualityGateRefs() {
+        when(admissionEvaluator.evaluateAndStore(order)).thenReturn(withGate(result(true), gate("PASS")));
+        when(admissionEvaluator.allPassed(any())).thenReturn(true);
+
+        DeployViews.SubmitResult submitted = service.submit(ORDER_ID);
+
+        assertEquals(DeployOrderStates.PENDING_APPROVAL, submitted.status());
+        assertEquals(9001L, order.getQualityGateSnapshotId());
+        assertEquals(7001L, order.getQualityGateId());
+        assertEquals(501L, order.getReportId());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).record(eq("STATE_CHANGE"), eq("deploy_order"), eq(ORDER_ID), captor.capture());
+        assertEquals(9001L, captor.getValue().get("qualityGateSnapshotId"));
+        assertEquals("PASS", captor.getValue().get("gateResult"));
     }
 
     @Test
@@ -317,7 +380,7 @@ class DeployOrderFlowTest {
     }
 
     @Test
-    @DisplayName("端到端：创建→提交被准入拦(409)→PMO 强制放行→登记执行→统计复算（终态 SUCCESS）")
+    @DisplayName("端到端：创建→提交被准入拦(409)→审批通过→登记执行→统计复算（终态 SUCCESS）")
     void endToEndFromDraftToSuccess() {
         DeployOrderEntity[] saved = new DeployOrderEntity[1];
         when(repository.save(any())).thenAnswer(invocation -> {
@@ -332,9 +395,6 @@ class DeployOrderFlowTest {
         when(codeGenerator.next("DEP", TENANT)).thenReturn("DEP-0001");
         when(admissionEvaluator.evaluateAndStore(any())).thenReturn(result(false));
         when(admissionEvaluator.allPassed(any())).thenReturn(false);
-        when(admissionEvaluator.parse(any())).thenReturn(result(false));
-        when(approverDirectory.hasAnyRole(eq(TENANT), eq(USER), any())).thenReturn(true);
-        when(approverDirectory.domainOwners(TENANT, List.of(3L))).thenReturn(List.of(99L));
 
         DeployViews.OrderDetail created = service.create(new DeployOrderService.CreateOrder(RELEASE_ID, "prod",
                 "2026-12-02T10:00:00+08:00", "2026-12-02T12:00:00+08:00", "1.4.0",
@@ -350,7 +410,12 @@ class DeployOrderFlowTest {
         assertEquals(5, blocked.items().size());
         assertEquals(DeployOrderStates.DRAFT, saved[0].getStatus(), "被拦住时单据仍在草稿");
 
-        service.forceRelease(ORDER_ID, "验证-受控放行");
+        // 强制放行已退役（恒 409），正常路径是走完需求发布审批
+        assertEquals(409, assertThrows(ApiException.class,
+                () -> service.forceRelease(ORDER_ID, "验证-受控放行")).status());
+        assertEquals(DeployOrderStates.DRAFT, saved[0].getStatus());
+
+        service.onApprovalApproved(ORDER_ID);
         assertEquals(DeployOrderStates.APPROVED, saved[0].getStatus());
 
         service.recordExecution(ORDER_ID, new DeployOrderService.ExecutionCmd("SUCCESS",
@@ -365,8 +430,9 @@ class DeployOrderFlowTest {
         assertEquals(new java.math.BigDecimal("1.0000"), stats.successRate());
         assertEquals(new java.math.BigDecimal("30.0"), stats.avgDurationMinutes());
 
-        verify(auditService).record(eq("ADMISSION_FORCE"), eq("deploy_order"), eq(ORDER_ID), any());
-        verify(notificationWriter).send(eq(99L), anyString(), anyString(), anyString(),
-                eq("deploy_order"), eq(ORDER_ID));
+        verify(auditService).recordInNewTx(eq("deploy.force-release.retired"), eq("deploy_order"),
+                eq(ORDER_ID), any());
+        verify(auditService).record(eq("EXECUTION"), eq("deploy_order"), eq(ORDER_ID), any());
+        verifyNoInteractions(notificationWriter);
     }
 }
