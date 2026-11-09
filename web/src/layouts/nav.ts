@@ -15,6 +15,10 @@ import type { NavGroup } from '@/router/types'
  * M6（T9）新增：workbench, test-plan-detail, test-strategies, test-reports,
  * test-report-detail, test-envs, quality-gates, quality-gate-detail,
  * quality-metrics, release-go-no-go
+ *
+ * M8 新增：gantt, wiki, value-stream（协作组）、code-policies（分支策略）、
+ * test-executors（执行器）—— 路由 name 见 web/src/router/routes/{collab,code,deliver}.routes.ts，
+ * 名字不一致时入口自动隐藏（不是点了 404）。
  */
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -86,11 +90,44 @@ export const NAV_GROUPS: NavGroup[] = [
         functionCode: 'env:manage',
       },
       {
+        label: '执行器',
+        to: '/test-executors',
+        icon: 'device',
+        routeName: 'test-executors',
+        functionCode: 'TEST_EXECUTOR_VIEW',
+      },
+      {
         label: '发布单',
         to: '/deploy-orders',
         icon: 'rocket',
         routeName: 'deploy-orders',
         functionCode: 'deploy:create',
+      },
+    ],
+  },
+  {
+    title: '协作',
+    items: [
+      {
+        label: '甘特',
+        to: '/gantt',
+        icon: 'gantt',
+        routeName: 'gantt',
+        functionCode: 'GANTT_VIEW',
+      },
+      {
+        label: 'Wiki',
+        to: '/wiki',
+        icon: 'book',
+        routeName: 'wiki',
+        functionCode: 'WIKI_VIEW',
+      },
+      {
+        label: '价值流',
+        to: '/value-stream',
+        icon: 'flow',
+        routeName: 'value-stream',
+        functionCode: 'FLOW_VIEW',
       },
     ],
   },
@@ -125,6 +162,13 @@ export const NAV_GROUPS: NavGroup[] = [
         routeName: 'defect-board',
         functionCode: 'defect:board',
       },
+      {
+        label: '分支策略',
+        to: '/code-policies',
+        icon: 'branch',
+        routeName: 'code-policies',
+        functionCode: 'CCODE_POLICY_VIEW',
+      },
     ],
   },
   {
@@ -157,6 +201,9 @@ export const NAV_GROUPS: NavGroup[] = [
         to: '/admin/permissions',
         icon: 'shield',
         routeName: 'admin-permissions',
+        // 矩阵本身是管理面数据（角色 × 功能码），与后端 PermissionRouteTable 同一个码：
+        // 没权限就不渲染入口，而不是点进去被 403。
+        functionCode: 'org:manage',
       },
       {
         label: '流程定义',
@@ -259,4 +306,10 @@ export const NAV_ICONS: Record<string, string> = {
   gauge: 'M3 11.4a5 5 0 1 1 10 0M8 11.2l2.6-3.8M2.6 11.4h10.8',
   // M7 集成配置：插头（四槽接线台的隐喻；不借用任何外部系统的主色/商标图形）
   plug: 'M6 2.6V5M10 2.6V5M3.6 5h8.8v2.2a4.4 4.4 0 0 1-8.8 0V5M8 11.4v2.1',
+  // M8 协作域：甘特用三根横条（时间轴上的承诺），Wiki 用摊开的书页
+  gantt: 'M2.6 4.2h6.6v2.2H2.6V4.2ZM5.6 7.9h7v2.2h-7V7.9ZM2.6 11.6h4.4v2.2H2.6v-2.2Z',
+  book: 'M3 3.1h3.9A2 2 0 0 1 8.9 5.1V13H5A2 2 0 0 0 3 14.9V3.1ZM13 3.1H9.1A2 2 0 0 0 7.1 5.1V13H11a2 2 0 0 1 2 1.9V3.1Z',
+  // M8 CCode / CTest：分支策略用分叉线（规则挂在分支上），执行器用带完成勾的机箱
+  branch: 'M4.2 4.2v7.6M4.2 6.6h4.2a2.2 2.2 0 0 0 2.2-2.2M4.2 3.2h.01M4.2 12.8h.01M10.6 4.4h.01',
+  device: 'M2.8 3.4h10.4v7H2.8v-7ZM6.2 12.6h3.6M8 10.4v2.2M6.4 6.8l1.1 1.1 2.1-2.1',
 }

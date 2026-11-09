@@ -88,6 +88,13 @@ const deliverRoutes: RouteRecordRaw[] = [
     meta: { title: '追溯矩阵', navKey: 'traceability', functionCode: 'trace:view' },
   },
   {
+    // CTest 执行器台账（T8）：健康五态由服务端派生，页面只渲染
+    path: '/test-executors',
+    name: 'test-executors',
+    component: () => import('@/views/deliver/TestExecutorsView.vue'),
+    meta: { title: '执行器', navKey: 'test-executors', functionCode: 'TEST_EXECUTOR_VIEW' },
+  },
+  {
     path: '/admin',
     component: () => import('@/views/admin/AdminLayout.vue'),
     redirect: { name: 'admin-orgs' },

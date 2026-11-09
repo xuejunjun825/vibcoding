@@ -3,10 +3,15 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ApiError } from '@/api/client'
 import { getRequirementIntegration, type RequirementIntegration } from '@/api/integration'
+import type { MrCard } from '@/api/integration'
+import { fetchCodeQuality } from '@/api/req'
+import type { CodeQualityPayload, MrRefreshResult } from '@/api/req'
 import { formatDateTime } from '@/utils/format'
 import StatusPill from '@/components/StatusPill.vue'
 import CodeCard from '@/components/req/CodeCard.vue'
-import SonarGateCard from '@/components/req/SonarGateCard.vue'
+import CodeQualityCard from '@/components/req/CodeQualityCard.vue'
+import MrReviewCard from '@/components/req/MrReviewCard.vue'
+import type { MrReviewModel } from '@/components/req/MrReviewCard.vue'
 import SonarSnapshotDrawer from '@/components/req/SonarSnapshotDrawer.vue'
 
 /**
@@ -44,21 +49,52 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadQuality()
+})
 
 const codeCard = computed(() => data.value?.code ?? null)
-const sonarCard = computed(() => data.value?.sonar ?? null)
 const syncRows = computed(() => (data.value?.sync ?? []).slice(0, 10))
+
+/** MR 评审卡的数据来源：MrCard + M8 增列（服务端未下发时保持缺省，不猜） */
+const mrModel = computed<MrReviewModel | null>(() =>
+  codeCard.value ? ({ ...codeCard.value } as unknown as MrReviewModel) : null,
+)
+
+/* 代码质量卡：只读快照，与集成载荷分开取——质量接口失败不影响 MR/同步记录 */
+const quality = ref<CodeQualityPayload | null>(null)
+const qualityLoading = ref(false)
+
+async function loadQuality(): Promise<void> {
+  qualityLoading.value = true
+  try {
+    quality.value = await fetchCodeQuality(props.requirementId)
+  } catch {
+    quality.value = { card: null, emptyReason: 'NO_SNAPSHOT' }
+  } finally {
+    qualityLoading.value = false
+  }
+}
+
+/** 刷新返回的是 MR 卡本身：合并进旧卡，保留服务端未回传的字段 */
+function onMrRefreshed(payload: MrRefreshResult): void {
+  if (!data.value) return
+  if (payload.card) {
+    data.value = { ...data.value, code: { ...(data.value.code as MrCard), ...payload.card } as MrCard }
+  }
+  emit('changed')
+}
+
+function onQualityUpdated(card: RequirementIntegration['sonar']): void {
+  if (!card) return
+  quality.value = { card, emptyReason: null }
+  emit('changed')
+}
 
 function onCodeUpdated(card: RequirementIntegration['code']): void {
   if (!data.value || !card) return
   data.value = { ...data.value, code: card }
-  emit('changed')
-}
-
-function onSonarUpdated(card: RequirementIntegration['sonar']): void {
-  if (!data.value || !card) return
-  data.value = { ...data.value, sonar: card }
   emit('changed')
 }
 
@@ -85,7 +121,7 @@ function operationText(row: RequirementIntegration['sync'][number]): string {
       <div>
         <h2 class="integration-tab__title">集成</h2>
         <p class="integration-tab__sub">
-          代码、质量门与同步记录都读本地快照；打开本页不会实时访问 GitLab / Sonar。
+          MR 评审、行级评论、代码卡与质量快照都读本地数据；只有「刷新」会访问 GitLab / Sonar。
         </p>
       </div>
       <el-button size="small" :loading="loading" @click="load">重新读取</el-button>
@@ -106,6 +142,9 @@ function operationText(row: RequirementIntegration['sync'][number]): string {
     </p>
 
     <template v-else>
+      <!-- 通栏 MR 评审卡：评论按文件分组内滚 420；刷新是唯一外呼入口 -->
+      <MrReviewCard :requirement-id="requirementId" :mr="mrModel" :loading="loading" @refreshed="onMrRefreshed" />
+
       <div class="integration-tab__grid">
         <CodeCard
           :requirement-id="requirementId"
@@ -114,11 +153,12 @@ function operationText(row: RequirementIntegration['sync'][number]): string {
           :loading="loading"
           @updated="onCodeUpdated"
         />
-        <SonarGateCard
+        <CodeQualityCard
           :requirement-id="requirementId"
-          :card="sonarCard"
-          :loading="loading"
-          @updated="onSonarUpdated"
+          :card="quality?.card ?? null"
+          :empty-reason="quality?.emptyReason ?? null"
+          :loading="qualityLoading"
+          @updated="onQualityUpdated"
           @open-snapshot="openSnapshot"
         />
       </div>

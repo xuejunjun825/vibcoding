@@ -4,6 +4,7 @@
  */
 import { download, http } from './client'
 import type {
+  AttachmentRow,
   BoardMetrics,
   DefectDetail,
   DefectRow,
@@ -345,4 +346,180 @@ export async function listMetricDefinitions(allVersions = false): Promise<Metric
     { allVersions },
   )
   return response?.items ?? []
+}
+
+/* ---------------- CTest：用例评审（TECHNICAL §2.8） ---------------- */
+
+export type CaseReviewStatus = 'SUBMITTED' | 'DONE' | 'INVALIDATED'
+export type CaseReviewConclusion = 'PASS' | 'NEED_CHANGE' | 'REJECT'
+
+/** 结论/状态文案与 tone 的唯一映射（dict 的 StatusKind 未含该枚举，组件自包含） */
+export const CASE_REVIEW_STATUS_LABEL: Record<string, string> = {
+  SUBMITTED: '评审中',
+  DONE: '已完成',
+  INVALIDATED: '已过期',
+}
+
+export const CASE_REVIEW_CONCLUSION_LABEL: Record<string, string> = {
+  PASS: '通过',
+  NEED_CHANGE: '需修改',
+  REJECT: '驳回',
+}
+
+/** 发起评审必须钉住当前用例版本；版本升级后旧评审由服务端置 INVALIDATED */
+export interface CaseReviewRow {
+  id: number
+  caseId: number
+  caseCode?: string | null
+  caseTitle?: string | null
+  caseVersion: number
+  reviewerId?: number | null
+  reviewerName?: string | null
+  status: CaseReviewStatus | string
+  conclusion?: CaseReviewConclusion | string | null
+  comment?: string | null
+  invalidReason?: string | null
+  createdAt?: string | null
+  decidedAt?: string | null
+}
+
+export interface CaseReviewQuery {
+  status?: string
+  page?: number
+  size?: number
+}
+
+export async function fetchCaseReviews(caseId: number | string): Promise<CaseReviewRow[]> {
+  const raw = await http.get<CaseReviewRow[] | { items?: CaseReviewRow[] }>(
+    `${DELIVER}/testcases/${caseId}/reviews`,
+  )
+  return Array.isArray(raw) ? raw : raw?.items ?? []
+}
+
+export function submitCaseReview(
+  caseId: number | string,
+  body: { reviewerId: number; conclusion?: CaseReviewConclusion; comment?: string },
+): Promise<CaseReviewRow> {
+  return http.post<CaseReviewRow>(`${DELIVER}/testcases/${caseId}/reviews`, body)
+}
+
+export function decideCaseReview(
+  reviewId: number,
+  body: { conclusion: CaseReviewConclusion; comment?: string },
+): Promise<CaseReviewRow> {
+  return http.post<CaseReviewRow>(`${DELIVER}/testcase-reviews/${reviewId}/decide`, body)
+}
+
+export function fetchCaseReviewList(q: CaseReviewQuery = {}): Promise<PageResponse<CaseReviewRow>> {
+  return http.get<PageResponse<CaseReviewRow>>(`${DELIVER}/testcase-reviews`, {
+    status: q.status || undefined,
+    page: q.page ?? 1,
+    size: q.size ?? 20,
+  })
+}
+
+/* ---------------- CTest：执行器台账（TECHNICAL §2.10） ---------------- */
+
+export type ExecutorHealth = 'ONLINE' | 'STALE' | 'OFFLINE' | 'NEVER' | 'DISABLED'
+
+/** 五态由服务端按 ExecutorHealth 阈值派生；页面只渲染，不判 24/72 小时 */
+export const EXECUTOR_HEALTH_LABEL: Record<string, string> = {
+  ONLINE: '在线',
+  STALE: '滞后',
+  OFFLINE: '离线',
+  NEVER: '从未上报',
+  DISABLED: '已停用',
+}
+
+export const EXECUTOR_HEALTH_HINT: Record<string, string> = {
+  ONLINE: '最近 24 小时内上报',
+  STALE: '最近上报在 24–72 小时之间',
+  OFFLINE: '超过 72 小时未上报',
+  NEVER: '登记后从未上报',
+  DISABLED: '已停用，上报会被拒绝',
+}
+
+export interface TestExecutorRow {
+  id: number
+  code: string
+  name: string
+  baseUrl?: string | null
+  apiClientId?: number | null
+  /** 绑定 AppKey 的展示名（可空） */
+  apiClientName?: string | null
+  enabled: boolean
+  lastReportAt?: string | null
+  reportCount?: number | null
+  health: ExecutorHealth | string
+  createdAt?: string | null
+}
+
+export interface ExecutorSaveBody {
+  id?: number
+  code?: string
+  name: string
+  baseUrl?: string
+  apiClientId?: number | null
+  /** 仅创建时可设置绑定密钥；编辑不传表示不变更 */
+  apiClientSecret?: string
+  enabled?: boolean
+}
+
+export interface ExecutorReportBucket {
+  date: string
+  count: number
+}
+
+export async function fetchExecutors(): Promise<{ items: TestExecutorRow[]; total: number }> {
+  const raw = await http.get<{ items?: TestExecutorRow[]; total?: number } | TestExecutorRow[]>(
+    `${DELIVER}/test-executors`,
+  )
+  const items = Array.isArray(raw) ? raw : raw?.items ?? []
+  return { items, total: Array.isArray(raw) ? items.length : raw?.total ?? items.length }
+}
+
+export function saveExecutor(body: ExecutorSaveBody): Promise<TestExecutorRow> {
+  return body.id
+    ? http.put<TestExecutorRow>(`${DELIVER}/test-executors/${body.id}`, body)
+    : http.post<TestExecutorRow>(`${DELIVER}/test-executors`, body)
+}
+
+export async function fetchExecutorReports(
+  id: number,
+  days = 7,
+): Promise<ExecutorReportBucket[]> {
+  const raw = await http.get<
+    | ExecutorReportBucket[]
+    | { items?: ExecutorReportBucket[]; days?: ExecutorReportBucket[]; buckets?: ExecutorReportBucket[] }
+  >(`${DELIVER}/test-executors/${id}/reports`, { days })
+  if (Array.isArray(raw)) return raw
+  return raw?.items ?? raw?.days ?? raw?.buckets ?? []
+}
+
+/* ---------------- CTest：测试数据说明（TECHNICAL §2.9） ---------------- */
+
+export const DATA_NOTE_MAX = 2000
+
+export interface TestDataNote {
+  dataNote: string
+  attachments: AttachmentRow[]
+  /** 计划已完成 → 锁定，保存返回 409 PLAN_DATA_LOCKED */
+  locked: boolean
+  revision: number
+}
+
+export function fetchDataNote(planId: number | string): Promise<TestDataNote> {
+  return http.get<TestDataNote>(`${DELIVER}/test-plans/${planId}/data-note`).then((raw) => ({
+    dataNote: raw?.dataNote ?? '',
+    attachments: raw?.attachments ?? [],
+    locked: Boolean(raw?.locked),
+    revision: raw?.revision ?? 0,
+  }))
+}
+
+export function saveDataNote(
+  planId: number | string,
+  body: { dataNote: string; revision: number },
+): Promise<TestDataNote> {
+  return http.put<TestDataNote>(`${DELIVER}/test-plans/${planId}/data-note`, body)
 }

@@ -16,6 +16,7 @@ import type { CaseStep, CaseVersionRow, TestCaseDetail, TestCaseRow } from '@/ap
 import { useListQuery } from '@/composables/useListQuery'
 import { usePermission } from '@/composables/usePermission'
 import CaseVersionSwitcher from '@/components/CaseVersionSwitcher.vue'
+import CaseReviewPanel from '@/components/deliver/CaseReviewPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -267,6 +268,25 @@ async function saveNewVersion(): Promise<void> {
 function closeDrawer(): void {
   drawerVisible.value = false
   detail.value = null
+}
+
+/* ---------------- 用例评审（钉版本，AC-14/15/16） ---------------- */
+
+const canReviewView = computed(() => can('CASE_REVIEW_VIEW') || can('CASE_REVIEW_SUBMIT') || can('CASE_REVIEW_DECIDE'))
+const reviewVisible = ref(false)
+const reviewCaseId = ref(0)
+const reviewCaseVersion = ref(1)
+
+function openReviews(): void {
+  if (!detail.value) return
+  reviewCaseId.value = detail.value.id
+  reviewCaseVersion.value = detail.value.version
+  reviewVisible.value = true
+}
+
+/** 评审结论可能让人想复核用例内容：保存后仍停在当前版本，不自动跳转 */
+function onReviewChanged(): void {
+  /* 评审记录由面板自持；这里只保留挂点，方便后续刷新行内标记 */
 }
 
 /* ---------------- 新建 / 复制 / 删除 / 导入导出 ---------------- */
@@ -585,6 +605,15 @@ onMounted(() => {
             :current-version="currentVersion"
             :disabled="detailLoading"
           />
+          <el-button
+            size="small"
+            style="margin-left: auto"
+            :disabled="!canReviewView || isHistorical"
+            :title="isHistorical ? '历史版本不能发起评审，评审钉在当前版本' : '查看 / 发起 v' + detail.version + ' 的评审'"
+            @click="openReviews"
+          >
+            评审
+          </el-button>
         </div>
 
         <div v-if="isHistorical" class="readonly-banner">
@@ -672,6 +701,16 @@ onMounted(() => {
         </div>
       </template>
     </el-drawer>
+
+    <CaseReviewPanel
+      v-if="detail"
+      v-model:visible="reviewVisible"
+      :case-id="reviewCaseId"
+      :case-version="reviewCaseVersion"
+      :case-title="detail.title"
+      :case-code="detail.code"
+      @changed="onReviewChanged"
+    />
 
     <el-dialog v-model="createVisible" title="新建用例" width="640px" :close-on-click-modal="false">
       <el-form label-position="top">

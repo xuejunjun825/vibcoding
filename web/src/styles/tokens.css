@@ -98,6 +98,48 @@
   --intg-code-bg: #f7f8fa; /* 代码/坐标 mono 行底 */
   --intg-running: #2b6fe5; /* RUNNING 呼吸点（reduced-motion 下静止） */
 
+  /* ---- M8 协作 / 代码 / 测试治理（DESIGN §7.2，只增不改） ---- */
+  /* 甘特：尺子（左树 360 + 行高 40；计划条 18 / 实际条 6；一天 36 / 12 / 3.6 px） */
+  --gantt-tree: 360px;
+  --gantt-row: 40px;
+  --gantt-bar: 18px;
+  --gantt-actual: 6px;
+  --gantt-head: 64px;
+  --gantt-day: 36px;
+  --gantt-week: 12px;
+  --gantt-month: 3.6px;
+  --gantt-plan-fill: #2b6fe5; /* 实心 = 承诺（计划条） */
+  --gantt-actual-fill: #9dc0f2; /* 浅带 = 事实（实际条，唯一数据源 ActualPeriodRecorder） */
+  --gantt-weekend: #fafbfc;
+  --gantt-grid: #f2f3f5;
+  --gantt-today: #2b6fe5;
+  --gantt-warn-chip: 72px; /* 临期/逾期 chip：72 容 4 个全角字 */
+  /* Wiki：纸（220 + 16 + 700 + 16 + 240；命中词高亮底色） */
+  --wiki-nav: 220px;
+  --wiki-toc: 240px;
+  --wiki-measure: 700px;
+  --wiki-tree-row: 32px;
+  --wiki-hit: #fff1b8;
+  --w-drawer-diff: 720px;
+  /* 价值流：七段管道（7 × 160 + 6 × 12 = 1192 内容宽） */
+  --flow-col: 160px;
+  --flow-head: 44px;
+  --flow-metric: 72px;
+  --flow-gap: 12px;
+  --w-drawer-drill: 720px;
+  /* CCode */
+  --ccode-pill: 88px; /* 三态 pill 定宽，状态切换不跳动 */
+  --w-drawer-policy: 640px;
+  /* CTest */
+  --w-drawer-case: 720px;
+  --w-drawer-executor: 560px;
+  --h-case-review-row: 64px;
+  --h-case-review-invalid: 88px; /* 失效行高：结论 + 失效原因两行 */
+  --w-exec-health: 88px;
+  /* 共享 */
+  --w-mr-comments: 420px; /* MR 评论区内滚高度 */
+  --w-drawer-link: 560px;
+
   /* ---- 字体 ---- */
   --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

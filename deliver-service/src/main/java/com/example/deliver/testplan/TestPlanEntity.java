@@ -66,6 +66,30 @@ public class TestPlanEntity {
     @Column(name = "updated_by")
     private Long updatedBy;
 
+    /** AC-15: 测试数据说明正文。锁定由服务层按状态判定，不靠前端置灰。 */
+    @Column(name = "data_note", columnDefinition = "TEXT")
+    private String dataNote;
+
+    /** 说明正文的乐观锁版本；默认 0，避免 JPA 插入往 NOT NULL 列写 null。 */
+    @Column(name = "revision", nullable = false)
+    private Integer revision = 0;
+
+    public String getDataNote() {
+        return dataNote;
+    }
+
+    public void setDataNote(String dataNote) {
+        this.dataNote = dataNote;
+    }
+
+    public Integer getRevision() {
+        return revision;
+    }
+
+    public void setRevision(Integer revision) {
+        this.revision = revision;
+    }
+
     public Long getId() {
         return id;
     }

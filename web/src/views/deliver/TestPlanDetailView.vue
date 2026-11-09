@@ -25,6 +25,7 @@ import ErrorState from '@/components/ErrorState.vue'
 import LifecycleStepper from '@/components/quality/LifecycleStepper.vue'
 import RoundSwitcher from '@/components/quality/RoundSwitcher.vue'
 import AssignmentSummary from '@/components/quality/AssignmentSummary.vue'
+import DataNoteCard from '@/components/deliver/DataNoteCard.vue'
 import { formatDate, formatDateTime, formatNumber, formatPercent } from '@/utils/format'
 import '@/views/deliver/shared.css'
 
@@ -691,6 +692,10 @@ onMounted(async () => {
                 判定只在提交完成时由服务端做（同一份 exit_criteria 语义），页面不预先下结论。
               </footer>
             </aside>
+
+            <div class="overview__datanote">
+              <DataNoteCard :plan-id="plan.id" :plan-status="plan.status" />
+            </div>
           </div>
 
           <!-- 用例 -->
@@ -1288,6 +1293,10 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   margin-top: 12px;
+}
+
+.overview__datanote {
+  grid-column: 1 / -1;
 }
 
 .criteria-card {

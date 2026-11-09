@@ -125,16 +125,31 @@ expect_jq "timedOut=true" '.timedOut' 'true' "BuildView.timedOut 由 timeout_at/
 section "s1 · 后台提交重试上限：5xx 连续失败 → 6 次尝试后 RETRY_EXHAUSTED"
 ORD4="$(i_order_for "$REL" "$RD")"
 i_stub_mode jenkins.submit 500
+# 桩计数是全脚本累加的（前面几条构建也走过 jenkins.submit），必须取本次构建前的基线，
+# 否则循环在第一条就 break：既数不出 6 次尝试，也会在重试还没跑完时就把 mode 改回 ok，
+# 让真正耗尽的路径永远走不到 RETRY_EXHAUSTED。
+BASE_TRIES="$(i_stub_count jenkins.submit)"
+[[ "$BASE_TRIES" =~ ^[0-9]+$ ]] || BASE_TRIES=0
 api_call POST "/api/req/deploy-orders/${ORD4}/builds" '{"branch":"main"}'
 expect "提交失败也先返回 202（异步提交）" 202
 B5="$(jget "$HTTP_BODY" '.buildId')"
-TRIES=0
+DELTA=0
 for _ in $(seq 1 45); do
     TRIES="$(i_stub_count jenkins.submit)"
-    [[ "$TRIES" =~ ^[0-9]+$ ]] && (( TRIES >= 6 )) && break
+    [[ "$TRIES" =~ ^[0-9]+$ ]] || TRIES=$BASE_TRIES
+    DELTA=$(( TRIES - BASE_TRIES ))
+    (( DELTA >= 6 )) && break
     sleep 1
 done
-expect_num "最多 6 次尝试（1/2/4/8/16s 退避）" "${TRIES:-0}" eq 6
+expect_num "最多 6 次尝试（1/2/4/8/16s 退避）" "${DELTA:-0}" eq 6
+# 第 6 次失败后写日志与断言之间有一个异步窗口：轮询到行出现（最多 10s），不靠 sleep 蒙。
+EXH=0
+for _ in $(seq 1 10); do
+    EXH="$(db_q "SELECT COUNT(*) FROM integration_sync_log WHERE tenant_id=${TENANT_ID} AND \`system\`='JENKINS' AND result='RETRY_EXHAUSTED' AND created_at > NOW() - INTERVAL 3 MINUTE")"
+    [[ "$EXH" =~ ^[0-9]+$ ]] || EXH=0
+    (( EXH >= 1 )) && break
+    sleep 1
+done
 expect_db "重试耗尽写 RETRY_EXHAUSTED 日志" \
     "SELECT COUNT(*) FROM integration_sync_log WHERE tenant_id=${TENANT_ID} AND \`system\`='JENKINS' AND result='RETRY_EXHAUSTED' AND created_at > NOW() - INTERVAL 3 MINUTE" ge 1
 i_stub_mode jenkins.submit ok

@@ -1,6 +1,9 @@
 package com.example.req.seed;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.LocalDate;
@@ -17,6 +20,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -42,6 +46,10 @@ public class SeedService {
     private static final String TENANT_CODE = "t1";
     private static final String ADMIN_PASSWORD = "Admin@12345";
     private static final String USER_PASSWORD = "Passw0rd!";
+    /** 协作/代码/测试治理的落库种子与回填校验都写在这个迁移里（V9 是唯一口径）。 */
+    private static final String COLLAB_SEED_SOURCE = "db/migration/V9__ccode_cteam_ctest_p0.sql";
+    /** 5 行质量指标（FPY/回归/逃逸/72h/回滚）的定义只在 V5 步 7，这里同样按段重放。 */
+    private static final String QUALITY_SEED_SOURCE = "db/migration/V5__quality_management.sql";
 
     private final JdbcTemplate jdbc;
     private final boolean enabled;
@@ -427,6 +435,13 @@ public class SeedService {
                             "version", 1, "effective_at", now));
         }
 
+        // 协作域（M8）：阶段定义 / FLOW 指标 / Wiki 空间与页面 / 分支策略 / 执行器台账。
+        // V9 的 ⑤ 段是这些行的唯一定义，这里在租户造好之后把它幂等重放（见 replayCollabSeed）。
+        replayCollabSeed();
+        // 质量域同理：V5 步 7 的 5 行指标在空库 Flyway 阶段插不进（sys_tenant 为空），
+        // 全新安装的指标字典会少 5 条（D-03）。租户与用户此刻都已存在，owner 子查询可命中。
+        replayQualityMetricSeed();
+
         // 编号序列（与已插入的单据号对齐）：next_val = 该前缀已发出的最大值，
         // 否则 CodeGenerator 从 0 起算，第一个 API 建单就会撞 uk_case_code / uk_req_code
         // （2026-11-09 T11 实测：种子 TC-0001..0012 之后，POST /testcases 报 Duplicate '4-TC-0001'）。
@@ -441,6 +456,100 @@ public class SeedService {
         if (scale > 20) {
             bulkRequirements(tenantId, pdrBulk, domain1, supplyOrg, users.get("admin"), scale, now);
         }
+    }
+
+    /**
+     * 重放 V9 迁移的 ⑤ 种子段（按租户幂等）。
+     *
+     * <p>为什么需要这一步：V9 的种子是 {@code INSERT ... SELECT FROM sys_tenant}，而全新空库里
+     * Flyway 先于 {@code POST /internal/seed} 执行——那一刻 sys_tenant 还是空表，于是 11 张新表
+     * 全是 0 行（实测 branch_policy=0 而 sys_tenant=1），甘特/价值流/Wiki/执行器的夹具全部缺失。
+     * 迁移已经 applied，改 V9 既不会重跑（validate-on-migrate=true，改内容反而校验和不匹配），
+     * 也不该把同一批行再抄一份到 Java 里变成两处定义。</p>
+     *
+     * <p>所以：V9 仍是唯一口径，这里只在租户造好之后把同一段 SQL 原样再执行一次。段内每条
+     * {@code INSERT ... SELECT} 都自带 {@code NOT EXISTS} 守卫，重放是幂等的（租户多个也只是
+     * 各取各的）。标号缺失会直接抛错而不是静默 0 行——那正是本方法要修的故障形态。</p>
+     */
+    private void replayCollabSeed() {
+        String sql;
+        try (InputStream in = new ClassPathResource(COLLAB_SEED_SOURCE).getInputStream()) {
+            sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            throw new IllegalStateException("读不到协作域种子源 " + COLLAB_SEED_SOURCE, ex);
+        }
+        // 段标号带括号是为了避开文件头那张目录注释（第 4 行也写着「⑤ 种子 → ⑥ 校验」）；
+        // ⑥ 从 ⑤ 之后找，否则永远命中的是那行注释，切片长度成 0。
+        int from = sectionStart(sql, "⑤ 种子（按租户，幂等）", 0);
+        int to = sectionStart(sql, "⑥ 校验", Math.max(from, 0));
+        if (from < 0 || to <= from) {
+            throw new IllegalStateException(COLLAB_SEED_SOURCE
+                    + " 缺少种子段标号（⑤ 种子 / ⑥ 校验）：迁移被动过，协作域种子会静默 0 行");
+        }
+        int executed = replaySeedSection(COLLAB_SEED_SOURCE, sql.substring(from, to));
+        log.info("协作域种子已按 V9 ⑤ 段重放：{} 条语句（幂等，命中即跳过）", executed);
+    }
+
+    /**
+     * 重放 V5 迁移「步 7」的质量指标种子（每租户 5 行，幂等）。
+     *
+     * <p>为什么需要这一步：V5 步 7 与 V9 ⑤ 段是同一个故障形态——种子写成
+     * {@code INSERT ... SELECT FROM sys_tenant}，而全新空库 Flyway 先于 {@code POST /internal/seed}
+     * 执行，sys_tenant 当时为空，插入 0 行；迁移已 applied，改文件反而校验和不匹配。
+     * 于是全新安装的指标字典只有 SeedService 内置的 4 条 + V9 的 5 条 FLOW，缺 5 条质量指标
+     * （FPY / REGRESSION_PASS_RATE / DEFECT_ESCAPE_RATE / POST_RELEASE_DEFECTS_72H / ROLLBACK_RATE），
+     * 既有的「14 条指标定义」门禁因此掉到 9 条（D-03）。</p>
+     *
+     * <p>与 V9 一样，V5 仍是唯一定义：这里只把步 7 原样再执行一次，步 7 自带
+     * {@code NOT EXISTS} 守卫，重放幂等；标号缺失直接抛错，不允许静默 0 行。</p>
+     */
+    private void replayQualityMetricSeed() {
+        String sql;
+        try (InputStream in = new ClassPathResource(QUALITY_SEED_SOURCE).getInputStream()) {
+            sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            throw new IllegalStateException("读不到质量域种子源 " + QUALITY_SEED_SOURCE, ex);
+        }
+        int from = sectionStart(sql, "步 7：5 行质量指标", 0);
+        if (from < 0) {
+            throw new IllegalStateException(QUALITY_SEED_SOURCE
+                    + " 缺少「步 7：5 行质量指标」段标号：迁移被动过，5 条质量指标会静默缺失");
+        }
+        int executed = replaySeedSection(QUALITY_SEED_SOURCE, sql.substring(from));
+        log.info("质量指标已按 V5 步 7 重放：{} 条语句（幂等，命中即跳过）", executed);
+    }
+
+    /** 执行一段迁移 SQL：丢弃 -- 注释行、按 ';' 拆句逐条执行，返回执行条数。 */
+    private int replaySeedSection(String source, String section) {
+        int executed = 0;
+        for (String chunk : section.split(";")) {
+            StringBuilder statement = new StringBuilder();
+            for (String line : chunk.split("\n")) {
+                // 段内的 -- 注释只解释口径，不进 SQL；留着会把注释粘到上一条语句尾部。
+                if (!line.trim().startsWith("--")) {
+                    statement.append(line).append('\n');
+                }
+            }
+            if (statement.toString().isBlank()) {
+                continue;
+            }
+            jdbc.execute(statement.toString());
+            executed++;
+        }
+        if (executed == 0) {
+            throw new IllegalStateException(source + " 的种子段解析出 0 条语句：迁移格式已变");
+        }
+        return executed;
+    }
+
+    /** 段标号所在行的行首偏移（从 fromIndex 起找）；找不到返回 -1。 */
+    private static int sectionStart(String sql, String marker, int fromIndex) {
+        int at = sql.indexOf(marker, fromIndex);
+        if (at < 0) {
+            return -1;
+        }
+        int lineStart = sql.lastIndexOf('\n', at);
+        return lineStart < 0 ? 0 : lineStart + 1;
     }
 
     /**

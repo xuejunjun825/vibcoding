@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import com.example.deliver.reqread.ReqReadModel;
+import com.example.deliver.review.CaseReviewService;
 import com.example.deliver.reqread.RequirementSnapshot;
 import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.code.CodeGenerator;
@@ -55,6 +56,7 @@ public class TestCaseService {
     private final AuditService audit;
     private final ScopedJdbc jdbc;
     private final ReqReadModel requirements;
+    private final CaseReviewService caseReviews;
     private final ScopeGuard scopeGuard;
 
     public TestCaseService(TestModuleRepository modules,
@@ -65,9 +67,10 @@ public class TestCaseService {
                            CodeGenerator codes,
                            AuditService audit,
                            ScopedJdbc jdbc,
-                           ReqReadModel requirements) {
+                           ReqReadModel requirements,
+                           CaseReviewService caseReviews) {
         this(modules, cases, steps, versions, query, codes, audit, jdbc, requirements,
-                new ScopeGuard());
+                caseReviews, new ScopeGuard());
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -80,6 +83,7 @@ public class TestCaseService {
                            AuditService audit,
                            ScopedJdbc jdbc,
                            ReqReadModel requirements,
+                           CaseReviewService caseReviews,
                            ScopeGuard scopeGuard) {
         this.modules = modules;
         this.cases = cases;
@@ -90,6 +94,7 @@ public class TestCaseService {
         this.audit = audit;
         this.jdbc = jdbc;
         this.requirements = requirements;
+        this.caseReviews = caseReviews;
         this.scopeGuard = scopeGuard;
     }
 
@@ -297,6 +302,8 @@ public class TestCaseService {
         writeVersion(entity, nextVersion, payload, scope.userId());
         audit.record("CASE_VERSION", "TEST_CASE", entity.getId(),
                 Map.of("version", nextVersion, "code", entity.getCode()));
+        // AC-14：改版即失效，且必须与本事务同提交——否则旧版本的评审会短暂"仍然有效"。
+        caseReviews.invalidate(entity.getId(), nextVersion - 1, "NEW_VERSION");
         return detail(entity.getId(), nextVersion);
     }
 

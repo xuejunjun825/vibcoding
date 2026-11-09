@@ -58,6 +58,13 @@ fi
 
 STAGE="3 构建全部 Maven 模块"
 detect_maven_repo
+# 平台模块必须先 install 到本地仓库再打 fat jar：`mvn package` 只重打包本模块的 classes，
+# 若 ~/.m2 里的 platform-common / platform-contract 还是上一轮的，服务端就会带着旧的
+# 权限码表与 ScopeSql 登记跑起来（实测：已登记的 test_executor 被判成 unknown scoped table，
+# 403/500 都与源码对不上）。-am 顺带把父 POM 一起装上。
+log "mvn -q -pl platform-contract,platform-common -am -DskipTests install（先刷新平台模块）"
+( cd "$ROOT" && mvn -q ${MAVEN_REPO_ARG:-} -pl platform-contract,platform-common -am -DskipTests install ) \
+    || die "平台模块 install 失败：先看上面 Maven 报的第一条 ERROR（多半是编译错误，不是网络）"
 log "mvn -q -DskipTests package（含平台模块）"
 ( cd "$ROOT" && mvn -q ${MAVEN_REPO_ARG:-} -DskipTests package )
 ok "构建完成"

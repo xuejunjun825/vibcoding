@@ -42,6 +42,9 @@ public final class PermissionRouteTable {
             rule(null, "^/admin/tenants$", false, "tenant:manage"),
             rule(null, "^/admin/tenants/.+$", false, "tenant:manage"),
             rule(null, "^/admin/(orgs|vendors|domains|users|dicts)(/.*)?$", false, "org:manage"),
+            // 权限矩阵是只读投影，但它把「角色 × 功能码」整张授权模型摊开：对非管理员开放等于
+            // 告诉任意已认证账号每个角色能做什么。管理页与后端用同一个码（前端 nav 也按它隐藏入口）。
+            rule(null, "^/admin/permissions$", false, "org:manage"),
             rule(null, "^/admin/workflows(/.*)?$", false, "workflow:manage"),
             rule(null, "^/admin/api-clients(/.*)?$", false, "apiclient:manage"),
             rule(null, "^/admin/metric-definitions(/.*)?$", false, "metric:manage"),
@@ -58,6 +61,71 @@ public final class PermissionRouteTable {
             // 只有晋级是写：它把制品推到正式仓库，属于发布动作而不是集成管理，
             // 与前端 ArtifactSummaryCard.canPromote（deploy:create）保持同一个码。
             rule("POST", "^/artifacts/\\d+/promote$", false, "deploy:create"),
+
+            // ---- M8 collaboration / code / test governance ----
+            // Same rule as M6: the broad read rule sits last within its own family, and every write
+            // or action rule sits above it, because first-match-wins would otherwise charge a wiki
+            // page write only WIKI_VIEW (a read code) and a gantt re-date only GANTT_VIEW.
+            // /gantt/rows/{id} is the one write entry point (AC-2 keeps it unique), so it gets its
+            // own rule before the board read.
+            rule("PATCH", "^/gantt/rows/.*$", false, "GANTT_EDIT"),
+            rule(null, "^/gantt(/.*)?$", false, "GANTT_VIEW"),
+            // Space structure (create / rename / members / visibility) is administration: without
+            // this rule it would be swallowed by the wiki write rule below and any WIKI_EDIT caller
+            // could lift a space's visibility.
+            rule("POST", "^/wiki/spaces(/.*)?$", false, "WIKI_ADMIN"),
+            rule("PUT", "^/wiki/spaces(/.*)?$", false, "WIKI_ADMIN"),
+            rule("DELETE", "^/wiki/spaces(/.*)?$", false, "WIKI_ADMIN"),
+            // Purging a page is physical deletion of an admin-visible trash row: the author who may
+            // soft-delete a page must not be able to skip the 30-day window through it.
+            rule("DELETE", "^/wiki/pages/.*/purge$", false, "WIKI_ADMIN"),
+            rule("POST", "^/wiki/.*$", false, "WIKI_EDIT"),
+            rule("PUT", "^/wiki/.*$", false, "WIKI_EDIT"),
+            rule("DELETE", "^/wiki/.*$", false, "WIKI_EDIT"),
+            rule(null, "^/wiki(/.*)?$", false, "WIKI_VIEW"),
+            // Stage definitions decide the flow metrics' caliber, so re-configuring them is
+            // FLOW_CONFIG while reading the board is FLOW_VIEW.
+            rule("POST", "^/flow/stages(/.*)?$", false, "FLOW_CONFIG"),
+            rule("PUT", "^/flow/stages(/.*)?$", false, "FLOW_CONFIG"),
+            rule("DELETE", "^/flow/stages(/.*)?$", false, "FLOW_CONFIG"),
+            rule(null, "^/flow(/.*)?$", false, "FLOW_VIEW"),
+            // The metric dictionary preview of a FLOW_* code must stay readable by anyone who can
+            // read the board: it delegates to the same computation (no second formula), so it must
+            // not require metric:manage - that would hide the number from the people judging it.
+            rule(null, "^/metrics/FLOW_[A-Z_]+/preview$", false, "FLOW_VIEW"),
+            // Verifying a policy calls GitLab; registering/editing one changes what the team must
+            // do, so both are the edit code, while listing is view-only.
+            rule(null, "^/code/policies/.*/check$", false, "CCODE_POLICY_EDIT"),
+            rule("POST", "^/code/policies(/.*)?$", false, "CCODE_POLICY_EDIT"),
+            rule("PUT", "^/code/policies(/.*)?$", false, "CCODE_POLICY_EDIT"),
+            rule("DELETE", "^/code/policies(/.*)?$", false, "CCODE_POLICY_EDIT"),
+            rule(null, "^/code/policies(/.*)?$", false, "CCODE_POLICY_VIEW"),
+            // Case reviews are read-gated and the service decides SUBMIT vs DECIDE (the reviewer
+            // is the assignee, not the role); both paths exist so the gate also covers the nested
+            // form used by the case library drawer. Must stay above ^/(testcases|...) below.
+            rule(null, "^/testcase-reviews(/.*)?$", false, "CASE_REVIEW_VIEW"),
+            rule(null, "^/testcases/\\d+/reviews(/.*)?$", false, "CASE_REVIEW_VIEW"),
+            // The executor ledger is test infrastructure: reading it is not managing it.
+            rule("POST", "^/test-executors(/.*)?$", false, "TEST_EXECUTOR_MANAGE"),
+            rule("PUT", "^/test-executors(/.*)?$", false, "TEST_EXECUTOR_MANAGE"),
+            rule("DELETE", "^/test-executors(/.*)?$", false, "TEST_EXECUTOR_MANAGE"),
+            rule(null, "^/test-executors(/.*)?$", false, "TEST_EXECUTOR_VIEW"),
+
+            // ---- M8 CCode（MR 评论 / 代码质量卡） ----
+            // 这两条读必须显式登记：没有规则时 /requirements/{id}/code-quality 是「任何已认证
+            // 账号可读」，而 /releases/{id}/code-quality 会掉到下面的 ^/releases → release:plan
+            // ——「勾了发布权限才能看质量卡」不是想要的口径。卡本身只读本地快照，零外呼。
+            rule(null, "^/requirements/\\d+/code-quality$", false, "CCODE_POLICY_VIEW"),
+            rule(null, "^/releases/\\d+/code-quality$", false, "CCODE_POLICY_VIEW"),
+            // 行级评论跟随需求可见性（跨域 404 由服务层给），但读它要落在协作链路的角色上：
+            // 代码负责人/PMO 用 CCODE_POLICY_VIEW，评审人（QA）只有 CASE_REVIEW_VIEW，
+            // 所以是 anyOf —— 单用 CCODE_POLICY_VIEW 会把评审人挡在自己要看的评论外面。
+            rule(null, "^/requirements/\\d+/integration/mr(-comments)?$", true,
+                    "CCODE_POLICY_VIEW", "CASE_REVIEW_VIEW"),
+            // 刷新 MR 卡是这一段唯一主动外呼 GitLab 的动作（会写 mr_sync），所以是编辑码：
+            // 读走上面的读规则，点「刷新」才需要 CCODE_POLICY_EDIT。
+            rule("POST", "^/requirements/\\d+/integration/mr/refresh$", false,
+                    "CCODE_POLICY_EDIT"),
 
             // ---- requirements ----
             rule("POST", "^/requirements$", true, "req:report:bus", "req:report:dev"),
@@ -82,6 +150,12 @@ public final class PermissionRouteTable {
             // QA account gets a 403 on the very action listed in the matrix.
             rule("POST", "^/test-plans/\\d+/rounds$", false, "plan:execute"),
             rule("POST", "^/test-plans/\\d+/rounds/\\d+/close$", false, "plan:execute"),
+            // AC-15：测试数据说明由「计划 owner + 本域测试角色」编辑（非 owner 403、计划完成
+            // 409 PLAN_DATA_LOCKED 都在服务层判）。路由层不能再用 plan:manage 一刀切：那会让
+            // 只有 plan:edit/plan:execute 的计划 owner 连读自己的说明都被 403，owner 判定永远
+            // 走不到。三个码任一即可，属于测试计划自己的动作码。
+            rule(null, "^/test-plans/\\d+/data-note$", true,
+                    "plan:edit", "plan:execute", "plan:manage"),
             rule(null, "^/test-strategies(/.*)?$", false, "strategy:manage"),
             rule("POST", "^/test-envs(/.*)?$", false, "env:manage"),
             rule("PUT", "^/test-envs(/.*)?$", false, "env:manage"),

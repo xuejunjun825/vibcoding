@@ -2,12 +2,14 @@
 import { computed, reactive, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { defectFromExecution, executeCase, getTestPlan } from '@/api/deliver'
+import { defectFromExecution, executeCase, fetchDataNote, getTestPlan } from '@/api/deliver'
 import { planApi, roundApi, envApi } from '@/api/quality'
 import { listUsers, type UserRow } from '@/api/admin'
+import { downloadAttachment } from '@/api/req'
 import { usePermission } from '@/composables/usePermission'
 import { useDictStore } from '@/stores/dict'
 import type { PlanCounts, PlanDetail, RoundDetail, RoundView, TestPlanDetail } from '@/api/types'
+import type { TestDataNote } from '@/api/deliver'
 import StatusPill from '@/components/StatusPill.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -73,6 +75,8 @@ const mode = computed<'round' | 'total'>(() => (route.query.mode === 'total' ? '
 
 const plan = ref<PlanDetail | null>(null)
 const m5 = ref<TestPlanDetail | null>(null)
+const dataNote = ref<TestDataNote | null>(null)
+const dataNoteOpen = ref(true)
 const rounds = ref<RoundView[]>([])
 const roundDetail = ref<RoundDetail | null>(null)
 const users = ref<UserRow[]>([])
@@ -219,6 +223,7 @@ async function loadAll(): Promise<void> {
     plan.value = planDetail
     rounds.value = roundList
     await loadRound()
+    void loadDataNote()
   } catch (err) {
     error.value = {
       message: (err as Error).message || '执行台加载失败',
@@ -228,6 +233,23 @@ async function loadAll(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+/** 执行台只读展示测试数据说明：读不到就整块不渲染，不编造「无数据」结论 */
+const dataNoteText = computed(() => (dataNote.value?.dataNote ?? '').trim())
+const dataNoteAttachments = computed(() => dataNote.value?.attachments ?? [])
+const hasDataNote = computed(() => Boolean(dataNoteText.value) || dataNoteAttachments.value.length > 0)
+
+async function loadDataNote(): Promise<void> {
+  try {
+    dataNote.value = await fetchDataNote(planId.value)
+  } catch {
+    dataNote.value = null
+  }
+}
+
+function downloadNoteAttachment(id: number, name: string): void {
+  void downloadAttachment(id, name)
 }
 
 async function loadRound(): Promise<void> {
@@ -613,6 +635,31 @@ onMounted(async () => {
         </div>
       </div>
 
+      <!-- 测试数据说明（只读折叠区） -->
+      <section v-if="hasDataNote" class="exec-datanote">
+        <button
+          type="button"
+          class="exec-datanote__bar"
+          :aria-expanded="dataNoteOpen"
+          @click="dataNoteOpen = !dataNoteOpen"
+        >
+          <span class="exec-datanote__caret" :class="{ 'is-open': dataNoteOpen }" aria-hidden="true">▸</span>
+          <span class="exec-datanote__title">测试数据说明</span>
+          <span class="exec-datanote__count">{{ dataNoteAttachments.length }} 个附件</span>
+          <span class="exec-datanote__hint">只读 · 在计划详情里维护</span>
+        </button>
+        <div v-show="dataNoteOpen" class="exec-datanote__body">
+          <p v-if="dataNoteText" class="exec-datanote__text">{{ dataNoteText }}</p>
+          <ul v-if="dataNoteAttachments.length" class="exec-datanote__files">
+            <li v-for="row in dataNoteAttachments" :key="row.id">
+              <button type="button" class="exec-datanote__file" @click="downloadNoteAttachment(row.id, row.fileName)">
+                {{ row.fileName }}
+              </button>
+            </li>
+          </ul>
+        </div>
+      </section>
+
       <!-- 统计行 -->
       <section class="exec-stats" v-loading="loading">
         <div class="exec-stats__ring">
@@ -910,6 +957,104 @@ onMounted(async () => {
   gap: 4px;
   margin-top: 8px;
   font-size: 12px;
+}
+
+/* 测试数据说明：只读折叠区 */
+.exec-datanote {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--bg-card);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.exec-datanote__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: var(--bg-table-head, #fafbfc);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--t-color) ease;
+}
+
+.exec-datanote__bar:hover {
+  background: var(--bg-hover);
+}
+
+.exec-datanote__bar:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.exec-datanote__caret {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--text-muted-aa);
+  transition: transform var(--t-expand) ease;
+}
+
+.exec-datanote__caret.is-open {
+  transform: rotate(90deg);
+}
+
+.exec-datanote__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-title);
+}
+
+.exec-datanote__count {
+  font-size: 12px;
+  color: var(--text-body);
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--bg-selected);
+}
+
+.exec-datanote__hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+
+.exec-datanote__body {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--divider);
+}
+
+.exec-datanote__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.exec-datanote__files {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.exec-datanote__file {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.exec-datanote__file:hover {
+  text-decoration: underline;
 }
 
 /* 统计行：环 + 4 个数字块 */

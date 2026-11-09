@@ -341,7 +341,7 @@ section "AC-5 权限矩阵：接口生成探测矩阵，逐格断言 2xx/403"
 api_call GET /api/req/admin/permissions
 expect "GET /admin/permissions 200" 200
 FN_COUNT="$(jlen "$HTTP_BODY" '.functions')"
-expect_num "权限矩阵暴露 42 个函数码" "${FN_COUNT:-0}" eq 42 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码 + 1 M7 integration:manage）"
+expect_num "权限矩阵暴露 56 个函数码" "${FN_COUNT:-0}" eq 56 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码 + 1 M7 integration:manage + 14 M8 协作/代码/测试码）"
 ROLE_COUNT="$(jlen "$HTTP_BODY" '.roles')"
 expect_num "权限矩阵暴露 10 个角色" "${ROLE_COUNT:-0}" eq 10 "建租户预置的 10 角色"
 ROLE_CODES="$(db_q "SELECT GROUP_CONCAT(DISTINCT code ORDER BY code) FROM sys_role WHERE tenant_id=$(tenant_id)")"
@@ -903,7 +903,12 @@ section "AC-18 指标定义与口径同源"
 api_call GET /api/deliver/metrics/definitions
 expect "指标定义 200" 200
 DEF_N="$(jlen "$HTTP_BODY" '.items // .')"
-expect_num "9 条指标定义（M6 新增 5 项质量指标）" "${DEF_N:-0}" eq 9 "种子必须写 9 条 metric_definition"
+expect_num "14 条指标定义（9 既有 + 5 条 FLOW_* 价值流指标）" "${DEF_N:-0}" eq 14 "V9 种子必须写 5 条 FLOW_* metric_definition（datasource=req.audit），与看板同源"
+# D-03 回归：V5 步 7 的 5 条质量指标也是 INSERT…SELECT FROM sys_tenant，空库 Flyway 时
+# sys_tenant 为空 → 0 行。只数总数会被别的来源凑够，所以按 code 点名断言。
+Q_DEF_N="$(jget "$HTTP_BODY" '[.items // . | .[] | select(.code as $c | ["FPY","REGRESSION_PASS_RATE","DEFECT_ESCAPE_RATE","POST_RELEASE_DEFECTS_72H","ROLLBACK_RATE"] | index($c))] | length')"
+expect_num "V5 步 7 的 5 条质量指标在全新库可重放（D-03）" "${Q_DEF_N:-0}" eq 5 \
+    "SeedService.replayQualityMetricSeed 必须重放 V5 步 7：空库 Flyway 早于建租户，INSERT…SELECT 插 0 行"
 api_call GET "/api/deliver/defects/board?domainId=1"
 DENSITY="$(jget "$HTTP_BODY" '.metrics.density')"
 D_TOTAL="$(db_count defect "tenant_id=$(tenant_id) AND domain_id=1")"

@@ -39,6 +39,13 @@ export type StatusKind =
   | 'admission'
   | 'sonar'
   | 'artifactSource'
+  // M8 协作/代码/测试治理域（DESIGN §6 状态词典增量：文案唯一来源）
+  | 'policyCheck'
+  | 'executorHealth'
+  | 'caseReview'
+  | 'caseReviewConclusion'
+  | 'wikiVisibility'
+  | 'mrReviewState'
 
 const REQUIREMENT: Record<string, StatusMeta> = {
   // BUS
@@ -256,6 +263,49 @@ const ARTIFACT_SOURCE: Record<string, StatusMeta> = {
   MANUAL: { label: '手工', tone: 'warning' },
 }
 
+/** M8-C1 分支策略核验：未核验永远是黄的，绝不落绿（AC-11） */
+const POLICY_CHECK: Record<string, StatusMeta> = {
+  MATCH: { label: '一致', tone: 'success' },
+  DRIFT: { label: '有差异', tone: 'warning' },
+  UNVERIFIED: { label: '未核验', tone: 'warning' },
+}
+
+/** M8-C2 执行器健康：五态由 ExecutorHealth.of 派生，页面不判 24/72 小时 */
+const EXECUTOR_HEALTH: Record<string, StatusMeta> = {
+  ONLINE: { label: '在线', tone: 'success' },
+  STALE: { label: '滞后', tone: 'warning' },
+  OFFLINE: { label: '离线', tone: 'danger' },
+  NEVER: { label: '从未上报', tone: 'neutral' },
+  DISABLED: { label: '已停用', tone: 'neutral' },
+}
+
+/** M8-T1 用例评审：改版即失效 */
+const CASE_REVIEW: Record<string, StatusMeta> = {
+  SUBMITTED: { label: '评审中', tone: 'primary' },
+  DONE: { label: '已完成', tone: 'success' },
+  INVALIDATED: { label: '已过期', tone: 'warning' },
+}
+
+const CASE_REVIEW_CONCLUSION: Record<string, StatusMeta> = {
+  PASS: { label: '通过', tone: 'success' },
+  NEED_CHANGE: { label: '需修改', tone: 'warning' },
+  REJECT: { label: '驳回', tone: 'danger' },
+}
+
+/** M8-W0 Wiki 空间可见范围（六出口同源，见 WikiVisibility） */
+const WIKI_VISIBILITY: Record<string, StatusMeta> = {
+  INHERIT: { label: '继承域范围', tone: 'info' },
+  DOMAIN: { label: '仅本域', tone: 'primary' },
+  VENDOR: { label: '仅同厂商', tone: 'neutral' },
+}
+
+/** M8-C3 MR 评审态（来自 GitLab MR notes 的聚合，不由前端推断） */
+const MR_REVIEW_STATE: Record<string, StatusMeta> = {
+  PENDING: { label: '待评审', tone: 'warning' },
+  APPROVED: { label: '已批准', tone: 'success' },
+  CHANGES_REQUESTED: { label: '已要求修改', tone: 'danger' },
+}
+
 const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   requirement: REQUIREMENT,
   defect: DEFECT,
@@ -280,6 +330,12 @@ const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   admission: ADMISSION,
   sonar: SONAR,
   artifactSource: ARTIFACT_SOURCE,
+  policyCheck: POLICY_CHECK,
+  executorHealth: EXECUTOR_HEALTH,
+  caseReview: CASE_REVIEW,
+  caseReviewConclusion: CASE_REVIEW_CONCLUSION,
+  wikiVisibility: WIKI_VISIBILITY,
+  mrReviewState: MR_REVIEW_STATE,
 }
 
 /** 流转动作中文标签（与 TECHNICAL §3.3 的状态表一一对应） */

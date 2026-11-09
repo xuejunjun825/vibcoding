@@ -10,6 +10,7 @@ import java.util.Locale;
 import java.util.Map;
 
 import com.example.deliver.reqread.ReqReadModel;
+import com.example.deliver.support.Rows;
 import com.example.deliver.testcase.TestCaseEntity;
 import com.example.deliver.testcase.TestCaseRepository;
 import com.example.deliver.testcase.TestCaseStepEntity;
@@ -20,6 +21,7 @@ import com.example.platform.common.error.ApiException;
 import com.example.platform.common.scope.ScopedJdbc;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,6 +47,7 @@ public class TestPlanService {
     private final TestPlanQuery query;
     private final ReqReadModel requirements;
     private final ScopedJdbc jdbc;
+    private final NamedParameterJdbcTemplate writeJdbc;
     private final AuditService audit;
 
     public TestPlanService(TestPlanRepository plans,
@@ -55,6 +58,7 @@ public class TestPlanService {
                            TestPlanQuery query,
                            ReqReadModel requirements,
                            ScopedJdbc jdbc,
+                           NamedParameterJdbcTemplate writeJdbc,
                            AuditService audit) {
         this.plans = plans;
         this.planCases = planCases;
@@ -64,6 +68,7 @@ public class TestPlanService {
         this.query = query;
         this.requirements = requirements;
         this.jdbc = jdbc;
+        this.writeJdbc = writeJdbc;
         this.audit = audit;
     }
 
@@ -284,6 +289,140 @@ public class TestPlanService {
             out.add(new TestCaseViews.StepView(step.getStepNo(), step.getAction(), step.getExpected()));
         }
         return out;
+    }
+
+    // ------------------------------------------------------------------ 测试数据说明（AC-15）
+
+    /** Wire shape for `GET/PUT /test-plans/{id}/data-note` (web/src/api/deliver.ts). */
+    public record DataNoteAttachment(long id,
+                                     String fileName,
+                                     Long size,
+                                     String uploadedBy,
+                                     LocalDateTime createdAt) {
+    }
+
+    public record DataNoteView(String dataNote,
+                               List<DataNoteAttachment> attachments,
+                               boolean locked,
+                               int revision) {
+    }
+
+    public record DataNoteCmd(String dataNote, Integer revision) {
+    }
+
+    /** Statuses where the note is frozen — same set the lifecycle refuses to edit. */
+    private static final List<String> DATA_NOTE_LOCKED_STATUSES =
+            List.of("COMPLETED", "CLOSED", "ARCHIVED");
+
+    private static final int DATA_NOTE_MAX_LENGTH = 2000;
+
+    @Transactional(readOnly = true)
+    public DataNoteView dataNote(long planId) {
+        DataScope scope = TenantContext.require();
+        TestPlanEntity plan = requirePlan(planId, scope.tenantId());
+        Map<String, Object> row = noteRow(planId);
+        return new DataNoteView(
+                row == null ? "" : Rows.str(row, "data_note", ""),
+                attachmentsOf(planId),
+                DATA_NOTE_LOCKED_STATUSES.contains(plan.getStatus()),
+                row == null ? 0 : Rows.toInt(row.get("revision"), 0));
+    }
+
+    /**
+     * Save the note with an optimistic revision check.
+     *
+     * <p>The lock is enforced here rather than only in the UI: a completed plan's evidence must not
+     * change after sign-off, and a hidden button is not a guarantee.</p>
+     */
+    @Transactional
+    public DataNoteView saveDataNote(long planId, DataNoteCmd cmd) {
+        DataScope scope = TenantContext.require();
+        long tenantId = scope.tenantId();
+        TestPlanEntity plan = requirePlan(planId, tenantId);
+        requireNoteEditor(plan, scope.userId());
+        if (cmd == null) {
+            throw new ApiException(400, "VALIDATION_FAILED", "请求体不能为空", Map.of());
+        }
+        String note = cmd.dataNote() == null ? "" : cmd.dataNote();
+        if (note.length() > DATA_NOTE_MAX_LENGTH) {
+            throw new ApiException(400, "DATA_NOTE_TOO_LONG",
+                    "测试数据说明不能超过 " + DATA_NOTE_MAX_LENGTH + " 字",
+                    Map.of("max", DATA_NOTE_MAX_LENGTH, "length", note.length()));
+        }
+        if (DATA_NOTE_LOCKED_STATUSES.contains(plan.getStatus())) {
+            throw new ApiException(409, "PLAN_DATA_LOCKED",
+                    "计划已完成，测试数据说明已锁定", Map.of("status", plan.getStatus()));
+        }
+        Map<String, Object> current = noteRow(planId);
+        int revision = current == null ? 0 : Rows.toInt(current.get("revision"), 0);
+        if (cmd.revision() != null && cmd.revision() != revision) {
+            throw new ApiException(409, "DATA_NOTE_CONFLICT",
+                    "测试数据说明已被他人修改，请刷新后重试",
+                    Map.of("expected", cmd.revision(), "actual", revision));
+        }
+        String previous = current == null ? "" : Rows.str(current, "data_note", "");
+        boolean changed = !previous.equals(note);
+        int updated = writeJdbc.update("""
+                UPDATE test_plan
+                SET data_note = :note, revision = revision + 1, updated_at = :now
+                WHERE id = :planId AND tenant_id = :tenantId AND revision = :revision
+                """, Map.of("note", note, "now", LocalDateTime.now(), "planId", planId,
+                "tenantId", tenantId, "revision", revision));
+        if (updated == 0) {
+            throw new ApiException(409, "DATA_NOTE_CONFLICT",
+                    "测试数据说明已被他人修改，请刷新后重试",
+                    Map.of("expected", cmd.revision() == null ? revision : cmd.revision()));
+        }
+        // 审计只记摘要：正文可能含账号/密码类数据，不落审计表。
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("length", note.length());
+        detail.put("attachmentCount", attachmentsOf(planId).size());
+        detail.put("changed", changed);
+        audit.record("TEST_DATA_NOTE_UPDATE", "TEST_PLAN", planId, detail);
+        return dataNote(planId);
+    }
+
+    private Map<String, Object> noteRow(long planId) {
+        return jdbc.one("""
+                SELECT p.data_note AS data_note, p.revision AS revision
+                FROM test_plan p
+                WHERE p.id = :planId AND /*scope:p*/
+                """, Map.of("planId", planId));
+    }
+
+    /** Attachments are scoped through their plan, so the two lists can never disagree. */
+    private List<DataNoteAttachment> attachmentsOf(long planId) {
+        List<Map<String, Object>> rows = jdbc.list("""
+                SELECT a.id AS id, a.file_name AS file_name, a.size AS size,
+                       COALESCE(u.name, CAST(a.uploader_id AS CHAR)) AS uploaded_by,
+                       a.created_at AS created_at
+                FROM test_plan p
+                JOIN attachment a ON a.biz_id = p.id AND a.tenant_id = p.tenant_id
+                     AND a.biz_type = 'TEST_PLAN'
+                LEFT JOIN sys_user u ON u.id = a.uploader_id AND u.tenant_id = a.tenant_id
+                WHERE p.id = :planId AND /*scope:p*/
+                ORDER BY a.id DESC
+                """, Map.of("planId", planId));
+        List<DataNoteAttachment> out = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            out.add(new DataNoteAttachment(
+                    Rows.toLong(row.get("id"), 0L),
+                    Rows.str(row, "file_name"),
+                    Rows.toLong(row.get("size")),
+                    Rows.str(row, "uploaded_by"),
+                    Rows.toDateTime(row.get("created_at"))));
+        }
+        return out;
+    }
+
+    private static void requireNoteEditor(TestPlanEntity plan, long userId) {
+        boolean owner = plan.getOwnerId() != null && plan.getOwnerId() == userId;
+        boolean tester = TenantContext.can("plan:edit") || TenantContext.can("plan:manage")
+                || TenantContext.can("plan:execute");
+        if (!owner && !tester) {
+            throw new ApiException(403, "FORBIDDEN", "只有计划负责人或测试角色可以编辑测试数据说明",
+                    Map.of("planId", plan.getId()));
+        }
     }
 
     private TestPlanEntity requirePlan(long planId, long tenantId) {
