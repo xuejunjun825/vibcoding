@@ -345,14 +345,7 @@ public class QualityGateService implements QualityGatePort {
                 "gateId", gateId,
                 "now", now,
                 "reportId", reportId == null ? 0L : reportId)));
-        for (GateSnapshot.GateRuleResult rule : evaluation.ruleResults()) {
-            jdbc.update("""
-                    UPDATE quality_gate_rule SET status = :status, evidence_json = :evidence,
-                                                 evaluated_at = :now
-                    WHERE tenant_id = :tenantId AND gate_id = :gateId AND rule_code = :code
-                    """, Map.of("status", rule.status(), "evidence", write(evidenceOf(evaluation, rule)),
-                    "now", now, "tenantId", tenantId, "gateId", gateId, "code", rule.code()));
-        }
+        recordRuleOutcomes(facts, tenantId, gateId, now, evaluation);
         keepAudit("QUALITY_GATE_EVALUATE", gateId, Map.of(
                 "releaseId", releaseId, "deployOrderId", deployOrderId,
                 "snapshotId", snapshotId, "result", evaluation.result()));
@@ -370,6 +363,42 @@ public class QualityGateService implements QualityGatePort {
             }
         }
         return Map.of();
+    }
+
+    /**
+     * Persist every rule's verdict and evidence. A release that was never configured has no
+     * {@code quality_gate_rule} row yet, and the old bare UPDATE matched zero rows — the evidence
+     * was silently dropped on exactly those versions. The insert half of the upsert seeds the row
+     * with the effective config; an existing row keeps its configuration and only gets the outcome.
+     */
+    private void recordRuleOutcomes(GateEvaluator.Facts facts, long tenantId, long gateId,
+                                    LocalDateTime now, GateEvaluator.Evaluation evaluation) {
+        Map<String, GateRuleset.RuleConfig> configs = new LinkedHashMap<>();
+        for (GateRuleset.RuleConfig config : facts.config()) {
+            configs.put(config.code(), config);
+        }
+        for (GateSnapshot.GateRuleResult rule : evaluation.ruleResults()) {
+            GateRuleset.RuleConfig config = configs.get(rule.code());
+            String thresholdJson = config == null || config.thresholdJson() == null
+                    ? "{}" : config.thresholdJson();
+            jdbc.update("""
+                    INSERT INTO quality_gate_rule
+                        (tenant_id, gate_id, rule_code, enabled, threshold_json, status,
+                         evidence_json, evaluated_at)
+                    VALUES (:tenantId, :gateId, :code, :enabled, :thresholdJson, :status,
+                            :evidence, :now)
+                    ON DUPLICATE KEY UPDATE status = :status, evidence_json = :evidence,
+                                            evaluated_at = :now
+                    """, new LinkedHashMap<>(Map.of(
+                    "tenantId", tenantId,
+                    "gateId", gateId,
+                    "code", rule.code(),
+                    "enabled", config == null || config.enabled() ? 1 : 0,
+                    "thresholdJson", thresholdJson,
+                    "status", rule.status(),
+                    "evidence", write(evidenceOf(evaluation, rule)),
+                    "now", now)));
+        }
     }
 
     private Map<String, Object> findReusable(long deployOrderId, String hash) {

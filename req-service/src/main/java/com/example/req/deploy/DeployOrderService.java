@@ -81,6 +81,7 @@ public class DeployOrderService {
     private final ReleaseService releaseService;
     private final ReleaseReviewService releaseReviewService;
     private final AdmissionEvaluator admissionEvaluator;
+    private final DeployPlanGuard planGuard;
     private final CodeGenerator codeGenerator;
     private final AuditService auditService;
     private final NotificationWriter notificationWriter;
@@ -96,6 +97,7 @@ public class DeployOrderService {
                               ReleaseService releaseService,
                               ReleaseReviewService releaseReviewService,
                               AdmissionEvaluator admissionEvaluator,
+                              DeployPlanGuard planGuard,
                               CodeGenerator codeGenerator,
                               AuditService auditService,
                               NotificationWriter notificationWriter,
@@ -110,6 +112,7 @@ public class DeployOrderService {
         this.releaseService = releaseService;
         this.releaseReviewService = releaseReviewService;
         this.admissionEvaluator = admissionEvaluator;
+        this.planGuard = planGuard;
         this.codeGenerator = codeGenerator;
         this.auditService = auditService;
         this.notificationWriter = notificationWriter;
@@ -176,6 +179,9 @@ public class DeployOrderService {
         }
 
         List<Long> requirementIds = resolveRequirementIds(cmd.requirementIds(), release, scope.tenantId());
+        // R1 / AC-1：写库前的唯一闸门。需求集到此已定型（上面的 resolve 不会再有补集），
+        // 远程校验失败（409/503）发生在任何 INSERT 之前 —— 不落单、不写审计，行数不变。
+        planGuard.requireApproved(release.getId(), requirementIds);
 
         DeployOrderEntity entity = new DeployOrderEntity();
         entity.setTenantId(scope.tenantId());

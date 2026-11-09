@@ -12,6 +12,16 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
 require_stack
 
+# q1_order_body <releaseId> <requirementId> — 与 q_create_deploy_order 同形，
+# 负向断言要复用同一份请求体，否则「被拒」可能只是因为字段写错。
+q1_order_body() {
+    jq -cn --argjson r "$1" --argjson q "$2" \
+        '{releaseId:$r,env:"PROD",windowStart:"2026-12-10T10:00:00+08:00",
+          windowEnd:"2026-12-10T12:00:00+08:00",artifactVersion:"qa",
+          steps:[{name:"发布",order:1}],rollbackPlan:"回滚到上一版",
+          impact:"只读 5 分钟",ownerId:1,requirementIds:[$q]}'
+}
+
 section "q1 · 准备 fixture（版本 + 3 条用例的 DRAFT 计划）"
 REL="$(q_create_release "质量计划版本-${RUN_TAG}")" || exit 1
 info "releaseId=${REL}"
@@ -123,5 +133,63 @@ expect_db "plan_change_log 恰好 1 行" "SELECT COUNT(*) FROM plan_change_log W
 expect_db "revision 与变更行数一致" "SELECT revision FROM test_plan WHERE id=${PLAN}" eq 1
 ARCHIVED_STATE="$(db_q "SELECT status FROM test_plan WHERE id=${PLAN}")"
 if [[ "$ARCHIVED_STATE" == "ARCHIVED" ]]; then pass "DB 中计划状态 ARCHIVED"; else fail "DB 中计划状态为 ${ARCHIVED_STATE}（期望 ARCHIVED）"; fi
+
+section "q1 · R1：发布单引用未批准计划 → 409 PLAN_NOT_APPROVED（不落单、不写审计）"
+# 覆盖关系走「计划用例 → 用例所属需求」，所以 fixture 必须挑一条带了 requirement_id 的用例：
+# 用例没挂需求时计划覆盖集恒为空，闸门根本不会触发（这正是本条链路最容易假绿的地方）。
+read -r PLAN_CASE REQ0 <<<"$(db_q "SELECT c.id, c.requirement_id FROM test_case c
+    JOIN requirement r ON r.id = c.requirement_id AND r.tenant_id = c.tenant_id
+    WHERE c.tenant_id=${TENANT_ID} AND c.requirement_id IS NOT NULL
+    ORDER BY c.id DESC LIMIT 1")"
+if [[ -z "${PLAN_CASE:-}" || -z "${REQ0:-}" ]]; then
+    fail "缺少「用例已挂需求」的 fixture，无法验证发布单计划闸门" "make platform-seed 后重跑"
+else
+    DRAFT_PLAN="$(q_create_plan "$REL" "未批准计划-${RUN_TAG}" "$PLAN_CASE")" || exit 1
+    info "draftPlanId=${DRAFT_PLAN} requirementId=${REQ0} caseId=${PLAN_CASE}"
+    ORDERS_BEFORE="$(db_count deploy_order)"
+    ORDER_REQS_BEFORE="$(db_count deploy_order_requirement)"
+    AUDIT_BEFORE="$(db_count audit_log "action='CREATE' AND biz_type='deploy_order'")"
+
+    api_call POST /api/req/deploy-orders "$(q1_order_body "$REL" "$REQ0")"
+    deny "DRAFT 计划覆盖需求 → 409 PLAN_NOT_APPROVED" 409 PLAN_NOT_APPROVED
+    expect_jq "409 detail.planIds 命中未批准计划" ".detail.planIds | index(${DRAFT_PLAN}) != null" 'true'
+    same_count "被拒建单不新增发布单" deploy_order "" "$ORDERS_BEFORE"
+    same_count "被拒建单不写需求关联" deploy_order_requirement "" "$ORDER_REQS_BEFORE"
+    same_count "被拒建单不写 CREATE 审计" audit_log "action='CREATE' AND biz_type='deploy_order'" "$AUDIT_BEFORE"
+
+    api_call POST "/api/deliver/test-plans/${DRAFT_PLAN}/submit-review" '{}'
+    expect "待批计划提交评审 200" 200
+    api_call POST /api/req/deploy-orders "$(q1_order_body "$REL" "$REQ0")"
+    deny "PENDING_REVIEW 计划覆盖需求 → 409 PLAN_NOT_APPROVED" 409 PLAN_NOT_APPROVED
+    expect_jq "待批计划同样出现在 detail.planIds" ".detail.planIds | index(${DRAFT_PLAN}) != null" 'true'
+
+    api_call POST "/api/deliver/test-plans/${DRAFT_PLAN}/approve" '{"comment":"同意"}'
+    expect "计划批准 200" 200
+    api_call POST /api/req/deploy-orders "$(q1_order_body "$REL" "$REQ0")"
+    expect "计划批准后建单放行 201" 201
+    APPROVED_ORDER="$(jget "$HTTP_BODY" '.id')"
+    if [[ -n "$APPROVED_ORDER" && "$APPROVED_ORDER" != "null" ]]; then
+        api_call POST "/api/req/deploy-orders/${APPROVED_ORDER}/evaluate" '{}'
+        expect "新单准入评估 200" 200
+        expect_jq "六项快照不被误标为历史单据" '.legacy' 'false'
+    else
+        fail "批准后建单未返回 id，无法继续验证准入快照" "检查 POST /deploy-orders 的响应体"
+    fi
+fi
+
+section "q1 · R1/AC-3：无覆盖计划的版本照常放行"
+api_call POST /api/req/requirements "$(jq -cn --arg n "无计划需求-${RUN_TAG}" --argjson d "$(q_domain)" \
+    '{type:"BUS",title:$n,description:"AC-3：版本内没有任何测试计划",domainIds:[$d],priority:"P2"}')"
+expect "造一条未挂版本的需求 201" 201
+NEW_REQ="$(jget "$HTTP_BODY" '.id')"
+if [[ -n "$NEW_REQ" && "$NEW_REQ" != "null" ]]; then
+    REL_NOPLAN="$(q_create_release "无计划版本-${RUN_TAG}")" || exit 1
+    api_call POST "/api/req/releases/${REL_NOPLAN}/requirements" "{\"requirementIds\":[${NEW_REQ}]}"
+    expect "无计划版本挂需求 200" 200
+    api_call POST /api/req/deploy-orders "$(q1_order_body "$REL_NOPLAN" "$NEW_REQ")"
+    expect "无覆盖计划 → 建单放行 201" 201
+else
+    fail "造需求未返回 id，AC-3 放行断言无法执行" "检查 POST /requirements 的响应体"
+fi
 
 guard q1-plan-lifecycle

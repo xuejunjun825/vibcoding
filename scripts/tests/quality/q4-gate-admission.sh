@@ -154,4 +154,61 @@ else
     fail "准入没有 GATE_UNAVAILABLE（fail-closed）分支" "门禁不可用时不得视为通过"
 fi
 
+section "q4 · Q-01：空需求集 QG-01 覆盖子项 N/A（不伪造 100%，不掩盖报告 FAIL）"
+REL_EMPTY="$(q_create_release "空需求版本-${RUN_TAG}")" || exit 1
+EMPTY_GATE="$(q_gate_snapshot "$REL_EMPTY" 0)"
+QG01_ACTUAL="$(jq -r '.rules[]? | select(.code=="QG-01") | .actual' <<<"$EMPTY_GATE" 2>/dev/null)"
+if [[ "$QG01_ACTUAL" == *"N/A（无需求可覆盖）"* ]]; then
+    pass "空需求集 QG-01 actual 说明覆盖 N/A（${QG01_ACTUAL}）"
+else
+    fail "空需求集 QG-01 未出 N/A（actual=${QG01_ACTUAL:-<空>}）" "totalRequirements=0 时覆盖子项应为 N/A，不能报 100%"
+fi
+if [[ -n "$QG01_ACTUAL" && "$QG01_ACTUAL" != *"100%"* ]]; then
+    pass "空需求集 QG-01 actual 不再出现 100% 假绿"
+else
+    fail "空需求集 QG-01 仍报 100%（actual=${QG01_ACTUAL:-<空>}）" "无需求可覆盖时不得显示 100%"
+fi
+if jq -e '.rules[]? | select(.code=="QG-01" and .status=="FAIL")' <<<"$EMPTY_GATE" >/dev/null; then
+    pass "覆盖 N/A 不掩盖报告缺失：QG-01 仍 FAIL"
+else
+    fail "空需求集 QG-01 未 FAIL（实际: $(jq -c '.rules[]? | select(.code=="QG-01")' <<<"$EMPTY_GATE")）" "覆盖子项 N/A 只是不计分母，报告子项仍须独立判定"
+fi
+# 证据落库：页面预评估不落库，必须走内部端点固化一次（req 提交时走的也是这条路径）。
+# 先 PUT 一次默认规则：quality_gate_rule 只在 configure 时插行，未配置的版本求值只算不落证据。
+api_call PUT "/api/deliver/quality-gates/${REL_EMPTY}" '{}'
+expect "空需求版本规则初始化 200" 200
+api_call POST /api/req/deploy-orders "$(jq -cn --argjson r "$REL_EMPTY" \
+    '{releaseId:$r,env:"TEST",windowStart:"2026-12-10T10:00:00+08:00",
+      windowEnd:"2026-12-10T12:00:00+08:00",artifactVersion:"qa",
+      steps:[{name:"发布",order:1}],rollbackPlan:"回滚到上一版",
+      impact:"只读 5 分钟",ownerId:1,requirementIds:[]}')"
+expect "空需求版本建单放行 201" 201
+EMPTY_DEP="$(jget "$HTTP_BODY" '.id')"
+if [[ -n "$EMPTY_DEP" && "$EMPTY_DEP" != "null" ]]; then
+    internal_call POST "$DELIVER_URL" "/internal/quality-gates/${REL_EMPTY}/evaluate" \
+        "$(jq -cn --argjson d "$EMPTY_DEP" '{deployOrderId:$d,requirementIds:[]}')"
+    expect "空需求版本内部求值固化 200" 200
+    GATE_ROW="$(db_q "SELECT id FROM quality_gate WHERE tenant_id=${TENANT_ID} AND release_id=${REL_EMPTY} ORDER BY id DESC LIMIT 1")"
+    EV_TOTAL="$(db_q "SELECT JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'\$.totalRequirements')) FROM quality_gate_rule WHERE gate_id=${GATE_ROW} AND rule_code='QG-01'")"
+    EV_APPLICABLE="$(db_q "SELECT JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'\$.coverageApplicable')) FROM quality_gate_rule WHERE gate_id=${GATE_ROW} AND rule_code='QG-01'")"
+    EV_PERCENT="$(db_q "SELECT JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'\$.coveragePercent')) FROM quality_gate_rule WHERE gate_id=${GATE_ROW} AND rule_code='QG-01'")"
+    if [[ "$EV_TOTAL" == "0" ]]; then
+        pass "证据落库 totalRequirements=0"
+    else
+        fail "证据 totalRequirements=${EV_TOTAL:-<空>}（期望 0）" "gate_id=${GATE_ROW} 的 QG-01 evidence_json 未更新"
+    fi
+    if [[ "$EV_APPLICABLE" == "false" ]]; then
+        pass "证据落库 coverageApplicable=false"
+    else
+        fail "证据 coverageApplicable=${EV_APPLICABLE:-<空>}（期望 false）" "空集必须显式标记为不适用"
+    fi
+    if [[ "$EV_PERCENT" == "null" ]]; then
+        pass "证据落库 coveragePercent 为 JSON null（不写 100）"
+    else
+        fail "证据 coveragePercent=${EV_PERCENT:-<空>}（期望 JSON null）" "空集不得写入任何百分比数值"
+    fi
+else
+    fail "空需求版本建单未返回 id，证据落库断言无法执行" "检查 POST /deploy-orders 的响应体"
+fi
+
 guard q4-gate-admission

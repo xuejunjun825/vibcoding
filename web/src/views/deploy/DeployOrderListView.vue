@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { ApiError } from '@/api/client'
 import { createDeployOrder, deployStats, listDeployOrders, listReleases } from '@/api/req'
 import type { DeployOrderRow, ReleaseRow } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
@@ -122,10 +123,22 @@ async function submitCreate(): Promise<void> {
     createOpen.value = false
     await router.push({ name: 'deploy-order-detail', params: { id: created.id } })
   } catch (error) {
-    formError.value = messageOf(error)
+    formError.value = planErrorText(error)
   } finally {
     saving.value = false
   }
+}
+
+/**
+ * 409 PLAN_NOT_APPROVED：不弹 toast（既有约定），在弹窗内就地列出未批准的测试计划号。
+ * 503 PLAN_CHECK_UNAVAILABLE 走 messageOf（后端已给「稍后重试」文案）。
+ */
+function planErrorText(error: unknown): string {
+  if (error instanceof ApiError && error.code === 'PLAN_NOT_APPROVED') {
+    const ids = (error.detail as { planIds?: number[] } | undefined)?.planIds ?? []
+    return `发布单引用了未批准的测试计划${ids.length ? `（#${ids.join('、#')}）` : ''}：请先完成计划评审批准，或移除对应需求后重试。`
+  }
+  return messageOf(error)
 }
 
 function envLabel(value?: string): string {

@@ -347,17 +347,25 @@ public class GateEvaluator {
         int requiredPercent = ruleset.intOf(config.thresholdJson(), "coveragePercent", 100);
         long total = facts.totalRequirements();
         long covered = facts.coveredRequirements();
-        int percent = total == 0 ? 100 : (int) Math.floor(covered * 100.0 / total);
-        boolean coverageOk = percent >= requiredPercent;
+        // Q-01: a release with no requirements has nothing to cover. Reporting 100% there was a
+        // false green; the coverage sub-check becomes N/A (vacuous pass, not counted), while the
+        // signed-report sub-check is still judged on its own so a real FAIL is never swallowed.
+        boolean coverageApplicable = total > 0;
+        Integer percent = coverageApplicable ? (int) Math.floor(covered * 100.0 / total) : null;
+        boolean coverageOk = !coverageApplicable || percent >= requiredPercent;
         boolean reportOk = facts.report() != null;
         boolean pass = coverageOk && reportOk;
 
-        String actual = "需求覆盖 " + percent + "%（" + covered + "/" + total + "）· "
+        String coverageText = coverageApplicable
+                ? "需求覆盖 " + percent + "%（" + covered + "/" + total + "）"
+                : "需求覆盖 N/A（无需求可覆盖）";
+        String actual = coverageText + " · "
                 + (reportOk ? "报告 v" + facts.report().versionNo() + " 已会签" : "无已会签报告");
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("totalRequirements", total);
         evidence.put("coveredRequirements", covered);
         evidence.put("coveragePercent", percent);
+        evidence.put("coverageApplicable", coverageApplicable);
         evidence.put("signedReport", reportOk);
         return outcome(config.code(), pass, facts, actual,
                 "覆盖 ≥ " + requiredPercent + "% · 已会签 RELEASE 报告", evidence);
@@ -521,7 +529,8 @@ public class GateEvaluator {
         Map<String, Object> requirements = new LinkedHashMap<>();
         requirements.put("total", facts.totalRequirements());
         requirements.put("covered", facts.coveredRequirements());
-        requirements.put("coveragePercent", facts.totalRequirements() == 0 ? 100
+        // Q-01: mirrors the rule evidence — no requirements means N/A (null), never a 100% claim.
+        requirements.put("coveragePercent", facts.totalRequirements() == 0 ? null
                 : (int) Math.floor(facts.coveredRequirements() * 100.0 / facts.totalRequirements()));
         doc.put("requirements", requirements);
 

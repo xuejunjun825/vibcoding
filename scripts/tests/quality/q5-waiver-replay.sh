@@ -187,4 +187,55 @@ api_call POST "/api/deliver/quality-gates/snapshots/${SNAP}/replay" '{}'
 expect "新数据后回放仍返回旧结果" 200
 expect_jq "回放结果仍是固化时的结论" '.result' "$SNAP_RESULT"
 
+section "q5 · R2：NULL 快照 → 历史单据（legacy=true，不伪造质量门）"
+# 先固化一份 6 项准入快照，确认正常路径不被 legacy 误标，再回退成历史两态。
+api_call POST "/api/req/deploy-orders/${DEP}/evaluate" '{}'
+expect "准入评估固化六项快照 200" 200
+expect_jq "六项快照 legacy=false（不误伤新单）" '.legacy' 'false'
+db_q "UPDATE deploy_order SET admission_result_json = NULL WHERE id=${DEP}" >/dev/null
+api_call GET "/api/req/deploy-orders/${DEP}"
+expect "NULL 快照详情 200" 200
+expect_jq "NULL 快照判为历史单据（legacy=true）" '.admission.legacy' 'true'
+expect_jq "NULL 快照不伪造质量门证据（gate=null）" '.admission.gate' 'null'
+expect_jq "NULL 快照 items 为空" '.admission.items | length' '0'
+
+section "q5 · R2：五项历史快照 → legacy=true（列表内条件不可达的根因回归）"
+api_call POST "/api/req/deploy-orders/${DEP}/evaluate" '{}'
+expect "重新固化六项快照 200" 200
+ADM_JSON="$(db_q "SELECT admission_result_json FROM deploy_order WHERE id=${DEP}")"
+# 历史快照的真实形状：没有第 6 项，也没有 gate 证据段。
+FIVE_JSON="$(jq -c 'del(.items[] | select(.code=="QUALITY_GATE")) | del(.gate)' <<<"$ADM_JSON" 2>/dev/null)"
+if [[ -n "$FIVE_JSON" && "$FIVE_JSON" != "null" ]] \
+    && [[ "$(jq -r '.items | length' <<<"$FIVE_JSON" 2>/dev/null)" == "5" ]]; then
+    HEX_JSON="$(printf '%s' "$FIVE_JSON" | xxd -p | tr -d '\n')"
+    # admission_result_json 是 JSON 列：UNHEX 出来是 binary，直接赋值会被拒；转成 utf8mb4 再写。
+    db_q "UPDATE deploy_order SET admission_result_json = CONVERT(UNHEX('${HEX_JSON}') USING utf8mb4) WHERE id=${DEP}" >/dev/null
+    api_call GET "/api/req/deploy-orders/${DEP}"
+    expect "五项快照详情 200" 200
+    expect_jq "五项快照判为历史单据（legacy=true）" '.admission.legacy' 'true'
+    expect_jq "五项快照 gate=null" '.admission.gate' 'null'
+    expect_jq "五项快照 items 仍为 5 项" '.admission.items | length' '5'
+    expect_jq "五项快照不含 QUALITY_GATE 项" '[.admission.items[].code] | index("QUALITY_GATE") == null' 'true'
+else
+    fail "无法构造五项历史快照（存储 JSON 缺少 QUALITY_GATE 项）" "先确认 POST /deploy-orders/{id}/evaluate 落库了 6 项"
+fi
+
+section "q5 · R2：前端横幅静态断言（提示必须挂在列表外，历史快照没有 QUALITY_GATE 项）"
+PANEL_FILE="${ROOT}/web/src/components/quality/QualityGatePanel.vue"
+if grep -q "legacyNotice" "$PANEL_FILE" 2>/dev/null; then
+    pass "面板存在列表外横幅开关 legacyNotice"
+else
+    fail "面板缺少 legacyNotice（历史提示仍可能挂在列表项条件上）" "改成 legacy && !hasQualityGateItem 的独立横幅"
+fi
+if grep -q "质量门未启用（历史单据）" "$PANEL_FILE" 2>/dev/null; then
+    pass "面板横幅文案为「质量门未启用（历史单据）」"
+else
+    fail "面板缺少可达的历史单据文案" "文案必须与 PRD/设计逐字一致"
+fi
+if grep -q "item.code === 'QUALITY_GATE' && legacy" "$PANEL_FILE" 2>/dev/null; then
+    fail "旧不可达条件 item.code === 'QUALITY_GATE' && legacy 仍在" "历史快照没有该项，该条件永不成立"
+else
+    pass "旧的列表项内不可达条件已删除"
+fi
+
 guard q5-waiver-replay

@@ -73,6 +73,18 @@ public final class PlanLifecycle {
         return Set.of("APPROVED", "IN_PROGRESS", "COMPLETED", "CLOSED");
     }
 
+    /**
+     * Statuses that are <em>not</em> approved yet, so a deploy order must not be allowed to
+     * reference requirements they cover (R1, AC-1..AC-4).
+     *
+     * <p>This is the single vocabulary for that decision: the coverage query passes it as a bind
+     * parameter instead of writing {@code 'DRAFT'} literals, so widening the state table later
+     * cannot leave the SQL behind.</p>
+     */
+    public static Set<String> pendingStatuses() {
+        return Set.of("DRAFT", "PENDING_REVIEW");
+    }
+
     /** Stable rank for "conclusion may only go down" (CANCELLED is independent). */
     public static int conclusionRank(String conclusion) {
         if (conclusion == null) {

@@ -116,7 +116,9 @@ public class AdmissionEvaluator {
     public DeployViews.AdmissionSnapshot snapshot(DeployOrderEntity order) {
         DeployViews.AdmissionResult stored = parse(order.getAdmissionResultJson());
         if (stored == null) {
-            return new DeployViews.AdmissionSnapshot(List.of(), null, false);
+            // NULL 快照 = 从未评估过（M6 之前落库的旧单）：显式给 legacy=true / gate=null，
+            // 不依赖 3 参构造器的派生逻辑，避免这条语义再次被"空集 ⇒ 非历史"的实现悄悄改回去（R2）。
+            return new DeployViews.AdmissionSnapshot(List.of(), null, false, null, true, null);
         }
         boolean stale = stored.signature() != null
                 && !stored.signature().equals(AdmissionPolicy.signature(facts(order),

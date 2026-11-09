@@ -35,13 +35,16 @@ public class QualityInternalController {
 
     private final QualityGateService gates;
     private final ReleaseQualityService releaseQuality;
+    private final InternalTenantResolver tenantResolver;
     private final NamedParameterJdbcTemplate jdbc;
 
     public QualityInternalController(QualityGateService gates,
                                      ReleaseQualityService releaseQuality,
+                                     InternalTenantResolver tenantResolver,
                                      NamedParameterJdbcTemplate jdbc) {
         this.gates = gates;
         this.releaseQuality = releaseQuality;
+        this.tenantResolver = tenantResolver;
         this.jdbc = jdbc;
     }
 
@@ -51,7 +54,7 @@ public class QualityInternalController {
                                               @RequestBody(required = false) Map<String, Object> body,
                                               @RequestHeader(value = "X-Tenant-Id", required = false)
                                               String tenantHeader) {
-        long tenantId = tenantOf(tenantHeader, releaseId);
+        long tenantId = tenantResolver.of(tenantHeader, releaseId);
         long deployOrderId = asLong(body == null ? null : body.get("deployOrderId"), 0L);
         if (deployOrderId <= 0) {
             throw new ApiException(400, "DEPLOY_ORDER_REQUIRED", "内部质量门求值必须携带 deployOrderId");
@@ -70,7 +73,7 @@ public class QualityInternalController {
     public QualityGateViews.Snapshot latest(@PathVariable long releaseId,
                                             @RequestHeader(value = "X-Tenant-Id", required = false)
                                             String tenantHeader) {
-        long tenantId = tenantOf(tenantHeader, releaseId);
+        long tenantId = tenantResolver.of(tenantHeader, releaseId);
         TenantContext.set(DataScope.system(tenantId));
         try {
             List<Long> ids = jdbc.queryForList("""
@@ -95,39 +98,12 @@ public class QualityInternalController {
     public ReleaseQualityService.Summary summary(@PathVariable long releaseId,
                                                  @RequestHeader(value = "X-Tenant-Id", required = false)
                                                  String tenantHeader) {
-        long tenantId = tenantOf(tenantHeader, releaseId);
+        long tenantId = tenantResolver.of(tenantHeader, releaseId);
         TenantContext.set(DataScope.system(tenantId));
         try {
             return releaseQuality.summary(releaseId);
         } finally {
             TenantContext.clear();
-        }
-    }
-
-    /** Header first; otherwise the release's own tenant. Never the body. */
-    private long tenantOf(String tenantHeader, long releaseId) {
-        Long header = parseTenant(tenantHeader);
-        if (header != null) {
-            return header;
-        }
-        List<Long> found = jdbc.queryForList(
-                "SELECT tenant_id FROM `release` WHERE id = :id",
-                new MapSqlParameterSource("id", releaseId), Long.class);
-        if (!found.isEmpty() && found.get(0) != null) {
-            return found.get(0);
-        }
-        throw new ApiException(404, "RELEASE_NOT_FOUND", "发布版本不存在");
-    }
-
-    private static Long parseTenant(String tenantHeader) {
-        if (tenantHeader == null || tenantHeader.isBlank()) {
-            return null;
-        }
-        try {
-            long value = Long.parseLong(tenantHeader.trim());
-            return value > 0 ? value : null;
-        } catch (NumberFormatException ignored) {
-            return null;
         }
     }
 

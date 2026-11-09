@@ -68,7 +68,8 @@ public final class DeployViews {
     /**
      * 准入快照对外形态；{@code stale=true} 表示需求集合/状态已变，页面必须提示重新校验。
      *
-     * <p>{@code legacy=true} = M6 之前生成的五项单据（没有第 6 项质量门），页面只展示历史结论，
+     * <p>{@code legacy=true} = 没有质量门结论的历史单据：M6 之前生成的五项快照，以及从未评估过
+     * （{@code admission_result_json} 为 NULL、{@code items} 为空）的旧单。页面只展示历史结论，
      * 不伪造质量门 PASS；{@code gate} 是该次判定的质量门证据（legacy 单据为 {@code null}）。</p>
      */
     public record AdmissionSnapshot(List<AdmissionItem> items, LocalDateTime checkedAt, boolean stale,
@@ -78,10 +79,15 @@ public final class DeployViews {
             this(items, checkedAt, stale, null, legacyOf(items), null);
         }
 
-        /** 六项之外的旧快照：缺 QUALITY_GATE 项即视为 M6 之前的历史结论。 */
+        /**
+         * 六项之外的旧快照：<b>没有第 6 项就是历史结论</b>。
+         *
+         * <p>空集（NULL 快照、从未评估的旧单）同样成立——"还没评估过"与"评估时还没有质量门"
+         * 对读者是同一件事：没有质量门证据，只能按历史单据展示，不得伪造 PASS（R2 / AC-5）。</p>
+         */
         public static boolean legacyOf(List<AdmissionItem> items) {
             if (items == null || items.isEmpty()) {
-                return false;
+                return true;
             }
             return items.stream().noneMatch(item -> AdmissionItem.QUALITY_GATE.equals(item.code()));
         }

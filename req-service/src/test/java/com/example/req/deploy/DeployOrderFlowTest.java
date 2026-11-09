@@ -98,7 +98,8 @@ class DeployOrderFlowTest {
         when(provider.getIfAvailable()).thenReturn(engine);
 
         service = new DeployOrderService(repository, orderRequirementRepository, requirementRepository,
-                releaseRepository, releaseService, releaseReviewService, admissionEvaluator, codeGenerator, auditService,
+                releaseRepository, releaseService, releaseReviewService, admissionEvaluator,
+                mock(DeployPlanGuard.class), codeGenerator, auditService,
                 notificationWriter, approverDirectory, instanceRepository, new ObjectMapper(), provider);
 
         order = new DeployOrderEntity();

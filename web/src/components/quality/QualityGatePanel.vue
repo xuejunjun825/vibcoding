@@ -75,6 +75,9 @@ const emit = defineEmits<{ waiver: [code: string] }>()
 const expanded = ref<Record<string, boolean>>({})
 
 const gateItems = computed(() => (props.items ?? []).map((item) => ({ ...item })))
+/** 历史快照（legacy）根本没有 QUALITY_GATE 项，因此只能按“是否存在该项”判定，不能按项内条件判定 */
+const hasQualityGateItem = computed(() => gateItems.value.some((item) => item.code === 'QUALITY_GATE'))
+const legacyNotice = computed(() => props.legacy && !hasQualityGateItem.value)
 const ruleList = computed<
   Array<GateRuleResult & { waivable?: boolean; thresholdText?: string; lastEvaluatedAt?: string | null }>
 >(() =>
@@ -163,6 +166,10 @@ function itemHasGateRules(item: GateItem): boolean {
       <slot name="actions" />
     </header>
 
+    <p v-if="legacyNotice" class="gate-panel__legacy" role="status">
+      质量门未启用（历史单据）— 不补写 PASS，也不显示快照 hash。
+    </p>
+
     <div v-if="rejected" class="gate-panel__reject" role="alert">
       <span class="gate-panel__reject-title">准入未通过</span>
       <span class="gate-panel__reject-text">
@@ -185,15 +192,12 @@ function itemHasGateRules(item: GateItem): boolean {
       />
     </div>
 
-    <ul v-else class="gate-panel__items">
+    <ul v-else-if="gateItems.length" class="gate-panel__items">
       <li
         v-for="(item, index) in gateItems"
         :key="item.code || `${item.name}-${index}`"
         class="gate-item"
-        :class="{
-          'gate-item--fail': !item.passed,
-          'gate-item--legacy': legacy && itemHasGateRules(item) === false && item.code === 'QUALITY_GATE',
-        }"
+        :class="{ 'gate-item--fail': !item.passed }"
       >
         <div class="gate-item__row">
           <span class="gate-item__no t-num">{{ index + 1 }}</span>
@@ -228,9 +232,6 @@ function itemHasGateRules(item: GateItem): boolean {
         <p v-if="!item.passed && item.fixHint" class="gate-item__fix">
           <span>修复指引</span>{{ item.fixHint }}
         </p>
-        <p v-if="item.code === 'QUALITY_GATE' && legacy && !itemHasGateRules(item)" class="gate-item__legacy">
-          质量门未启用（历史单据）— 不补写 PASS，也不显示快照 hash。
-        </p>
         <div v-if="expanded[item.code] && itemHasGateRules(item)" class="gate-item__rules">
           <QualityRuleCard
             v-for="rule in item.rules"
@@ -245,7 +246,7 @@ function itemHasGateRules(item: GateItem): boolean {
         </div>
       </li>
     </ul>
-    <div v-if="mode === 'admission' && !gateItems.length" class="gate-panel__empty">
+    <div v-if="mode === 'admission' && !gateItems.length && !legacyNotice" class="gate-panel__empty">
       暂无准入结果。点击「重新校验」由服务端重新装载事实（门禁超时按 FAIL 处理，不会视为通过）。
     </div>
   </section>
@@ -350,8 +351,15 @@ function itemHasGateRules(item: GateItem): boolean {
 .gate-item--fail {
   background: #fffafa;
 }
-.gate-item--legacy {
-  background: var(--bg-page);
+.gate-panel__legacy {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--color-warning);
+  border-radius: 0 var(--r-ctl) var(--r-ctl) 0;
+  background: var(--color-warning-bg);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--warning-ink);
 }
 .gate-item__row {
   display: flex;
@@ -416,11 +424,6 @@ function itemHasGateRules(item: GateItem): boolean {
 .gate-item__fix span {
   margin-right: 6px;
   color: var(--danger-ink);
-}
-.gate-item__legacy {
-  margin: 4px 0 0 32px;
-  font-size: 12px;
-  color: var(--text-muted-aa);
 }
 .gate-item__rules {
   margin: 8px 0 2px 32px;
