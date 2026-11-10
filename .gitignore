@@ -42,6 +42,12 @@ scripts/tests/integration/.stub-run/
 test-results/
 playwright-report/
 
+# ---- M9 报表导出产物（20261110-r9 /reports/{id}/export 的下载件） ----
+# 手工点一次导出就会在项目根留下 报表-*.xlsx / *.csv；两者都是二进制或可再生的验证残留
+# （git ls-files 里没有任何 .xlsx/.csv，安全），跑一次导出就让 git status 变脏是纯噪音。
+*.xlsx
+*.csv
+
 # ---- IDE ----
 .idea/
 *.iml

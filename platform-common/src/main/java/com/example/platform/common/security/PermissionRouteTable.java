@@ -174,6 +174,20 @@ public final class PermissionRouteTable {
             rule(null, "^/releases/\\d+/reviews(/.*)?$", false, "review:manage"),
             rule(null, "^/releases/\\d+/quality-settings$", false, "review:manage"),
 
+            // ---- M9 岗位工作台 / 数据看板 / 自助报表（deliver-service，网关 /api/deliver/**） ----
+            // 位次是硬约束：本表首匹配生效，这一段必须排在下面的 ^/releases、^/deploy-orders、
+            // ^/test-plans 兜底之前。放错位置时 /reports/* 会被 ^/releases 之前的 release:plan
+            // 之类规则吃掉（历史上 /reports 落到 release:plan，非发布角色一律 403 且报错说
+            // 「缺 release:plan」，与本页毫无关系）。
+            // 权限粒度：PORTAL_CONFIG 只管写配置这一条 PUT，读配置（GET /portal/config）走
+            // PORTAL_VIEW；REPORT_SHARE 只管共享这一条 POST，报表本身的读写都走 REPORT_VIEW
+            // （导出 /reports/{id}/export 也在其中——导出的是查看者自己有权看的定义）。
+            rule("PUT", "^/portal/config$", false, "PORTAL_CONFIG"),
+            rule(null, "^/portal(/.*)?$", false, "PORTAL_VIEW"),
+            rule(null, "^/analytics(/.*)?$", false, "PORTAL_VIEW"),
+            rule("POST", "^/reports/\\d+/share$", false, "REPORT_SHARE"),
+            rule(null, "^/reports(/.*)?$", false, "REPORT_VIEW"),
+
             // ---- releases / deployment ----
             rule(null, "^/releases(/.*)?$", false, "release:plan"),
             rule(null, "^/deploy-orders/\\d+/force-release$", false, "deploy:force"),

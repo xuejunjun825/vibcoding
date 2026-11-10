@@ -17,20 +17,21 @@ import org.junit.jupiter.api.Test;
 /**
  * AC-5: the matrix is asserted cell by cell, not spot-checked.
  *
- * <p>Every one of the 10 roles × 56 functions is covered, so a silently changed cell (the usual
+ * <p>Every one of the 10 roles × 60 functions is covered, so a silently changed cell (the usual
  * way a permission bug ships) fails here instead of in production. The 26 r2 codes are asserted
  * exactly as before; M6 appended 15 quality codes (grid 260 → 410), M7 appended
- * {@code integration:manage} (420), and M8 appended 14 collaboration/code/test codes, which is
- * why the expected grid size is 560.</p>
+ * {@code integration:manage} (420), M8 appended 14 collaboration/code/test codes (560), and M9
+ * appended 4 analytics/portal codes (PORTAL_VIEW / PORTAL_CONFIG / REPORT_VIEW / REPORT_SHARE),
+ * which is why the expected grid size is 600.</p>
  */
 class PermissionMatrixGridTest {
 
     @Test
-    @DisplayName("10 roles × 56 functions: every cell exists and is defined exactly once")
+    @DisplayName("10 roles × 60 functions: every cell exists and is defined exactly once")
     void everyCellIsDefined() {
         List<PermissionMatrix.Cell> cells = PermissionMatrix.cells();
         int expected = PermissionMatrix.roles().size() * PermissionMatrix.functions().size();
-        assertEquals(560, expected, "the matrix is 10 roles × 56 functions");
+        assertEquals(600, expected, "the matrix is 10 roles × 60 functions");
         assertEquals(expected, cells.size(), "cells() must enumerate the whole grid");
         Set<String> seen = new HashSet<>();
         for (PermissionMatrix.Cell cell : cells) {
@@ -44,7 +45,7 @@ class PermissionMatrixGridTest {
     }
 
     @Test
-    @DisplayName("PLATFORM_ADMIN is ALLOW on all 56 functions; no other role holds tenant:manage")
+    @DisplayName("PLATFORM_ADMIN is ALLOW on all 60 functions; no other role holds tenant:manage")
     void platformAdminIsUnrestricted() {
         for (String function : PermissionMatrix.functions()) {
             assertEquals(Access.ALLOW, PermissionMatrix.accessFor("PLATFORM_ADMIN", function),

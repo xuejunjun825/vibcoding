@@ -59,6 +59,9 @@ public final class SeedResult {
                 "qa1:Passw0rd!",
                 "qa2:Passw0rd!",
                 "vendor1:Passw0rd!",
-                "vendor2:Passw0rd!");
+                "vendor2:Passw0rd!",
+                // 20261110-r9：MGMT 样本账号（/portal 管理层模板 + /dashboard 治理视角）。
+                // 这个列表就是 platform-seed.sh 逐个登录的门禁输入，漏一行等于 mgr1 永不被测。
+                "mgr1:Passw0rd!");
     }
 }

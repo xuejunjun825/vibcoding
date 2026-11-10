@@ -38,6 +38,10 @@ export interface NavGroup {
  * M8 新增：gantt, wiki, value-stream（协作组）、code-policies（分支策略）、
  * test-executors（执行器）—— 路由 name 见 web/src/router/routes/{collab,code,deliver}.routes.ts，
  * 名字不一致时入口自动隐藏（不是点了 404）。
+ *
+ * M9 新增（分析域末尾三项）：portal（岗位工作台）、analytics-dashboard（数据看板）、
+ * report-list（自助报表）—— 路由见 web/src/router/routes/analytics.routes.ts。
+ * /workbench 是本轮**不动**的既有个人工作台，两项靠 label 区分。
  */
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -235,6 +239,28 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'branch',
         routeName: 'code-policies',
         functionCode: 'CCODE_POLICY_VIEW',
+      },
+      {
+        // 与既有 /workbench（M6 个人工作台）不是同一页：这里按岗位模板装配五区
+        label: '岗位工作台',
+        to: '/portal',
+        icon: 'workbench',
+        routeName: 'portal',
+        functionCode: 'PORTAL_VIEW',
+      },
+      {
+        label: '数据看板',
+        to: '/dashboard',
+        icon: 'chart',
+        routeName: 'analytics-dashboard',
+        functionCode: 'PORTAL_VIEW',
+      },
+      {
+        label: '自助报表',
+        to: '/reports',
+        icon: 'document',
+        routeName: 'report-list',
+        functionCode: 'REPORT_VIEW',
       },
     ],
   },

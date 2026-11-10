@@ -185,7 +185,7 @@ public class SeedService {
                     row("name", r[1], "builtin", 1)));
         }
 
-        // 12 个账号：厂商隔离靠账号的 vendor_id（不是独立厂商角色）
+        // 13 个账号：厂商隔离靠账号的 vendor_id（不是独立厂商角色）
         // biz1/suite1 是 20261110-r7 补的角色样本（业务部门 / 二级企业业务）——域授权不必单独写，
         // 下面循环里的 link("sys_user_domain", …) 会把每个账号绑到全部 7 域，与 po1 天然同源。
         String[][] userDefs = {
@@ -200,7 +200,10 @@ public class SeedService {
                 {"qa1", "测试-孙", "QA", null},
                 {"qa2", "测试-周", "QA", null},
                 {"vendor1", "厂商管理员-钱", "PMO", "VEN-A"},
-                {"vendor2", "厂商研发-郑", "DEV", "VEN-B"}};
+                {"vendor2", "厂商研发-郑", "DEV", "VEN-B"},
+                // mgr1 是 20261110-r9 补的 MGMT 样本：/portal 的「管理层」模板与 /dashboard 的
+                // 治理视角都由 MGMT 角色渲染，没有账号就演示不了（兜底模板只是无角色时的退路）。
+                {"mgr1", "管理层-演示", "MGMT", null}};
         Map<String, Long> users = new LinkedHashMap<>();
         for (String[] u : userDefs) {
             String raw = "admin".equals(u[0]) ? ADMIN_PASSWORD : USER_PASSWORD;
