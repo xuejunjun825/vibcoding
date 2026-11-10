@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { defectFromExecution, executeCase, fetchDataNote, getTestPlan } from '@/api/deliver'
 import { planApi, roundApi, envApi } from '@/api/quality'
-import { listUsers, type UserRow } from '@/api/admin'
+import { listDictionaryUsers, type DictionaryUser } from '@/api/dictionaries'
 import { downloadAttachment } from '@/api/req'
 import { usePermission } from '@/composables/usePermission'
 import { useDictStore } from '@/stores/dict'
@@ -79,7 +79,7 @@ const dataNote = ref<TestDataNote | null>(null)
 const dataNoteOpen = ref(true)
 const rounds = ref<RoundView[]>([])
 const roundDetail = ref<RoundDetail | null>(null)
-const users = ref<UserRow[]>([])
+const users = ref<DictionaryUser[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const error = ref<{ message: string; code?: string; status?: number } | null>(null)
@@ -553,7 +553,7 @@ watch(
 onMounted(async () => {
   await loadAll()
   try {
-    users.value = (await listUsers({ page: 1, size: 200 })).items ?? []
+    users.value = await listDictionaryUsers()
   } catch {
     users.value = []
   }

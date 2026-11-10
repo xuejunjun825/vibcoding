@@ -3,8 +3,8 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { assignVendor, deliverRequirement, getApprovalInstance, getRequirement, actOnRequirement, listApprovalMine } from '@/api/req'
-import { listUsers, listVendors } from '@/api/admin'
-import type { UserRow, VendorRow } from '@/api/admin'
+import { listDictionaryUsers, listDictionaryVendors } from '@/api/dictionaries'
+import type { DictionaryUser, DictionaryVendor } from '@/api/dictionaries'
 import type {
   ApprovalInstanceDetail,
   ApprovalTodoRow,
@@ -208,13 +208,12 @@ const deliverEstimate = ref<number | undefined>()
 const deliverActual = ref<number | undefined>()
 const deliverOwner = ref<number | undefined>()
 const deliverError = ref('')
-const users = ref<UserRow[]>([])
+const users = ref<DictionaryUser[]>([])
 
 async function ensureUsers(): Promise<void> {
   if (users.value.length) return
   try {
-    const page = await listUsers({ page: 1, size: 50 })
-    users.value = page.items
+    users.value = await listDictionaryUsers()
   } catch {
     users.value = []
   }
@@ -263,7 +262,7 @@ const assignVendorId = ref<number | undefined>()
 const assignOwner = ref<number | undefined>()
 const assignReason = ref('')
 const assignError = ref('')
-const vendors = ref<VendorRow[]>([])
+const vendors = ref<DictionaryVendor[]>([])
 
 async function openAssign(): Promise<void> {
   assignOpen.value = true
@@ -274,7 +273,7 @@ async function openAssign(): Promise<void> {
   await ensureUsers()
   if (vendors.value.length === 0) {
     try {
-      vendors.value = await listVendors()
+      vendors.value = await listDictionaryVendors()
     } catch {
       vendors.value = []
     }

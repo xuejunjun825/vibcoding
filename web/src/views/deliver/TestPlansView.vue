@@ -4,10 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createTestPlan, listTestCases, listTestPlans } from '@/api/deliver'
 import { planApi } from '@/api/quality'
-import { listUsers } from '@/api/admin'
+import { listDictionaryUsers } from '@/api/dictionaries'
 import { listReleases } from '@/api/req'
 import type { ReleaseRow, TestCaseRow } from '@/api/types'
-import type { UserRow } from '@/api/admin'
+import type { DictionaryUser } from '@/api/dictionaries'
 import { usePermission } from '@/composables/usePermission'
 import StatusPill from '@/components/StatusPill.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -56,7 +56,7 @@ const canManage = computed(() => can('plan:manage'))
 const canApprove = computed(() => can('plan:approve'))
 
 const releases = ref<ReleaseRow[]>([])
-const users = ref<UserRow[]>([])
+const users = ref<DictionaryUser[]>([])
 const releaseId = ref(String(route.query.releaseId ?? ''))
 const status = ref(String(route.query.status ?? ''))
 const keyword = ref('')
@@ -126,8 +126,7 @@ async function loadOptions(): Promise<void> {
   }
   if (!canManage.value) return
   try {
-    const userPage = await listUsers({ page: 1, size: 200 })
-    users.value = userPage.items ?? []
+    users.value = await listDictionaryUsers()
   } catch {
     users.value = []
   }

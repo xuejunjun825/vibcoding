@@ -10,9 +10,13 @@ import {
   listDefects,
 } from '@/api/deliver'
 import { listReleases, searchRequirements } from '@/api/req'
-import { listDomains, listUsers, listVendors } from '@/api/admin'
+import {
+  listDictionaryDomains,
+  listDictionaryUsers,
+  listDictionaryVendors,
+} from '@/api/dictionaries'
 import type { DefectRow, ReleaseRow, RequirementRow, Severity } from '@/api/types'
-import type { DomainRow, UserRow, VendorRow } from '@/api/admin'
+import type { DictionaryDomain, DictionaryUser, DictionaryVendor } from '@/api/dictionaries'
 import { useListQuery } from '@/composables/useListQuery'
 import { usePermission } from '@/composables/usePermission'
 import { useDictStore } from '@/stores/dict'
@@ -87,9 +91,9 @@ const summaryMode = computed(
 )
 
 const releases = ref<ReleaseRow[]>([])
-const users = ref<UserRow[]>([])
-const domains = ref<DomainRow[]>([])
-const vendors = ref<VendorRow[]>([])
+const users = ref<DictionaryUser[]>([])
+const domains = ref<DictionaryDomain[]>([])
+const vendors = ref<DictionaryVendor[]>([])
 const loadingOptions = ref(false)
 const today = new Date().toISOString().slice(0, 10)
 
@@ -100,12 +104,12 @@ async function loadOptions(): Promise<void> {
   try {
     const [releasePage, userPage, domainList, vendorList] = await Promise.all([
       listReleases({ page: 1, size: 100 }),
-      canPickPeople.value ? listUsers({ page: 1, size: 200 }) : Promise.resolve(null),
-      canFilterDomain.value ? listDomains() : Promise.resolve([]),
-      canFilterDomain.value ? listVendors() : Promise.resolve([]),
+      canPickPeople.value ? listDictionaryUsers() : Promise.resolve(null),
+      canFilterDomain.value ? listDictionaryDomains() : Promise.resolve([]),
+      canFilterDomain.value ? listDictionaryVendors() : Promise.resolve([]),
     ])
     releases.value = releasePage.items ?? []
-    users.value = userPage?.items ?? []
+    users.value = userPage ?? []
     domains.value = domainList
     vendors.value = vendorList
   } catch {

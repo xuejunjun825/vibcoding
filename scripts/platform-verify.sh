@@ -925,7 +925,7 @@ fi
 section "AC-19 种子数据规模（platform-seed 再做幂等两遍）"
 expect_num "7 个业务域" "$(db_count biz_domain "tenant_id=$(tenant_id)")" eq 7 "SeedService"
 expect_num "3 家厂商" "$(db_count sys_vendor "tenant_id=$(tenant_id)")" eq 3 "SeedService"
-expect_num "10 个账号" "$(db_q "SELECT COUNT(*) FROM sys_user WHERE tenant_id=$(tenant_id) AND username IN ('admin','pm','tl1','po1','dev1','dev2','qa1','qa2','vendor1','vendor2')")" eq 10 "SeedService"
+expect_num "12 个账号" "$(db_q "SELECT COUNT(*) FROM sys_user WHERE tenant_id=$(tenant_id) AND username IN ('admin','pm','tl1','po1','biz1','suite1','dev1','dev2','qa1','qa2','vendor1','vendor2')")" eq 12 "SeedService.userDefs 必须写全 12 个演示账号（与 SeedResult.loginUsers / platform-seed.sh 名单同源）"
 expect_num "1 个测试计划" "$(db_count test_plan "tenant_id=$(tenant_id)")" ge 1 "SeedService"
 PLAN_CASES="$(db_q "SELECT COUNT(*) FROM test_plan_case pc JOIN test_plan p ON p.id=pc.plan_id WHERE p.tenant_id=$(tenant_id)")"
 expect_num "计划用例 ≥10" "${PLAN_CASES:-0}" ge 10 "SeedService 必须给计划纳入 ≥10 用例"

@@ -9,8 +9,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ApiError } from '@/api/client'
-import { listDomains } from '@/api/admin'
-import type { DomainRow } from '@/api/admin'
+import { listDictionaryDomains, type DictionaryDomain } from '@/api/dictionaries'
 import { listConfigs } from '@/api/integration'
 import type { IntegrationConfigView } from '@/api/integration'
 import {
@@ -48,7 +47,7 @@ const { can } = usePermission()
 const canEdit = computed(() => can('CCODE_POLICY_EDIT'))
 
 const rows = ref<PolicyRow[]>([])
-const domains = ref<DomainRow[]>([])
+const domains = ref<DictionaryDomain[]>([])
 const gitlabConfig = ref<IntegrationConfigView | null>(null)
 const loading = ref(false)
 const error = ref<{ message: string; code?: string; status?: number } | null>(null)
@@ -91,7 +90,7 @@ async function load(silent = false): Promise<void> {
 
 async function loadDomains(): Promise<void> {
   try {
-    domains.value = await listDomains()
+    domains.value = await listDictionaryDomains()
   } catch {
     domains.value = []
   }

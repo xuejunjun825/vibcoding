@@ -14,8 +14,8 @@ import {
   urgeTask,
   withdrawInstance,
 } from '@/api/req'
-import { listUsers } from '@/api/admin'
-import type { UserRow } from '@/api/admin'
+import { listDictionaryUsers } from '@/api/dictionaries'
+import type { DictionaryUser } from '@/api/dictionaries'
 import {
   CASE_REVIEW_CONCLUSION_LABEL,
   CASE_REVIEW_STATUS_LABEL,
@@ -364,13 +364,12 @@ const signUserIds = ref<number[]>([])
 const signComment = ref('')
 const signBusy = ref(false)
 const signError = ref('')
-const userOptions = ref<UserRow[]>([])
+const userOptions = ref<DictionaryUser[]>([])
 
 async function loadUsers(): Promise<void> {
   if (userOptions.value.length > 0) return
   try {
-    const response = await listUsers({ page: 1, size: 100 })
-    userOptions.value = response.items ?? []
+    userOptions.value = await listDictionaryUsers()
   } catch {
     userOptions.value = []
   }

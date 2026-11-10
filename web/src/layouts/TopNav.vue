@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { NAV_ICONS, TOP_NAV } from './nav'
+import { navVisible, type NavContext } from './navAccess'
 
 /**
  * 顶栏 48px（DESIGN §3.2）：8 项一级导航 + 全局搜索 + 通知 + 用户菜单。
@@ -16,20 +17,15 @@ const auth = useAuthStore()
 
 const keyword = ref('')
 
+/** 顶栏准入：与侧栏共用 navVisible（唯一判定）；原 admin 内联特判已删除 */
 const navItems = computed(() =>
   TOP_NAV.filter((item) => {
-    if (!router.hasRoute(item.routeName)) return false
-    if (item.key === 'admin') {
-      return (
-        auth.can('tenant:manage') ||
-        auth.can('org:manage') ||
-        auth.can('workflow:manage') ||
-        auth.can('apiclient:manage') ||
-        auth.can('metric:manage') ||
-        auth.can('audit:view')
-      )
+    const ctx: NavContext = {
+      hasRoute: (name) => router.hasRoute(name),
+      canAny: (codes) => auth.canAny(codes),
+      vendorScoped: auth.user?.vendorId != null,
     }
-    return true
+    return navVisible(item, ctx)
   }),
 )
 

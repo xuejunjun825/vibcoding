@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getTestPlan } from '@/api/deliver'
 import { assignmentApi, planApi, reportApi, roundApi } from '@/api/quality'
-import { listUsers, type UserRow } from '@/api/admin'
+import { listDictionaryUsers, type DictionaryUser } from '@/api/dictionaries'
 import { listReleases } from '@/api/req'
 import { usePermission } from '@/composables/usePermission'
 import { DANGER_ACTIONS, useDictStore } from '@/stores/dict'
@@ -107,7 +107,7 @@ const assignments = ref<AssignmentView[]>([])
 const changes = ref<PlanChangeLogRow[]>([])
 const changeTotal = ref(0)
 const reports = ref<ReportRow[]>([])
-const users = ref<UserRow[]>([])
+const users = ref<DictionaryUser[]>([])
 const releases = ref<ReleaseRow[]>([])
 const loading = ref(false)
 const tabLoading = ref(false)
@@ -297,7 +297,7 @@ async function loadOptions(): Promise<void> {
   }
   if (!can('plan:assign')) return
   try {
-    users.value = (await listUsers({ page: 1, size: 200 })).items ?? []
+    users.value = await listDictionaryUsers()
   } catch {
     users.value = []
   }

@@ -10,9 +10,9 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { metricApi } from '@/api/quality'
 import { listReleases } from '@/api/req'
-import { listDomains, listVendors } from '@/api/admin'
+import { listDictionaryDomains, listDictionaryVendors } from '@/api/dictionaries'
 import { ApiError } from '@/api/client'
-import type { DomainRow, VendorRow } from '@/api/admin'
+import type { DictionaryDomain, DictionaryVendor } from '@/api/dictionaries'
 import type { QualityMetricValue, QualityMetrics, ReleaseRow } from '@/api/types'
 import MetricCard from '@/components/MetricCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -27,8 +27,8 @@ const data = ref<QualityMetrics | null>(null)
 const loading = ref(false)
 const error = ref<{ message: string; code?: string; status?: number } | null>(null)
 const releases = ref<ReleaseRow[]>([])
-const domains = ref<DomainRow[]>([])
-const vendors = ref<VendorRow[]>([])
+const domains = ref<DictionaryDomain[]>([])
+const vendors = ref<DictionaryVendor[]>([])
 
 const releaseId = ref<number | null>(null)
 const domainId = ref<number | null>(null)
@@ -100,7 +100,7 @@ async function load(): Promise<void> {
 }
 
 async function loadOptions(): Promise<void> {
-  const results = await Promise.allSettled([listReleases({ page: 1, size: 100 }), listDomains(), listVendors()])
+  const results = await Promise.allSettled([listReleases({ page: 1, size: 100 }), listDictionaryDomains(), listDictionaryVendors()])
   if (results[0].status === 'fulfilled') releases.value = results[0].value.items ?? []
   if (results[1].status === 'fulfilled') domains.value = results[1].value ?? []
   if (results[2].status === 'fulfilled') vendors.value = results[2].value ?? []

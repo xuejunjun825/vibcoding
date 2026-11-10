@@ -1,6 +1,6 @@
 import { ref } from 'vue'
-import { listDomains, listUsers, listVendors } from '@/api/admin'
-import type { DomainRow, UserRow, VendorRow } from '@/api/admin'
+import { loadDictionaries } from '@/api/dictionaries'
+import type { DictionaryDomain, DictionaryUser, DictionaryVendor } from '@/api/dictionaries'
 import type { ApprovalTimelineEvent, RequirementDetail, RequirementRow } from '@/api/types'
 
 /**
@@ -136,22 +136,23 @@ export function messageOf(error: unknown): string {
   return String(error)
 }
 
-/** 域/厂商/人员的名字来自管理接口；失败时退化为空表，不阻断业务页面 */
-const domains = ref<DomainRow[]>([])
-const vendors = ref<VendorRow[]>([])
-const users = ref<UserRow[]>([])
+/**
+ * 域/厂商/人员选项来自只读字典端点（`api/dictionaries.ts`，仅认证、按租户/厂商裁剪）。
+ * 失败时退化为空表，不阻断业务页面。
+ *
+ * 缓存留在页面层：换租户=重新登录=整页刷新，缓存自然失效，不引入第二套租户态。
+ */
+const domains = ref<DictionaryDomain[]>([])
+const vendors = ref<DictionaryVendor[]>([])
+const users = ref<DictionaryUser[]>([])
 let pending: Promise<void> | null = null
 let loaded = false
 
 async function loadDictionary(): Promise<void> {
-  const [domainList, vendorList, userList] = await Promise.all([
-    listDomains().catch(() => [] as DomainRow[]),
-    listVendors().catch(() => [] as VendorRow[]),
-    listUsers({ page: 1, size: 200 }).then((result) => result.items).catch(() => [] as UserRow[]),
-  ])
-  domains.value = domainList
-  vendors.value = vendorList
-  users.value = userList
+  const bundle = await loadDictionaries()
+  domains.value = bundle.domains
+  vendors.value = bundle.vendors
+  users.value = bundle.users
   loaded = true
 }
 
@@ -170,7 +171,9 @@ export function normalizeTimeline(
   })
 }
 
-export function usePlatformDict() {  async function ensure(): Promise<void> {
+export function usePlatformDict() {
+  /** 幂等装载：loaded 短路，并发调用共享同一个 pending（页面内多处 ensure 只发一轮请求） */
+  async function ensure(): Promise<void> {
     if (loaded) return
     if (!pending) {
       pending = loadDictionary().finally(() => {

@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>平台功能总览与角色演示手册</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 0 60px;background:#fff;color:var(--body);
+  font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:960px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;
+  font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.meta-note{font-size:12px;color:var(--muted)}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+@media print{body{padding:0}.toc{break-inside:avoid}}
+
+h1.title{display:none}
+td:first-child,th:first-child{white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="toc"><div class="toc-title">目录</div>
+<ul>
+<li><a href="#sec1">1. 演示环境与账号</a></li>
+<li><a href="#sec2">2. 已交付能力地图（按域）</a></li>
+<li><a href="#sec3">3. 角色 × 页面可用性矩阵（r7 修复后）</a></li>
+<li><a href="#sec4">4. 各角色演示脚本</a></li>
+<li><a href="#sec5">5. 端到端演示剧本（15 分钟）</a></li>
+<li><a href="#sec6">6. 本轮修复的两条 P0（已修复，含验证命令）</a></li>
+<li><a href="#sec7">7. 截图与复现</a></li>
+<li><a href="#sec8">8. 建议的下一步</a></li>
+</ul>
+</div>
+<h1 id="top">平台功能总览与角色演示手册</h1>
+<blockquote>
+<p>生成时间：2026-11-10（r7 角色准入修复轮） · 代码基线 <code>main = ea877fa</code> + 本轮改动 · 环境 <code>make platform-up</code>（req 8082 / deliver 8083 / gateway 8080 / web 5173 / MySQL <code>devops_platform</code>）<br>
+本文的权限码与准入格取自 <code>PermissionMatrix.java</code> 与本轮路由 <code>meta.functionCode</code>，可用 <code>make access-verify</code> 在本机复核（见 §6.3）。<strong>先说结论：功能面是齐的，r7 修掉的两条 P0（字典 403、菜单与路由不同源）已交付并有自动化证据</strong>，见 §6。</p>
+</blockquote>
+<hr>
+<h2 id="sec1">1. 演示环境与账号</h2>
+<pre><code>make platform-up            # 拉起 MySQL + req + deliver + web，末尾打印 READY
+open http://127.0.0.1:5173  # 登录页，租户 t1
+make platform-down          # 演示结束</code></pre>
+<table>
+<thead>
+<tr><th>账号</th><th>姓名</th><th>角色</th><th>密码</th><th>权限码</th><th>可见需求数</th></tr>
+</thead>
+<tbody>
+<tr><td><code>admin</code></td><td>平台管理员</td><td>PLATFORM_ADMIN</td><td><code>Admin@12345</code></td><td>56</td><td>12</td></tr>
+<tr><td><code>pm</code></td><td>产品经理-张</td><td>PRODUCT</td><td><code>Passw0rd!</code></td><td>26</td><td>12</td></tr>
+<tr><td><code>tl1</code></td><td>项目域负责人-李</td><td>PMO（域负责人）</td><td><code>Passw0rd!</code></td><td>40</td><td>12</td></tr>
+<tr><td><code>po1</code></td><td>二级企业负责人-王</td><td>SUB_BUSINESS_LEADER</td><td><code>Passw0rd!</code></td><td>11</td><td><strong>8</strong>（仅本企业提报）</td></tr>
+<tr><td><code>dev1</code></td><td>研发-赵</td><td>DEV</td><td><code>Passw0rd!</code></td><td>24</td><td>12</td></tr>
+<tr><td><code>dev2</code></td><td>研发-钱</td><td>DEV</td><td><code>Passw0rd!</code></td><td>24</td><td>12</td></tr>
+<tr><td><code>qa1</code></td><td>测试-孙</td><td>QA</td><td><code>Passw0rd!</code></td><td>33</td><td>12</td></tr>
+<tr><td><code>qa2</code></td><td>测试-周</td><td>QA</td><td><code>Passw0rd!</code></td><td>33</td><td>12</td></tr>
+<tr><td><code>vendor1</code></td><td>厂商管理员-钱</td><td>PMO + 厂商 VEN-A</td><td><code>Passw0rd!</code></td><td>40</td><td><strong>3</strong>（仅本厂商承接）</td></tr>
+<tr><td><code>vendor2</code></td><td>厂商研发-郑</td><td>DEV + 厂商 VEN-B</td><td><code>Passw0rd!</code></td><td>24</td><td><strong>0</strong>（未承接）</td></tr>
+<tr><td><code>biz1</code> <sup>a</sup></td><td>陈业务</td><td>BUSINESS（业务部门）</td><td><code>Passw0rd!</code></td><td>8 <sup>a</sup></td><td>8 <sup>a</sup></td></tr>
+<tr><td><code>suite1</code> <sup>a</sup></td><td>许二级</td><td>SUB_BUSINESS_LEADER（二级企业业务）</td><td><code>Passw0rd!</code></td><td>11 <sup>a</sup></td><td>8 <sup>a</sup></td></tr>
+</tbody>
+</table>
+<p class="meta-note"><sup>a</sup> 本轮新增的两个种子账号。权限码由 <code>PermissionMatrix</code> 推导（<code>node logs/teamflow/tf-mw9yzocw-5kv3pt/scripts/t10-role-grants.mjs</code>，该推导口径已用 admin/pm/tl1/po1/dev1/qa1 六个账号的既有实测值对账通过）；「可见需求数」中 12/8/3/0 由 <code>make platform-demo-reset</code> 的 4 条不变量断言，<code>biz1</code>/<code>suite1</code> 的两个 8 是按 po1 同组织同域口径推导、未被不变量单独断言。</p>
+<p><strong>隔离是真实生效的</strong>：同一租户下全量角色看到 12 条（<code>make platform-demo-reset</code> 后的干净数据集），<code>po1</code>（二级企业负责人）只看到本企业 8 条，<code>vendor1</code> 只看到本厂商承接的 3 条，<code>vendor2</code> 0 条。</p>
+<blockquote>
+<p>已补齐：<code>BUSINESS</code>（业务部门）与二级企业业务账号不再缺位。<code>biz1</code> 用于演示“业务方自己提报”，<code>suite1</code> 与 <code>po1</code> 同角色（<code>SUB_BUSINESS_LEADER</code>）用于演示“二级企业业务读面”，两者与 <code>po1</code> 同租户 t1、同组织 supplyOrg，并在种子循环里绑同一组 7 个业务域，故数据范围天然同源。</p>
+</blockquote>
+<hr>
+<h2 id="sec2">2. 已交付能力地图（按域，均为页面实测可打开）</h2>
+<table>
+<thead>
+<tr><th>域</th><th>能力</th><th>入口页</th></tr>
+</thead>
+<tbody>
+<tr><td>需求</td><td>三类需求（BUS/PDR/RD）、三层父子拆解、需求池（入池/待评审/关闭统计）、编号规则、CSV 导出</td><td><code>/requirements</code> <code>/requirements/:id</code> <code>/requirements/new</code></td></tr>
+<tr><td>审批</td><td>自研审批引擎：提报/评审入池/版本/发布四类单据、会签/或签、条件分支、加签/减签、转办/撤回/催办、流程定义（版本化）</td><td><code>/approvals</code> <code>/admin/workflows</code></td></tr>
+<tr><td>版本与发布</td><td>版本计划（Release）+ 里程碑、发布单、准入校验 9 项（需求全测过/无未关闭 P0·P1/MR/人天/审批/构建/Sonar/制品/门禁）、PMO 强制放行留痕</td><td><code>/releases</code> <code>/deploy-orders</code></td></tr>
+<tr><td>研发交付</td><td>任务、迭代看板、MR 区（GitLab 同步）、追溯矩阵（需求→任务→MR→测试→缺陷→发布）</td><td><code>/iterations</code> <code>/traceability</code></td></tr>
+<tr><td>缺陷</td><td>P0–P3、状态机、重开计数、看板、失败转缺陷、生产缺陷回流</td><td><code>/defects</code> <code>/defects/board</code></td></tr>
+<tr><td>测试</td><td>用例库（版本化）、用例评审单、测试计划（策略/轮次/执行/分配）、测试报告三签、质量门、豁免、环境台账、执行器健康</td><td><code>/testcases</code> <code>/test-plans</code> <code>/test-reports</code> <code>/quality-gates</code> <code>/test-envs</code> <code>/test-executors</code></td></tr>
+<tr><td>协作（M8）</td><td>甘特（版本/迭代/需求三视图、拖拽改期落库+审计）、Wiki（空间隔离/版本回滚/全文检索/回收站）、价值流（7 阶段、WIP、P90 停留、流动效率、瓶颈）</td><td><code>/gantt</code> <code>/wiki</code> <code>/value-stream</code></td></tr>
+<tr><td>代码与集成（M7/M8）</td><td>分支策略登记与 GitLab 现状核验（MATCH/DRIFT/UNVERIFIED）、CR 行级评论、Sonar 质量摘要、四系统集成配置</td><td><code>/code-policies</code> <code>/admin/integrations</code></td></tr>
+<tr><td>平台治理</td><td>组织/租户/用户/角色/权限矩阵（10 角色 × 56 功能码）、指标字典、审计日志、API 客户端</td><td><code>/admin/*</code></td></tr>
+</tbody>
+</table>
+<p>规模：REST 接口 196 个映射、前端 54 个页面、业务表 53 张、验证套件（r1 14 / platform 168 / quality 348 / integration 230 / collab 263 / access 约 85 / negative 25 / unit 234 / lint 16）。</p>
+<hr>
+<h2 id="sec3">3. 角色 × 页面可用性矩阵（r7 修复后 · 9 账号 × 13 页）</h2>
+<table>
+<thead>
+<tr><th>页面</th><th>admin</th><th>pm</th><th>tl1</th><th>po1</th><th>dev1</th><th>qa1</th><th>vendor1</th><th>biz1</th><th>suite1</th></tr>
+</thead>
+<tbody>
+<tr><td>需求池 <code>/requirements</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>版本计划 <code>/releases</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>⛔<sup>4</sup></td><td>✅</td></tr>
+<tr><td>审批中心 <code>/approvals</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>测试计划 <code>/test-plans</code></td><td>✅</td><td>✅</td><td>✅</td><td>⛔<sup>4</sup></td><td>⛔<sup>4</sup></td><td>✅</td><td>✅</td><td>⛔<sup>4</sup></td><td>⛔<sup>4</sup></td></tr>
+<tr><td>用例库 <code>/testcases</code></td><td>✅</td><td>✅</td><td>✅</td><td>⛔<sup>1</sup></td><td>✅<sup>3</sup></td><td>✅</td><td>⛔<sup>3</sup></td><td>⛔<sup>1</sup></td><td>⛔<sup>1</sup></td></tr>
+<tr><td>缺陷 <code>/defects</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>甘特 <code>/gantt</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>⛔<sup>2</sup></td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Wiki <code>/wiki</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>价值流 <code>/value-stream</code></td><td>✅</td><td>✅</td><td>✅</td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td><td>✅</td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td></tr>
+<tr><td>追溯矩阵 <code>/traceability</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>质量门 <code>/quality-gates</code></td><td>✅</td><td>✅</td><td>✅</td><td>⛔<sup>2</sup></td><td>✅</td><td>✅</td><td>✅</td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td></tr>
+<tr><td>分支策略 <code>/code-policies</code></td><td>✅</td><td>⛔<sup>2</sup></td><td>✅</td><td>⛔<sup>2</sup></td><td>✅</td><td>⛔<sup>2</sup></td><td>✅</td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td></tr>
+<tr><td>用户与角色 <code>/admin/users</code></td><td>✅</td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td><td>⛔<sup>2</sup></td></tr>
+</tbody>
+</table>
+<p class="meta-note">
+<sup>1</sup> <code>po1</code>/<code>biz1</code>/<code>suite1</code> 无 <code>case:manage</code>，用例库入口不渲染，深链落 <code>/403</code>。<br>
+<sup>2</sup> 角色确实没有该功能码（<code>DENY</code>），入口隐藏且深链 403 —— 这是权限矩阵的正确拒绝，不是故障。<br>
+<sup>3</sup> <code>dev1</code> 可见用例库、<code>vendor1</code> 不可见：前者是 DEV 对 <code>case:manage</code> 持 <code>RESTRICTED</code>（收窄数据范围而非拒绝，详见 <code>docs/teamflow/20261110-r7-role-page-access-fix/TECHNICAL.md</code> §7 记为唯一偏差）；后者是 <code>/testcases</code> 带 <code>meta.internalOnly</code>，厂商账号深链一律落 <code>/403?code=INTERNAL_ONLY</code>。<br>
+<sup>4</sup> 5 格 ⛔ 与 §6.2 同一张表：<code>/test-plans</code> 要 <code>plan:manage</code>（<code>po1</code>/<code>dev1</code>/<code>biz1</code>/<code>suite1</code> 无），<code>/code-policies</code> 要 <code>CCODE_POLICY_VIEW</code>（<code>pm</code>/<code>po1</code>/<code>qa1</code> 无），<code>/releases</code> 要 <code>release:plan</code>（<code>BUSINESS</code> 未授）。矩阵未新增任何权限码。
+</p>
+<blockquote>
+<p>判据是<strong>两段同源</strong>：菜单看 <code>navVisible()</code>，路由看 <code>meta.functionCode</code>，<code>nav</code> 的码是 <code>meta</code> 的码的子集，故“看得见”与“点得开”不会再分叉（§6 P0-2）。</p>
+</blockquote>
+<hr>
+<h2 id="sec4">4. 各角色演示脚本</h2>
+<h3 id="s41">4.1 平台管理员 <code>admin</code>（可走通全流程的角色）</h3>
+<ol type="1">
+<li>需求池 <code>http://127.0.0.1:5173/requirements</code>：看 12 条、类型 Tab、筛选与 CSV 导出。</li>
+<li>点任意需求进详情：父子需求、子需求进度、审批流转时间线、人天预估/已投入/偏差、关联版本。</li>
+<li>版本计划 <code>/releases</code> → 打开版本详情（工作项、准入 9 项清单、状态计数胶囊）。</li>
+<li>测试计划 <code>/test-plans</code> → 计划详情六 tab（生命周期/用例/轮次/执行/报告/风险）；执行页勾结果。</li>
+<li>质量门 <code>/quality-gates</code> → 单版本质量门详情（报告结论、5 条规则、豁免、快照回放）。</li>
+<li>甘特 <code>/gantt</code> → 切版本/迭代/需求三视图与日/周/月；拖拽右端改期（落库 + 审计 + 超父窗口 409 确认）。</li>
+<li>价值流 <code>/value-stream</code>：7 阶段 WIP、P90 停留、瓶颈阶段、流动效率（数据全部取自 <code>audit_log</code>）。</li>
+<li>Wiki <code>/wiki</code>：建空间（可见范围 继承/仅本域/仅本厂商）、写页、看版本对比与回滚、回收站。</li>
+<li>分支策略 <code>/code-policies</code>：登记规则 → “对照核验” GitLab 现状（未配置集成时 必须显示 UNVERIFIED，不得假绿）。</li>
+<li>设置 <code>/admin/users</code>、<code>/admin/permissions</code>（10×56 权限矩阵）、<code>/admin/audit</code>（审计日志）。</li>
+</ol>
+<h3 id="s42">4.2 产品经理 <code>pm</code>（权限 26）</h3>
+<ul>
+<li>可演示：<code>/requirements</code>、<code>/releases</code>、<code>/approvals</code>、<code>/testcases</code>、<code>/defects</code>、<code>/gantt</code>、<code>/wiki</code>、<code>/value-stream</code>、<code>/traceability</code>、<code>/quality-gates</code>、<code>/admin/workflows</code>。</li>
+<li>不可演示（矩阵拒绝，非故障）：<code>/test-plans</code>、<code>/code-policies</code>、<code>/admin/users</code>。</li>
+<li>工作台 <code>/workbench</code> 目前是<strong>质量工作台</strong>（待批准计划/待会签报告/待审批豁免/我的待执行用例），实测 pm 待会签 6 份 —— 这是 M6 的岗位化视图，不是 PRD §4.10 那张“待办四宫格”。</li>
+<li>主线剧本：需求池 → 评审入池审批 → 拆解产品/研发需求 → 排版本 → 会签测试报告。</li>
+</ul>
+<h3 id="s43">4.3 项目域负责人 <code>tl1</code>（权限 40，PMO 视角）</h3>
+<ul>
+<li>可演示：域内需求池、版本计划、审批中心、测试计划、用例库、缺陷、甘特、Wiki、价值流、追溯矩阵、质量门、分支策略、流程定义、指标字典、审计。</li>
+<li>典型动作：域内需求按域过滤、发布单强制放行、版本准入裁决。</li>
+</ul>
+<h3 id="s44">4.4 二级企业负责人 <code>po1</code>（权限 11，隔离演示的最佳角色）</h3>
+<ul>
+<li>实测：<code>/requirements</code> 只返回本企业 8 条（隔离生效），页面已可直接打开；也可用 API 复核：</li>
+</ul>
+<pre><code>TOKEN=$(curl -s -X POST http://127.0.0.1:8080/api/req/auth/login -H 'Content-Type: application/json' \
+  -d '{&quot;tenantCode&quot;:&quot;t1&quot;,&quot;username&quot;:&quot;po1&quot;,&quot;password&quot;:&quot;Passw0rd!&quot;}' | jq -r .token)
+curl -s -H &quot;Authorization: Bearer $TOKEN&quot; -H 'X-Tenant-Id: 1' \
+  'http://127.0.0.1:8080/api/req/requirements?page=1&amp;size=5' | jq '.total'   # → 8</code></pre>
+<ul>
+<li>可演示页面：需求池、版本计划、审批中心、缺陷、甘特、Wiki、追溯矩阵。</li>
+<li>不可演示（矩阵拒绝）：测试计划、用例库、价值流、质量门、分支策略、管理后台。</li>
+</ul>
+<h3 id="s45">4.5 研发 <code>dev1</code> / <code>dev2</code>（权限 24）</h3>
+<ul>
+<li>可演示：需求池、版本计划、审批中心、缺陷（处理/转测试）、用例库、甘特（可编辑改期）、Wiki（可编辑）、追溯矩阵、质量门、分支策略。</li>
+<li>不可演示（矩阵拒绝）：测试计划、价值流、管理后台。</li>
+<li><code>vendor2</code> 用于演示厂商 0 承接：用它的 token 调 <code>/requirements</code> 返回 <code>total=0</code>。</li>
+</ul>
+<h3 id="s46">4.6 测试 <code>qa1</code> / <code>qa2</code>（权限 33，权限最完整的业务角色）</h3>
+<ol type="1">
+<li>用例库 <code>/testcases</code>：建用例、发起用例评审（绑 <code>case_version</code>，改版自动 INVALIDATED）。</li>
+<li>测试计划 <code>/test-plans</code>：计划七态、轮次 R1/R2/R3、执行结果四态、通过率/覆盖率。</li>
+<li>测试报告 <code>/test-reports</code>：生成 → 三签（测试负责人→产品→PMO）→ 带水印导出。</li>
+<li>质量门 <code>/quality-gates</code>：报告 PASS 且 7 天内、通过率 ≥95%、未关闭 P0/P1=0、第 5 规则（Sonar/制品/构建）。</li>
+<li>环境台账 <code>/test-envs</code>、执行器 <code>/test-executors</code>（外部 CI 上报的健康状态，24h 在线 / 72h 陈旧）。</li>
+<li>追溯矩阵 <code>/traceability</code>：按缺口筛选（需求没用例、用例没执行、缺陷没关联）。</li>
+<li>不可演示（矩阵拒绝）：甘特、分支策略、管理后台。</li>
+</ol>
+<h3 id="s47">4.7 厂商管理员 <code>vendor1</code>（PMO + VEN-A，演示域×厂商双维度隔离）</h3>
+<ul>
+<li>实测：<code>/requirements</code> 总量 3（只本厂商承接）、缺陷 3；甘特、Wiki、价值流、质量门、追溯可用。</li>
+<li>用例库对厂商账号不可见（<code>internalOnly</code>），管理后台按矩阵不可见：这是本次修复让“厂商账号只能待在厂商面”的入口级证据。</li>
+<li>演示话术：同一个 URL、同一个租户，换账号后数据从 12 条变成 3 条——这就是“行级双维度隔离 + 六出口同源过滤”。</li>
+</ul>
+<h3 id="s48">4.8 业务方 <code>biz1</code> / <code>suite1</code>（权限 8 / 11，本轮新增账号）</h3>
+<ul>
+<li><code>biz1</code>（BUSINESS）：可提报业务需求（<code>req:report:bus</code>）、看本组织需求池（8 条）、审批待办、缺陷、甘特、Wiki、追溯矩阵、质量指标。</li>
+<li>不可演示（矩阵拒绝）：版本计划、测试计划、用例库、价值流、质量门、分支策略、管理后台 —— 与 §3 的 <code>biz1</code> 列一致。</li>
+<li><code>suite1</code>（SUB_BUSINESS_LEADER）：在 <code>biz1</code> 基础上多 <code>release:plan</code>（受限）与 <code>req:review</code>，故版本计划可打开、可参与评审。</li>
+<li>首次登录即验证：两个账号都不出现测试计划/分支策略/管理后台菜单（<code>make access-verify</code> 的 a4 段断言关键隐藏项）。</li>
+</ul>
+<hr>
+<h2 id="sec5">5. 端到端演示剧本（15 分钟）</h2>
+<table>
+<thead>
+<tr><th>步</th><th>账号</th><th>动作</th><th>预期</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td><code>biz1</code></td><td>提报业务需求</td><td>进入“待评审”，触发“产品评审”会签待办</td></tr>
+<tr><td>2</td><td><code>pm</code></td><td>产品评审会签通过 → 入池</td><td>状态 待评审→已入池，集团需求池可见（仅标题/摘要/域/版本）</td></tr>
+<tr><td>3</td><td><code>pm</code></td><td>拆解产品需求 + 研发需求</td><td>父子链路建立，父需求完成率开始汇总</td></tr>
+<tr><td>4</td><td><code>pm</code></td><td>排入 2026 Q4 版本</td><td>版本详情出现工作项，甘特出现计划条</td></tr>
+<tr><td>5</td><td><code>dev1</code></td><td>交付：填 MR、预估/实际人天</td><td>需求→待测试，追溯矩阵出现 MR 节点</td></tr>
+<tr><td>6</td><td><code>qa1</code></td><td>执行测试计划 → 失败转缺陷</td><td>缺陷带用例/版本/需求；计划通过率下降</td></tr>
+<tr><td>7</td><td><code>qa1</code></td><td>缺陷修复后复测 → 生成测试报告 → 三签</td><td>报告 PASS，质量门变绿（含 9 项准入）</td></tr>
+<tr><td>8</td><td><code>tl1</code>/<code>pm</code></td><td>提交发布单 → 准入校验</td><td>9 项逐项展示；FAIL 禁提交，PMO 放行留痕</td></tr>
+<tr><td>9</td><td><code>admin</code></td><td>甘特看交付节奏 / 价值流看瓶颈</td><td>停留时间与审计事件一致，三处读数差 0</td></tr>
+</tbody>
+</table>
+<blockquote>
+<p>步 2 的审批人是 <code>PRODUCT</code> 角色（种子流程“产品评审”单节点 ALL 会签），即 <code>pm</code>，不是 <code>po1</code> —— 旧版剧本把审批人写成 <code>po1</code> 是笔误，本轮改正。</p>
+</blockquote>
+<hr>
+<h2 id="sec6">6. 本轮修复的两条 P0（已修复，含验证命令）</h2>
+<h3 id="p0-1">6.1 P0-1 共享字典接口 403 → 全局跳 403（已修复）</h3>
+<ul>
+<li>修复前现象：<code>pm</code> 打开 <code>/requirements</code>、<code>/releases</code>、<code>/approvals</code>、<code>/test-plans</code>、<code>/code-policies</code> 都落到“无权访问该单据（需要功能码 FORBIDDEN）”；根因是页面加载时调 <code>/api/req/admin/{domains,vendors,users}</code> 取显示名，这三个接口要 <code>org:manage</code>，非管理员 403，而 <code>web/src/api/client.ts</code> 对任何未声明 <code>silentForbidden</code> 的 403 做全局 <code>navigate('/403')</code>。</li>
+<li>修复：后端新增<strong>只读字典端点</strong> <code>GET /api/req/dictionaries/{domains,vendors,users}</code>（仅认证、按 <code>DataScope</code> 裁剪租户/厂商边界、<code>record</code> 形状固定字段白名单，故意不进 <code>PermissionRouteTable</code> 并用单测钉住）；前端字典读取统一收敛到单入口 <code>web/src/api/dictionaries.ts</code>（各业务页不再直连 <code>api/admin.ts</code>），全部声明 <code>silentForbidden</code> 并在内部降级。管理面 <code>/admin/*</code> 的 <code>org:manage</code> 语义不变。</li>
+<li>验证：<code>a0</code>（字典契约 29 断言：401/200/字段白名单/404/管理面仍 403）+ <code>a1</code>（裁剪与隔离 8 断言）。</li>
+</ul>
+<h3 id="p0-2">6.2 P0-2 菜单与路由不同源 → 看得见点不开（已修复）</h3>
+<ul>
+<li>修复前现象：<code>po1</code> 能看到“用例库”却点开 403；<code>dev1</code> 有 <code>CCODE_POLICY_VIEW</code> 却在分支策略被 403；<code>pm</code> 顶栏看到“设置”点开 403（特判含 <code>workflow:manage</code> 却落 <code>/admin/orgs</code>，需 <code>org:manage</code>）。</li>
+<li>修复：新增 <code>web/src/layouts/navAccess.ts</code> 的 <code>navVisible()</code> 作为侧栏与顶栏<strong>唯一</strong>准入判定；<code>NavItem.functionCode</code> 改为必填（33 条侧栏 + 8 条顶栏逐项赋值，登录可读用 <code>AUTHENTICATED</code> 哨兵）；5 条路由 <code>meta</code> 补齐并保证 nav 码 ⊆ meta 码；<code>/testcases</code> 加 <code>meta.internalOnly</code>（厂商账号入口级 403，不改权限矩阵）；删除 <code>TopNav.vue</code> 的 admin 内联六码特判。</li>
+<li>5 格 ⛔（7 角色 × 5 页探测矩阵内）与本轮定性见下表。</li>
+</ul>
+<table>
+<thead>
+<tr><th>页面</th><th>⛔ 角色</th><th>触发码</th><th>定性</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/test-plans</code></td><td><code>po1</code> <code>dev1</code></td><td><code>plan:manage</code></td><td>矩阵拒绝，符合 AC-5</td></tr>
+<tr><td><code>/code-policies</code></td><td><code>pm</code> <code>po1</code> <code>qa1</code></td><td><code>CCODE_POLICY_VIEW</code></td><td>矩阵拒绝，符合 AC-5</td></tr>
+<tr><td>其余 30 格</td><td>—</td><td>—</td><td>200，入口与接口同源放行</td></tr>
+</tbody>
+</table>
+<ul>
+<li>验证：<code>a2</code>（5 页 × 7 角色 35 条精确状态码）+ <code>a3</code>（导航静态审计：码必填/值域/nav⊆meta/前缀/silentForbidden/客户端 403 守卫）+ <code>a4</code>（7 角色真实权限推导可见集）。</li>
+</ul>
+<h3 id="sec6-3">6.3 验证命令</h3>
+<pre><code>make access-verify            # a0..a4 五段聚合，PASS==TOTAL 才退出 0；栈未起非 0 退出
+bash scripts/tests/access/a0-dictionary-contract.sh   # 只跑字典契约
+bash scripts/tests/access/a1-isolation.sh             # 只跑租户/厂商裁剪
+bash scripts/tests/access/a2-page-matrix.sh           # 只跑 5 页 × 7 角色状态码
+node scripts/tests/access/a3-nav-audit.mjs            # 只跑导航静态审计（不需起栈）
+node scripts/tests/access/a4-nav-visibility.mjs       # 只跑角色可见集推导（不需起栈）</code></pre>
+<h3 id="p1">P1：文档与实现不一致（本轮未修，非目标）</h3>
+<ul>
+<li><code>DELIVERED-MODULES.md:96-98</code> 把<strong>岗位工作台</strong>（待办中心 + 快捷动作 + 数据卡片 + 我的列表）和<strong>自助报表</strong>（拖拽交叉表 → 图表 → 保存/共享/导出）列为已交付；实际代码里 <code>/workbench</code> 是 M6 的<strong>质量工作台</strong>（<code>WorkbenchQuery</code> 只有计划卡/用例卡/汇总），也没有任何 <code>/reports</code> 路由与报表接口（<code>report_definition</code> 表/接口 0 命中）。</li>
+<li>建议：要么另开需求补，要么把文档改成“设计已定、未排期”。</li>
+</ul>
+<h3 id="p2">P2：演示数据被验收夹具污染（已提供一键重置）</h3>
+<ul>
+<li>修复前：需求池 73 条中大部分是 <code>s1/s5/s7/neg-sm-*</code> 夹具，人天出现 614 天；甘特首屏 88 行也是夹具（大量“逾期”）；通知 99+。</li>
+<li>干净演示做法（单事务重建，连跑两次结果一致，失败整体回滚）：</li>
+</ul>
+<pre><code>make platform-demo-reset</code></pre>
+<ul>
+<li>该命令调内部端点 <code>POST /api/req/internal/demo-reset</code>（需 <code>X-Internal-Token</code>，且 <code>PLATFORM_SEED_ENABLED</code> 关闭时端点不存在），重建 12 条需求小链路 + 1 版本 + 1 迭代 + 12 用例 + 3 缺陷 + 1 测试计划 + 1 甘特组 8 行 + ≤5 通知，并自检 4 条不变量（需求 12 / <code>po1</code> 见 8 / <code>vendor1</code> 见 3 / <code>vendor2</code> 见 0）与夹具痕迹清零；不进自动门禁，属演示前手动动作。</li>
+<li>账号缺口已补：<code>biz1</code>/<code>suite1</code>（§1）。</li>
+</ul>
+<hr>
+<h2 id="sec7">7. 截图与复现</h2>
+<p>截图都在 <code>docs/teamflow/demo-shots/</code>（1440×900，headless Chrome + CDP 注入会话）。</p>
+<h3 id="s71">7.1 平台管理员视角（核心流程）</h3>
+<table>
+<tbody>
+<tr><td><img src="demo-shots/admin-requirements.png" alt="需求池"><br>需求池：类型 Tab、父子聚合/平铺、CSV 导出</td><td><img src="demo-shots/admin-releases.png" alt="版本计划"><br>版本计划 + 里程碑</td></tr>
+<tr><td><img src="demo-shots/admin-gantt.png" alt="甘特"><br>甘特：版本/迭代/需求三视图、拖拽改期、逾期标红</td><td><img src="demo-shots/admin-value-stream.png" alt="价值流"><br>价值流：7 阶段 WIP、P90 停留、瓶颈阶段</td></tr>
+<tr><td><img src="demo-shots/admin-traceability.png" alt="追溯矩阵"><br>追溯矩阵：需求→任务→MR→测试→缺陷→发布</td><td><img src="demo-shots/admin-quality-gates.png" alt="质量门"><br>质量门总览</td></tr>
+<tr><td><img src="demo-shots/admin-wiki.png" alt="Wiki"><br>Wiki：空间/页面树/版本</td><td><img src="demo-shots/admin-users.png" alt="用户与角色"><br>用户与角色（10 角色 × 56 功能码）</td></tr>
+</tbody>
+</table>
+<h3 id="s72">7.2 业务角色视角</h3>
+<table>
+<tbody>
+<tr><td><img src="demo-shots/qa1-testcases.png" alt="qa1 用例库"><br>qa1：用例库（版本化、评审状态）</td><td><img src="demo-shots/qa1-quality-gates.png" alt="qa1 质量门"><br>qa1：质量门（报告/规则/豁免）</td></tr>
+<tr><td><img src="demo-shots/dev1-defects.png" alt="dev1 缺陷"><br>dev1：缺陷列表</td><td><img src="demo-shots/pm-defect-board.png" alt="pm 缺陷看板"><br>pm：缺陷看板</td></tr>
+<tr><td><img src="demo-shots/vendor1-gantt.png" alt="vendor1 甘特"><br>vendor1：甘特（只见本厂商承接）</td><td><img src="demo-shots/po1-traceability.png" alt="po1 追溯"><br>po1：追溯矩阵（二级企业视角）</td></tr>
+</tbody>
+</table>
+<h3 id="s73">7.3 修复前证据（历史对照）</h3>
+<p><img src="demo-shots/po1-requirements-403.png" alt="po1 打开需求池被 403"></p>
+<p>这张图是 r7 <strong>修复前</strong>的故障态，保留作对照：二级企业负责人 <code>po1</code> 打开 <code>/requirements</code> 直接落到全局 403 页（根因见 §6.1）。修复后 <code>po1</code> 打开需求池为 200 且看到 8 条，由 <code>make access-verify</code> 的 a2（状态码）与 a4（可见集）持续断言；页面级证据请按 §7.4 现截。</p>
+<h3 id="s74">7.4 复现命令</h3>
+<pre><code>make platform-up
+make platform-demo-reset   # 干净演示数据（12 需求 / po1 见 8 / vendor1 见 3 / vendor2 见 0）
+&quot;/Applications/Google Chrome.app/Contents/MacOS/Google Chrome&quot; --headless=new --no-sandbox \
+  --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-cdp about:blank &amp;
+# CDP：Target.createTarget → attachToTarget(flatten) → Page.navigate(/login)
+#      → Runtime.evaluate 写 sessionStorage.setItem('devops.session', &lt;登录响应&gt;)
+#      → Page.navigate(目标路由) → Page.captureScreenshot</code></pre>
+<h2 id="sec8">8. 建议的下一步</h2>
+<ol type="1">
+<li><strong>P1 收口</strong>：岗位工作台、自助报表 —— 补齐实现或把 <code>DELIVERED-MODULES.md</code> 改成“设计已定、未排期”（本轮按 PRD 非目标处理，未动）。</li>
+<li><strong>r7 遗留观察项</strong>：<code>/testcases</code> 对 <code>dev1</code> 可见源自 <code>DEV</code> 对 <code>case:manage</code> 的 <code>RESTRICTED</code>（收窄而非拒绝）。若产品要求 <code>dev1</code> 不可见，需改权限矩阵，属独立需求。</li>
+<li>之后再做 M8-B（自动化规则引擎、风险与基线、敏感信息扫描）。</li>
+</ol>
+</div>
+</body>
+</html>

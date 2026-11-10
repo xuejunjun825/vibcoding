@@ -37,7 +37,7 @@ const deliverRoutes: RouteRecordRaw[] = [
     path: '/iterations',
     name: 'iterations',
     component: () => import('@/views/deliver/IterationsView.vue'),
-    meta: { title: '迭代', navKey: 'iterations' },
+    meta: { title: '迭代', navKey: 'iterations', functionCode: 'task:manage' },
   },
   {
     path: '/iterations/:id(\\d+)/board',
@@ -49,13 +49,14 @@ const deliverRoutes: RouteRecordRaw[] = [
     path: '/testcases',
     name: 'testcases',
     component: () => import('@/views/deliver/TestCaseLibraryView.vue'),
-    meta: { title: '用例库', navKey: 'testcases' },
+    // 厂商账号不作用例：菜单侧 nav.ts 同项 internalOnly，深链由 beforeEach 拦成 403
+    meta: { title: '用例库', navKey: 'testcases', functionCode: 'case:manage', internalOnly: true },
   },
   {
     path: '/test-plans',
     name: 'test-plans',
     component: () => import('@/views/deliver/TestPlansView.vue'),
-    meta: { title: '测试计划', navKey: 'test-plans' },
+    meta: { title: '测试计划', navKey: 'test-plans', functionCode: 'plan:manage' },
   },
   {
     path: '/test-plans/:id(\\d+)',

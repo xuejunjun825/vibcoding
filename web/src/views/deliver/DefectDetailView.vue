@@ -3,8 +3,8 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { actOnDefect, getDefect } from '@/api/deliver'
-import { listUsers } from '@/api/admin'
-import type { UserRow } from '@/api/admin'
+import { listDictionaryUsers } from '@/api/dictionaries'
+import type { DictionaryUser } from '@/api/dictionaries'
 import type { ApprovalTimelineEvent, DefectDetail } from '@/api/types'
 import { usePermission } from '@/composables/usePermission'
 import { useAuthStore } from '@/stores/auth'
@@ -35,7 +35,7 @@ const defect = ref<DefectDetail | null>(null)
 const loading = ref(false)
 const error = ref<{ message: string; code?: string; status?: number } | null>(null)
 const conflict = ref('')
-const users = ref<UserRow[]>([])
+const users = ref<DictionaryUser[]>([])
 
 const canHandle = computed(() => perm.can('defect:handle'))
 const summaryMode = computed(() => !canHandle.value)
@@ -190,8 +190,7 @@ function openAudit(): void {
 async function loadUsers(): Promise<void> {
   if (!perm.can('org:manage')) return
   try {
-    const page = await listUsers({ page: 1, size: 200 })
-    users.value = page.items ?? []
+    users.value = await listDictionaryUsers()
   } catch {
     users.value = []
   }

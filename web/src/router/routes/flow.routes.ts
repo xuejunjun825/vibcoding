@@ -6,7 +6,7 @@ const routes: RouteRecordRaw[] = [
     path: '/releases',
     name: 'releases',
     component: () => import('@/views/release/ReleaseListView.vue'),
-    meta: { title: '版本计划' },
+    meta: { title: '版本计划', functionCode: 'release:plan' },
   },
   {
     path: '/releases/:id',
