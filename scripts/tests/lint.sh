@@ -164,8 +164,10 @@ platform_routes_preserve_demo() {
 #                                            列表读走 ScopedJdbc，直连语句同样显式绑定 tenant_id。
 #   testplan/TestPlanService.java            测试数据说明：COMPLETED 锁定与 revision 乐观锁必须在同一事务里
 #                                            `SELECT ... FOR UPDATE` 后 UPDATE；读路径仍走 ScopedJdbc（jdbcRead）。
+#   analytics/AnalyticsDirectory.java        只读「角色 code → sys_role.id」的授权目录（组装共享可见性
+#                                            Viewer.roleIds）；不取业务数据、不参与行级过滤，故不走 ScopedJdbc。
 scoped_jdbc_single_source() {
-    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/|integration/|collab/|flow/|review/|executor/|testplan/TestPlanService\.java'
+    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/|integration/|collab/|flow/|review/|executor/|testplan/TestPlanService\.java|analytics/AnalyticsDirectory\.java'
     local hits
     hits="$(grep -rl 'JdbcTemplate' "$ROOT/req-service/src/main/java" "$ROOT/deliver-service/src/main/java" 2>/dev/null \
         | grep -v '/seed/' | grep -Ev "$allow_re" || true)"

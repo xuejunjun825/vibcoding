@@ -10,12 +10,13 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The single definition of "who may do what": 10 roles × 56 function codes.
+ * The single definition of "who may do what": 10 roles × 60 function codes.
  *
  * <p>The 26 r2 codes cover requirement/defect/delivery operations; M6 appended 15 quality codes
  * (strategy, plan lifecycle, report, gate, waiver, review, metrics) and M7 the integration code;
  * M8 appends 14 collaboration/code/test-governance codes (wiki, gantt, value stream, branch
- * policy, case review, executor). Appends only, so existing offsets never move. Nothing else may add a code: server-side interception and the frontend
+ * policy, case review, executor); M9 appends 4 analytics/portal codes (workbench, dashboard,
+ * report read, report share). Appends only, so existing offsets never move. Nothing else may add a code: server-side interception and the frontend
  * entry check both read {@link #functions()} / {@link #accessOf}, and the admin page is a
  * projection of this matrix (AC-5 of r2, PRD §6 of r3).</p>
  *
@@ -111,7 +112,15 @@ public final class PermissionMatrix {
             "CASE_REVIEW_SUBMIT",
             "CASE_REVIEW_DECIDE",
             "TEST_EXECUTOR_VIEW",
-            "TEST_EXECUTOR_MANAGE");
+            "TEST_EXECUTOR_MANAGE",
+            // ---- M9 岗位工作台 / 数据看板 / 自助报表（append-only；PRD §6.10） ----
+            // 四个码对应三条新路由：/portal → PORTAL_VIEW（PUT /portal/config → PORTAL_CONFIG）、
+            // /dashboard（前端路由，服务端 /analytics）→ PORTAL_VIEW、/reports → REPORT_VIEW
+            // （POST /reports/{id}/share 另要 REPORT_SHARE）。与 M8 同风格用大写常量。
+            "PORTAL_VIEW",
+            "PORTAL_CONFIG",
+            "REPORT_VIEW",
+            "REPORT_SHARE");
 
     /**
      * Role codes, matching PRD §6.1 and {@code sys_role.code} seeded by SeedService.
@@ -331,6 +340,23 @@ public final class PermissionMatrix {
         allow(matrix, "SUB_BUSINESS", "WIKI_VIEW", "GANTT_VIEW");
         allow(matrix, "SUB_BUSINESS_LEADER", "WIKI_VIEW", "GANTT_VIEW");
         allow(matrix, "OPS", "WIKI_VIEW", "GANTT_VIEW");
+
+        // ---- M9 岗位工作台 / 数据看板 / 自助报表（PRD §6.10） ----
+        // PORTAL_VIEW / REPORT_VIEW 对十个角色全开：这两个码管的是「能不能进自己的页面」，
+        // 不是「能看到谁的数据」——行级范围由 ScopeSql 与报表属主/共享判定收口（共享只共享
+        // 定义，数据永远按查看者 Scope 重算，AC-4）。按角色关掉读页面只会让厂商账号看不见
+        // 自己的交付，而这正是工作台要回答的问题。
+        for (String role : ROLES) {
+            allow(matrix, role, "PORTAL_VIEW", "REPORT_VIEW");
+        }
+        // PORTAL_CONFIG（管理员改四张卡的显隐）不在这里授予：PLATFORM_ADMIN 已由上面的
+        // catch-all 拿到，其余九个角色保持 DENY——卡片显隐是模板治理，不是个人偏好。
+        // REPORT_SHARE 是「把报表定义共享给别人」的写动作，只有治理/管理侧三档 + 业务方负责人
+        // （po1 = SUB_BUSINESS_LEADER，PRD AC-9 要求其共享自己的报表）+ 平台管理员。
+        allow(matrix, "PMO", "REPORT_SHARE");
+        allow(matrix, "PRODUCT", "REPORT_SHARE");
+        allow(matrix, "MGMT", "REPORT_SHARE");
+        allow(matrix, "SUB_BUSINESS_LEADER", "REPORT_SHARE");
 
         Map<String, Map<String, Access>> frozen = new LinkedHashMap<>();
         matrix.forEach((role, row) -> frozen.put(role, Map.copyOf(row)));
