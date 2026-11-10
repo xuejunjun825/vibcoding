@@ -2,8 +2,8 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { NAV_GROUPS, NAV_ICONS } from './nav'
-import type { NavItem } from '@/router/types'
+import { NAV_GROUPS, NAV_ICONS, type NavItem } from './nav'
+import { navVisible, type NavContext } from './navAccess'
 
 /**
  * 侧栏 200px（DESIGN §3.2）：
@@ -25,11 +25,14 @@ function pathOf(to: string): string {
   return to.split('?')[0] ?? to
 }
 
+/** 侧栏准入：与顶栏共用 navVisible（唯一判定，见 navAccess.ts） */
 function permitted(item: NavItem): boolean {
-  if (item.routeName && !router.hasRoute(item.routeName)) return false
-  if (!item.functionCode) return true
-  const codes = Array.isArray(item.functionCode) ? item.functionCode : [item.functionCode]
-  return auth.canAny(codes)
+  const ctx: NavContext = {
+    hasRoute: (name) => router.hasRoute(name),
+    canAny: (codes) => auth.canAny(codes),
+    vendorScoped: auth.user?.vendorId != null,
+  }
+  return navVisible(item, ctx)
 }
 
 const visibleGroups = computed(() =>

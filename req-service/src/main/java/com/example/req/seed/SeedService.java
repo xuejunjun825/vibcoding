@@ -185,12 +185,16 @@ public class SeedService {
                     row("name", r[1], "builtin", 1)));
         }
 
-        // 10 个账号：厂商隔离靠账号的 vendor_id（不是独立厂商角色）
+        // 12 个账号：厂商隔离靠账号的 vendor_id（不是独立厂商角色）
+        // biz1/suite1 是 20261110-r7 补的角色样本（业务部门 / 二级企业业务）——域授权不必单独写，
+        // 下面循环里的 link("sys_user_domain", …) 会把每个账号绑到全部 7 域，与 po1 天然同源。
         String[][] userDefs = {
                 {"admin", "平台管理员", "PLATFORM_ADMIN", null},
                 {"pm", "产品经理-张", "PRODUCT", null},
                 {"tl1", "项目域负责人-李", "PMO", null},
                 {"po1", "二级企业负责人-王", "SUB_BUSINESS_LEADER", null},
+                {"biz1", "陈业务（业务部门）", "BUSINESS", null},
+                {"suite1", "许二级（二级企业业务）", "SUB_BUSINESS_LEADER", null},
                 {"dev1", "研发-赵", "DEV", null},
                 {"dev2", "研发-钱", "DEV", null},
                 {"qa1", "测试-孙", "QA", null},

@@ -4,7 +4,7 @@ SHELL := /bin/bash
 .PHONY: help dev-up dev-down verify build lint test test-negative nacos-status clean distclean \
         platform-up platform-down platform-web platform-verify platform-test-negative \
         platform-seed platform-unit platform-perf quality-verify quality-e2e integration-verify \
-        collab-verify collab-perf
+        collab-verify collab-perf access-verify platform-demo-reset
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
@@ -81,6 +81,12 @@ collab-verify: ## M8 协作域验收 s0..s8（本地 GitLab 桩 127.0.0.1:19091�
 
 collab-perf: ## AC-20 五项 P95 性能基线（甘特 300 条 / Wiki 检索 / 页面树 / 价值流 / 列表首屏）
 	@./scripts/collab-perf.sh
+
+access-verify: ## 角色×页面准入：字典契约/隔离/5页×7角色矩阵/导航声明/菜单可见集（先 make platform-up）
+	@./scripts/access-verify.sh
+
+platform-demo-reset: ## 单事务重建演示数据（12 需求链路 + 4 条不变量自检；先 make platform-up && platform-seed）
+	@./scripts/platform-demo-reset.sh
 
 clean: ## 清理 Maven 产物与运行态 pid（请先 make dev-down；保留 .nacos 缓存）
 	@bash -c 'source ./scripts/lib.sh; \

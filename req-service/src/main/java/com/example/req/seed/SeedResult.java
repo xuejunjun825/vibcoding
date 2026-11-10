@@ -52,6 +52,8 @@ public final class SeedResult {
                 "pm:Passw0rd!",
                 "tl1:Passw0rd!",
                 "po1:Passw0rd!",
+                "biz1:Passw0rd!",
+                "suite1:Passw0rd!",
                 "dev1:Passw0rd!",
                 "dev2:Passw0rd!",
                 "qa1:Passw0rd!",

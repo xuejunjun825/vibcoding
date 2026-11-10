@@ -182,11 +182,13 @@ export function disableWorkflow(id: number | string): Promise<void> {
   return http.post<void>(`${ADMIN}/workflows/${id}/disable`)
 }
 
-export function listApiClients(params: {
-  page?: number
-  size?: number
-}): Promise<PageResponse<ApiClientRow>> {
-  return http.get<PageResponse<ApiClientRow>>(`${ADMIN}/api-clients`, params)
+export function listApiClients(
+  params: { page?: number; size?: number },
+  options?: { silentForbidden?: boolean },
+): Promise<PageResponse<ApiClientRow>> {
+  // 第二参只给「非管理页借读凭证名」用（执行器台账）：调用点声明 silentForbidden 后，
+  // 403 只降级为空表，不再由 client.ts 全局跳 /403（D-01）；管理面自己不传，行为不变。
+  return http.get<PageResponse<ApiClientRow>>(`${ADMIN}/api-clients`, params, options)
 }
 
 export function createApiClient(payload: {

@@ -2,8 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { addSign, handleApprovalTask, removeSign, transferTask, urgeTask, withdrawInstance } from '@/api/req'
-import { listUsers } from '@/api/admin'
-import type { UserRow } from '@/api/admin'
+import { listDictionaryUsers } from '@/api/dictionaries'
+import type { DictionaryUser } from '@/api/dictionaries'
 import type {
   ApprovalInstanceDetail,
   ApprovalTaskRow,
@@ -107,7 +107,7 @@ const addType = ref<'BEFORE' | 'AFTER'>('AFTER')
 const addUserIds = ref<number[]>([])
 const addComment = ref('')
 const addError = ref('')
-const userOptions = ref<UserRow[]>([])
+const userOptions = ref<DictionaryUser[]>([])
 const userLoading = ref(false)
 
 async function openAddSign(): Promise<void> {
@@ -119,8 +119,7 @@ async function openAddSign(): Promise<void> {
   if (userOptions.value.length === 0) {
     userLoading.value = true
     try {
-      const page = await listUsers({ page: 1, size: 50 })
-      userOptions.value = page.items
+      userOptions.value = await listDictionaryUsers()
     } catch {
       userOptions.value = []
     } finally {
@@ -210,8 +209,7 @@ function openTransfer(): void {
 async function loadUsers(): Promise<void> {
   userLoading.value = true
   try {
-    const page = await listUsers({ page: 1, size: 50 })
-    userOptions.value = page.items
+    userOptions.value = await listDictionaryUsers()
   } catch {
     userOptions.value = []
   } finally {

@@ -6,6 +6,17 @@ import { publicRoutes, shellRoutes } from './routes/base.routes'
 import './types'
 
 /**
+ * `meta.internalOnly` 的类型跟随守卫实现声明（TECHNICAL §4.5）：
+ * router/types.ts 由另一任务维护，这里做接口合并，避免并发写同一文件。
+ */
+declare module 'vue-router' {
+  interface RouteMeta {
+    /** 仅内部账号可进：厂商账号深链 → 403（code=INTERNAL_ONLY） */
+    internalOnly?: boolean
+  }
+}
+
+/**
  * 各域路由文件由不同的开发线维护，用 glob 汇总：
  * 新增一个域只需要新建 routes/<domain>.routes.ts 并默认导出一个数组。
  */
@@ -69,6 +80,11 @@ router.beforeEach((to) => {
 
   if (!auth.isAuthenticated) {
     return { path: '/login', query: { redirect: to.fullPath } }
+  }
+
+  // 展示层策略先于功能码：厂商账号不作用例，深链也不让进（不新增权限码）
+  if (to.meta.internalOnly && auth.user?.vendorId != null) {
+    return { path: '/403', query: { from: to.fullPath, code: 'INTERNAL_ONLY' } }
   }
 
   const codes = requiredCodes(to.meta)

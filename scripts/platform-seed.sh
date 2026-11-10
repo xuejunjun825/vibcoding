@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # platform-seed.sh — AC-19 种子幂等门禁。
 # 连跑两次 POST /internal/seed，断言：第二次 skipped、两次 counts 完全一致、
-# 7 域 / 3 厂商 / 10 账号 / 1 个测试计划（≥10 用例）/ 完整链路存在。
+# 7 域 / 3 厂商 / 12 账号 / 1 个测试计划（≥10 用例）/ 完整链路存在。
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
@@ -70,16 +70,16 @@ check_count releases ">=1" "版本（>=1）"
 check_count testPlans ">=1" "测试计划（>=1，验证会再建一个）"
 check_count testCases ">=10" "测试计划用例（>=10）"
 
-# 「10 个账号」断言的是种子那 10 个账号存在，而不是「tenant 内用户总数恰好 10」：
+# 「12 个账号」断言的是种子那 12 个账号存在，而不是「tenant 内用户总数恰好 12」：
 # 权限/账号类检查（如 T1 的 devcheck）会在同一个 t1 租户里加人，用总数会把别人的账号算成种子缺陷。
 TENANT_ID="$(db_q "SELECT id FROM sys_tenant WHERE code='t1' LIMIT 1")"
 SEEDED_USERS="$(db_q "SELECT COUNT(DISTINCT username) FROM sys_user
     WHERE tenant_id=${TENANT_ID}
-      AND username IN ('admin','pm','tl1','po1','dev1','dev2','qa1','qa2','vendor1','vendor2')")"
+      AND username IN ('admin','pm','tl1','po1','biz1','suite1','dev1','dev2','qa1','qa2','vendor1','vendor2')")"
 USERS_TOTAL="$(db_q "SELECT COUNT(*) FROM sys_user WHERE tenant_id=${TENANT_ID}")"
-[[ "$SEEDED_USERS" == "10" ]] \
-    && pass "10 个种子账号齐备（tenant 内共 ${USERS_TOTAL} 个用户）" \
-    || fail "10 个种子账号只找到 ${SEEDED_USERS} 个（tenant 内共 ${USERS_TOTAL} 个用户）" "检查 SeedService 的 userDefs 是否全部写入"
+[[ "$SEEDED_USERS" == "12" ]] \
+    && pass "12 个种子账号齐备（tenant 内共 ${USERS_TOTAL} 个用户）" \
+    || fail "12 个种子账号只找到 ${SEEDED_USERS} 个（tenant 内共 ${USERS_TOTAL} 个用户）" "检查 SeedService 的 userDefs 是否全部写入"
 
 # 完整链路：1 BUS → 2 PDR → 4 RD，且每个 RD 的父需求确实是 PDR（PRD AC-19「1 条完整链路」，
 # 不是「需求总数 >=10」——总数由 perf 的 10 万条数据集负责）。
@@ -96,7 +96,7 @@ else
         "检查 SeedService 的 requirement(...) 父子关系与 type"
 fi
 
-# 10 个账号必须都能登录（AC-19 的「10 账号可登录」），且各自只看权限内数据。
+# 12 个账号必须都能登录（AC-19 的「12 账号可登录」），且各自只看权限内数据。
 USERS="$(printf '%s' "$C1" | jq -r '.loginUsers[]? // empty' 2>/dev/null || true)"
 if [[ -n "$USERS" ]]; then
     LOGIN_FAIL=0
@@ -106,10 +106,10 @@ if [[ -n "$USERS" ]]; then
         [[ "$HTTP_CODE" == "200" ]] || { LOGIN_FAIL=$((LOGIN_FAIL + 1)); warn "登录失败: $u (HTTP $HTTP_CODE)"; }
     done <<< "$USERS"
     (( LOGIN_FAIL == 0 )) \
-        && pass "10 个账号全部可登录" \
+        && pass "12 个账号全部可登录" \
         || fail "有 ${LOGIN_FAIL} 个账号登录失败" "检查 SeedService 写入的 password_hash 与登录编码是否一致"
 else
-    fail "seed 响应缺 loginUsers 列表（无法验证 10 账号可登录）" "SeedService 在 counts.loginUsers 返回 user:password 列表"
+    fail "seed 响应缺 loginUsers 列表（无法验证 12 账号可登录）" "SeedService 在 counts.loginUsers 返回 user:password 列表"
 fi
 
 # 落一份可审计的计数载荷（非可重跑：每次 seed 的真实响应）

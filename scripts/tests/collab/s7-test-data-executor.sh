@@ -88,6 +88,9 @@ APP_KEY="$(jget "$HTTP_BODY" '.appKey')"
 APP_SECRET="$(jget "$HTTP_BODY" '.secret // .clientSecret // .secretOnce')"
 if [[ -n "$APP_KEY" && "$APP_KEY" != "null" && -n "$CASE" ]]; then
     OAPI_PATH="/openapi/v1/test-executions"
+    # 上报时间必须取当下：ONLINE 窗口是 24h（ExecutorHealth.ONLINE_HOURS），写死的时间戳
+    # 会在第二天同一时刻把「上报后转 ONLINE」翻成 STALE —— 门禁随墙钟变红，与代码无关。
+    REPORT_AT="$(date +%Y-%m-%dT%H:%M:%S+08:00)"
     sign_for() {
         local digest ts="$1" body="$2"
         digest="$(printf '%s' "$body" | openssl dgst -sha256 -hex | awk '{print $NF}')"
@@ -105,13 +108,13 @@ ${digest}" | openssl dgst -sha256 -hmac "${APP_SECRET}" -hex | awk '{print $NF}'
         OAPI_BODY="$(cat "$out" 2>/dev/null || true)"; rm -f "$out"
         printf '%s' "$code"
     }
-    BODY_OK="$(jq -cn --argjson c "$CASE" --argjson p "$PLAN" --arg r "s7run-${RUN_TAG}" --arg e "$EXEC_GOOD" \
-        '{run_id:$r,case_id:$c,result:"PASS",duration_ms:900,executed_at:"2026-11-09T10:00:00+08:00",plan_id:$p,executorCode:$e}')"
+    BODY_OK="$(jq -cn --argjson c "$CASE" --argjson p "$PLAN" --arg r "s7run-${RUN_TAG}" --arg e "$EXEC_GOOD" --arg t "$REPORT_AT" \
+        '{run_id:$r,case_id:$c,result:"PASS",duration_ms:900,executed_at:$t,plan_id:$p,executorCode:$e}')"
     BEFORE_EXEC="$(db_count test_execution "case_id=${CASE}")"
     code="$(oapi_post "$(date +%s)" "deadbeef" "$BODY_OK")"
     [[ "$code" == "401" ]] && pass "错签名 401（验签先于业务）" || fail "错签名返回 ${code}" "签名校验必须在解析 executorCode 之前"
-    BODY_OFF="$(jq -cn --argjson c "$CASE" --argjson p "$PLAN" --arg r "s7off-${RUN_TAG}" --arg e "LEGACY-OFF" \
-        '{run_id:$r,case_id:$c,result:"PASS",duration_ms:900,executed_at:"2026-11-09T10:00:00+08:00",plan_id:$p,executorCode:$e}')"
+    BODY_OFF="$(jq -cn --argjson c "$CASE" --argjson p "$PLAN" --arg r "s7off-${RUN_TAG}" --arg e "LEGACY-OFF" --arg t "$REPORT_AT" \
+        '{run_id:$r,case_id:$c,result:"PASS",duration_ms:900,executed_at:$t,plan_id:$p,executorCode:$e}')"
     TS="$(date +%s)"
     code="$(oapi_post "$TS" "$(sign_for "$TS" "$BODY_OFF")" "$BODY_OFF")"
     [[ "$code" == "422" ]] && pass "停用执行器上报 → 422" || fail "停用执行器上报返回 ${code}，期望 422" "EXECUTOR_DISABLED 必须在落 test_execution 前拒绝"

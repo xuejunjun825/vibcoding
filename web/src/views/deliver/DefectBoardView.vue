@@ -4,9 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { defectBoard } from '@/api/deliver'
 import { listReleases } from '@/api/req'
-import { listDomains, listVendors } from '@/api/admin'
+import { listDictionaryDomains, listDictionaryVendors } from '@/api/dictionaries'
 import type { BoardMetrics, MetricDefinition, ReleaseRow } from '@/api/types'
-import type { DomainRow, VendorRow } from '@/api/admin'
+import type { DictionaryDomain, DictionaryVendor } from '@/api/dictionaries'
 import { usePermission } from '@/composables/usePermission'
 import { formatDateTime } from '@/utils/format'
 import EmptyState from '@/components/EmptyState.vue'
@@ -37,8 +37,8 @@ const filters = reactive({
 })
 
 const releases = ref<ReleaseRow[]>([])
-const domains = ref<DomainRow[]>([])
-const vendors = ref<VendorRow[]>([])
+const domains = ref<DictionaryDomain[]>([])
+const vendors = ref<DictionaryVendor[]>([])
 const canFilterDomain = computed(() => perm.can('org:manage'))
 
 const dateRange = computed<[string, string] | null>({
@@ -117,8 +117,8 @@ async function loadOptions(): Promise<void> {
   try {
     const [releasePage, domainList, vendorList] = await Promise.all([
       listReleases({ page: 1, size: 100 }),
-      canFilterDomain.value ? listDomains() : Promise.resolve([]),
-      canFilterDomain.value ? listVendors() : Promise.resolve([]),
+      canFilterDomain.value ? listDictionaryDomains() : Promise.resolve([]),
+      canFilterDomain.value ? listDictionaryVendors() : Promise.resolve([]),
     ])
     releases.value = releasePage.items ?? []
     domains.value = domainList

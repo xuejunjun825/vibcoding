@@ -65,7 +65,10 @@ async function loadReportTotals(): Promise<void> {
 
 async function loadClients(): Promise<void> {
   try {
-    const page = await listApiClients({ page: 1, size: 200 })
+    // 凭证名只是台账的一列辅助信息：/admin/api-clients 需要 org:manage，qa1（仅
+    // TEST_EXECUTOR_VIEW）必然 403。silentForbidden 让 403 只降级为「AppKey #id」，
+    // 不再由 client.ts 全局跳 /403 把整页踢走（D-01）；凭证下拉本身只对 canManage 可见。
+    const page = await listApiClients({ page: 1, size: 200 }, { silentForbidden: true })
     clients.value = page.items ?? []
   } catch {
     clients.value = []

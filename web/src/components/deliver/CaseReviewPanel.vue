@@ -10,8 +10,8 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ApiError } from '@/api/client'
-import { listUsers } from '@/api/admin'
-import type { UserRow } from '@/api/admin'
+import { listDictionaryUsers } from '@/api/dictionaries'
+import type { DictionaryUser } from '@/api/dictionaries'
 import {
   CASE_REVIEW_CONCLUSION_LABEL,
   CASE_REVIEW_STATUS_LABEL,
@@ -52,7 +52,7 @@ const error = ref<{ message: string; code?: string; status?: number } | null>(nu
 const notice = ref('')
 const busy = ref(false)
 
-const reviewers = ref<UserRow[]>([])
+const reviewers = ref<DictionaryUser[]>([])
 const reviewerId = ref<number | null>(null)
 
 const conclusion = ref<CaseReviewConclusion>('PASS')
@@ -141,8 +141,7 @@ async function load(): Promise<void> {
 
 async function loadReviewers(): Promise<void> {
   try {
-    const page = await listUsers({ page: 1, size: 200 })
-    reviewers.value = page.items ?? []
+    reviewers.value = await listDictionaryUsers()
   } catch {
     reviewers.value = []
   }

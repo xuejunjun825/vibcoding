@@ -67,6 +67,27 @@ class PermissionRouteTableTest {
         assertNull(PermissionRouteTable.requirementFor("GET", "/auth/me"));
     }
 
+    /**
+     * r7: the option dictionaries are authenticated-only <b>on purpose</b>. They are what the
+     * non-admin pages (requirement pool, release plan, approval centre, test plans, code policy)
+     * read for their pickers; guarding them with a function code is exactly the 403 that broke
+     * those pages, because a pm/dev has no {@code org:manage}. Pinned here so a future rule cannot
+     * silently undo the fix — while {@code /admin/*} keeps its code, because the dictionaries do
+     * not replace the management surface.
+     */
+    @Test
+    void dictionaryOptionsStayAuthenticatedOnly() {
+        assertNull(PermissionRouteTable.requirementFor("GET", "/dictionaries/domains"),
+                "a rule on /dictionaries/domains is the r7 regression: pickers would 403 again");
+        assertNull(PermissionRouteTable.requirementFor("GET", "/dictionaries/vendors"),
+                "vendor options are read by deliver/quality pages without org:manage");
+        assertNull(PermissionRouteTable.requirementFor("GET", "/dictionaries/users"),
+                "assignee options are read by every page with a person picker");
+        assertEquals(List.of("org:manage"),
+                PermissionRouteTable.requirementFor("GET", "/admin/domains").codes(),
+                "the admin surface keeps its code; the dictionaries do not widen it");
+    }
+
     @Test
     void permissionMatrixIsAdminOnly() {
         // The matrix is a read-only projection, but it exposes the whole role × function model, so

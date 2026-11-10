@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { envApi } from '@/api/quality'
-import { listUsers, type UserRow } from '@/api/admin'
+import { listDictionaryUsers, type DictionaryUser } from '@/api/dictionaries'
 import { usePermission } from '@/composables/usePermission'
 import type { EnvPayload, EnvRow } from '@/api/types'
 import StatusPill from '@/components/StatusPill.vue'
@@ -51,7 +51,7 @@ const typeFilter = ref('')
 const keyword = ref('')
 const loading = ref(false)
 const error = ref<{ message: string; code?: string; status?: number } | null>(null)
-const users = ref<UserRow[]>([])
+const users = ref<DictionaryUser[]>([])
 const inUse = ref<{ planIds: number[]; envName: string } | null>(null)
 const fieldError = ref('')
 
@@ -235,7 +235,7 @@ function applyFilter(): void {
 onMounted(async () => {
   await load()
   try {
-    users.value = (await listUsers({ page: 1, size: 200 })).items ?? []
+    users.value = await listDictionaryUsers()
   } catch {
     users.value = []
   }

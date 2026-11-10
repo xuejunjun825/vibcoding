@@ -3,8 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createRequirement } from '@/api/req'
-import { listDomains } from '@/api/admin'
-import type { DomainRow } from '@/api/admin'
+import { listDictionaryDomains } from '@/api/dictionaries'
+import type { DictionaryDomain } from '@/api/dictionaries'
 import type { CreateRequirementPayload, Priority, RequirementRow } from '@/api/types'
 import StatusPill from '@/components/StatusPill.vue'
 import { usePermission } from '@/composables/usePermission'
@@ -25,7 +25,7 @@ const priority = ref<Priority>('P2')
 const expectedDeliveryDate = ref('')
 const saving = ref(false)
 const formError = ref('')
-const domains = ref<DomainRow[]>([])
+const domains = ref<DictionaryDomain[]>([])
 
 const parentId = computed(() => {
   const raw = route.query.parentId
@@ -35,11 +35,17 @@ const parentId = computed(() => {
 const requiredPermission = computed(() => (type.value === 'BUS' ? 'req:report:bus' : 'req:report:dev'))
 const hasPermission = computed(() => can(requiredPermission.value))
 const canSubmit = computed(
-  () => title.value.trim().length >= 4 && domainIds.value.length > 0 && hasPermission.value && !saving.value,
+  () =>
+    title.value.trim().length >= 4 &&
+    domainIds.value.length > 0 &&
+    domains.value.length > 0 &&
+    hasPermission.value &&
+    !saving.value,
 )
 
 const submitHint = computed(() => {
   if (!hasPermission.value) return `需要权限：${requiredPermission.value}`
+  if (domains.value.length === 0) return '当前账号没有可提报的业务域，请联系域负责人授权后再提报'
   if (title.value.trim().length < 4) return '标题至少 4 个字'
   if (domainIds.value.length === 0) return '至少选择一个业务域'
   return ''
@@ -47,7 +53,7 @@ const submitHint = computed(() => {
 
 onMounted(async () => {
   try {
-    domains.value = await listDomains()
+    domains.value = await listDictionaryDomains()
   } catch {
     domains.value = []
   }
@@ -139,12 +145,15 @@ async function submit(): Promise<void> {
             filterable
             collapse-tags
             collapse-tags-tooltip
-            placeholder="选择所属业务域（供应链平台已划分 7 个域）"
+            :disabled="domains.length === 0"
+            :placeholder="domains.length === 0 ? '当前账号没有可提报的业务域' : '选择所属业务域（供应链平台已划分 7 个域）'"
             style="width: 100%"
           >
             <el-option v-for="domain in domains" :key="domain.id" :label="`${domain.code} · ${domain.name}`" :value="domain.id" />
           </el-select>
-          <p v-if="domains.length === 0" class="create__hint">域列表暂不可用（管理端接口未就绪），仍可提交后再分配。</p>
+          <p v-if="domains.length === 0" class="create__hint">
+            域字典为空：当前账号未获任何业务域授权（字典按租户/厂商裁剪），提报已禁用，请联系域负责人授权。
+          </p>
         </el-form-item>
 
         <div class="create__row">

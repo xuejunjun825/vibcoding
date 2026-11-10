@@ -42,7 +42,12 @@ const qualityRoutes: RouteRecordRaw[] = [
     path: '/test-reports',
     name: 'test-reports',
     component: lazyView('quality/TestReportsView.vue'),
-    meta: { title: '测试报告', navKey: 'test-reports' },
+    meta: {
+      title: '测试报告',
+      navKey: 'test-reports',
+      // 测试报告不在权限矩阵的读码里：读者面用「生成 / 签发」两码表达（po1/dev1 天然隐藏）
+      functionCode: ['report:generate', 'report:sign'],
+    },
   },
   {
     path: '/test-reports/:id(\\d+)',

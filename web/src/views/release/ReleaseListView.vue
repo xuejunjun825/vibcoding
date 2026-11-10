@@ -3,8 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createRelease, listReleases } from '@/api/req'
-import { listDomains } from '@/api/admin'
-import type { DomainRow } from '@/api/admin'
+import { listDictionaryDomains } from '@/api/dictionaries'
+import type { DictionaryDomain } from '@/api/dictionaries'
 import type { ReleaseRow } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -32,10 +32,10 @@ const list = useListQuery<ReleaseRow>(
   { domainId: '', status: '' },
 )
 
-const domains = ref<DomainRow[]>([])
+const domains = ref<DictionaryDomain[]>([])
 onMounted(async () => {
   try {
-    domains.value = await listDomains()
+    domains.value = await listDictionaryDomains()
   } catch {
     domains.value = []
   }

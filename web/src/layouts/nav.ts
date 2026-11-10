@@ -1,4 +1,23 @@
-import type { NavGroup } from '@/router/types'
+import { AUTHENTICATED, type NavGuard } from './navAccess'
+
+/**
+ * 导航项：`functionCode` **必填**（TECHNICAL §4.4）——漏写即 vue-tsc 报错，
+ * 而不是留到演示现场「菜单看得见、点开 403」。登录可读页写 `AUTHENTICATED`。
+ */
+export interface NavItem extends NavGuard {
+  label: string
+  to: string
+  icon: string
+  /** 角标来源：待办数 / 未读数 */
+  badge?: 'todo' | 'unread'
+}
+
+export interface NavGroup {
+  title: string
+  items: NavItem[]
+  /** 仅管理员可见（组内所有条目都无权限时整组隐藏） */
+  admin?: boolean
+}
 
 /**
  * 导航是唯一来源：侧栏分组 + 顶栏 8 项都从这里取。
@@ -29,6 +48,7 @@ export const NAV_GROUPS: NavGroup[] = [
         to: '/approvals?tab=todo',
         icon: 'inbox',
         routeName: 'approvals',
+        functionCode: AUTHENTICATED,
         badge: 'todo',
       },
       {
@@ -36,6 +56,7 @@ export const NAV_GROUPS: NavGroup[] = [
         to: '/requirements?ownerId=me',
         icon: 'list',
         routeName: 'requirements',
+        functionCode: AUTHENTICATED,
       },
       {
         label: '工作台',
@@ -49,6 +70,7 @@ export const NAV_GROUPS: NavGroup[] = [
         to: '/notifications',
         icon: 'bell',
         routeName: 'notifications',
+        functionCode: AUTHENTICATED,
         badge: 'unread',
       },
     ],
@@ -56,7 +78,13 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: '需求域',
     items: [
-      { label: '需求池', to: '/requirements', icon: 'inbox', routeName: 'requirements' },
+      {
+        label: '需求池',
+        to: '/requirements',
+        icon: 'inbox',
+        routeName: 'requirements',
+        functionCode: AUTHENTICATED,
+      },
       {
         label: '提报需求',
         to: '/requirements/new',
@@ -64,16 +92,48 @@ export const NAV_GROUPS: NavGroup[] = [
         routeName: 'requirement-create',
         functionCode: ['req:report:bus', 'req:report:dev'],
       },
-      { label: '版本计划', to: '/releases', icon: 'calendar', routeName: 'releases' },
-      { label: '迭代', to: '/iterations', icon: 'layout', routeName: 'iterations' },
+      {
+        label: '版本计划',
+        to: '/releases',
+        icon: 'calendar',
+        routeName: 'releases',
+        functionCode: 'release:plan',
+      },
+      {
+        label: '迭代',
+        to: '/iterations',
+        icon: 'layout',
+        routeName: 'iterations',
+        functionCode: 'task:manage',
+      },
     ],
   },
   {
     title: '交付域',
     items: [
-      { label: '缺陷', to: '/defects', icon: 'bug', routeName: 'defects' },
-      { label: '用例库', to: '/testcases', icon: 'library', routeName: 'testcases' },
-      { label: '测试计划', to: '/test-plans', icon: 'clipboard', routeName: 'test-plans' },
+      {
+        label: '缺陷',
+        to: '/defects',
+        icon: 'bug',
+        routeName: 'defects',
+        functionCode: AUTHENTICATED,
+      },
+      {
+        // 厂商不作用例：内部账号才渲染；厂商深链由路由守卫 403（meta.internalOnly）
+        label: '用例库',
+        to: '/testcases',
+        icon: 'library',
+        routeName: 'testcases',
+        functionCode: 'case:manage',
+        internalOnly: true,
+      },
+      {
+        label: '测试计划',
+        to: '/test-plans',
+        icon: 'clipboard',
+        routeName: 'test-plans',
+        functionCode: 'plan:manage',
+      },
       {
         label: '测试策略',
         to: '/test-strategies',
@@ -81,7 +141,14 @@ export const NAV_GROUPS: NavGroup[] = [
         routeName: 'test-strategies',
         functionCode: 'strategy:manage',
       },
-      { label: '测试报告', to: '/test-reports', icon: 'document', routeName: 'test-reports' },
+      {
+        label: '测试报告',
+        to: '/test-reports',
+        icon: 'document',
+        routeName: 'test-reports',
+        // 测试报告不在权限矩阵的读码里：读者面用「生成 / 签发」两码表达
+        functionCode: ['report:generate', 'report:sign'],
+      },
       {
         label: '环境台账',
         to: '/test-envs',
@@ -245,7 +312,7 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ]
 
-export interface TopNavItem {
+export interface TopNavItem extends NavGuard {
   key: string
   label: string
   to: string
@@ -253,22 +320,76 @@ export interface TopNavItem {
   match: string[]
 }
 
-/** 顶部 8 项（DESIGN §3.2：不再增加，工作台属 M6） */
+/**
+ * 顶部 8 项（DESIGN §3.2：不再增加，工作台属 M6）。
+ * 每项绑定**落地路由**的码，宁窄不宽，避免「点了才 403」；原 admin 内联六码特判
+ * （含 workflow:manage 却落 /admin/orgs）已删除，改由 navVisible 统一判定。
+ */
 export const TOP_NAV: TopNavItem[] = [
-  { key: 'requirements', label: '需求', to: '/requirements', routeName: 'requirements', match: ['/requirements'] },
-  { key: 'releases', label: '版本', to: '/releases', routeName: 'releases', match: ['/releases'] },
-  { key: 'approvals', label: '审批', to: '/approvals', routeName: 'approvals', match: ['/approvals'] },
-  { key: 'deploy', label: '发布', to: '/deploy-orders', routeName: 'deploy-orders', match: ['/deploy-orders'] },
-  { key: 'defects', label: '缺陷', to: '/defects', routeName: 'defects', match: ['/defects'] },
+  {
+    key: 'requirements',
+    label: '需求',
+    to: '/requirements',
+    routeName: 'requirements',
+    functionCode: AUTHENTICATED,
+    match: ['/requirements'],
+  },
+  {
+    key: 'releases',
+    label: '版本',
+    to: '/releases',
+    routeName: 'releases',
+    functionCode: 'release:plan',
+    match: ['/releases'],
+  },
+  {
+    key: 'approvals',
+    label: '审批',
+    to: '/approvals',
+    routeName: 'approvals',
+    functionCode: AUTHENTICATED,
+    match: ['/approvals'],
+  },
+  {
+    key: 'deploy',
+    label: '发布',
+    to: '/deploy-orders',
+    routeName: 'deploy-orders',
+    functionCode: ['deploy:create', 'deploy:execute', 'deploy:force'],
+    match: ['/deploy-orders'],
+  },
+  {
+    key: 'defects',
+    label: '缺陷',
+    to: '/defects',
+    routeName: 'defects',
+    functionCode: AUTHENTICATED,
+    match: ['/defects'],
+  },
   {
     key: 'testing',
     label: '测试',
     to: '/test-plans',
     routeName: 'test-plans',
+    functionCode: 'plan:manage',
     match: ['/test-plans', '/testcases', '/test-strategies', '/test-reports', '/test-envs'],
   },
-  { key: 'trace', label: '追溯', to: '/traceability', routeName: 'traceability', match: ['/traceability'] },
-  { key: 'admin', label: '设置', to: '/admin/orgs', routeName: 'admin-orgs', match: ['/admin'] },
+  {
+    key: 'trace',
+    label: '追溯',
+    to: '/traceability',
+    routeName: 'traceability',
+    functionCode: 'trace:view',
+    match: ['/traceability'],
+  },
+  {
+    key: 'admin',
+    label: '设置',
+    to: '/admin/orgs',
+    routeName: 'admin-orgs',
+    functionCode: ['tenant:manage', 'org:manage'],
+    match: ['/admin'],
+  },
 ]
 
 /** 16×16 线性图标（1.3px 描边，与 Element Plus 图标观感一致） */
