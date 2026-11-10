@@ -31,6 +31,7 @@ import { formatDateTime } from '@/utils/format'
 import '@/views/deliver/shared.css'
 
 type StatusFilter = '' | 'MATCH' | 'DRIFT' | 'UNVERIFIED' | 'DISABLED'
+type GitlabCapability = 'ENABLED' | 'DISABLED' | 'UNREADABLE'
 
 const MERGE_LABEL: Record<string, string> = {
   MERGE: '合并提交',
@@ -45,9 +46,13 @@ const PAGE_SIZE = 20
 const router = useRouter()
 const { can } = usePermission()
 const canEdit = computed(() => can('CCODE_POLICY_EDIT'))
+const canManageIntegration = computed(() => can('integration:manage'))
 
 const rows = ref<PolicyRow[]>([])
 const domains = ref<DictionaryDomain[]>([])
+/** 页面级能力事实（只影响提示条与核验入口，不进行内 pill）；null = 探测中 */
+const gitlabCapability = ref<GitlabCapability | null>(null)
+/** 仅存「已启用」的那条：null 即不可核验 */
 const gitlabConfig = ref<IntegrationConfigView | null>(null)
 const loading = ref(false)
 const error = ref<{ message: string; code?: string; status?: number } | null>(null)
@@ -59,12 +64,37 @@ const checkingId = ref<number | null>(null)
 
 async function loadGitlabConfig(): Promise<void> {
   try {
-    const configs = await listConfigs('GITLAB')
-    gitlabConfig.value = configs.find((item) => item.enabled) ?? configs[0] ?? null
+    // 可选能力探测：没有 integration:manage 的账号这里必然 403，
+    // 降级为页面内 UNREADABLE，绝不能升级为整页 /403（本页的第一条不变量）
+    const configs = await listConfigs('GITLAB', { silentForbidden: true })
+    const enabled = configs.find((item) => item.enabled) ?? null
+    gitlabConfig.value = enabled
+    gitlabCapability.value = enabled ? 'ENABLED' : 'DISABLED'
   } catch {
-    // 读不到配置不阻断列表；点核验时再按 409 原因给出说明
+    // 403（无 integration:manage）与网络失败同态：都只能说明「读不到」，不能断言「未启用」
     gitlabConfig.value = null
+    gitlabCapability.value = 'UNREADABLE'
   }
+}
+
+/** 页面级事实：只派生常驻提示条，不写 rowNotice、不进 row.latestCheck.reason */
+const capabilityNotice = computed<{ text: string; withLink: boolean } | null>(() => {
+  if (gitlabCapability.value === 'DISABLED') {
+    return { text: 'GitLab 集成未启用，核验结果将保持「未核验」。', withLink: canManageIntegration.value }
+  }
+  if (gitlabCapability.value === 'UNREADABLE') {
+    return {
+      text: '当前账号无法读取 GitLab 集成配置（需 integration:manage），核验结果将保持「未核验」；如需核验请联系集成管理员。',
+      withLink: false,
+    }
+  }
+  return null
+})
+
+/** 手动刷新：重探能力 + 重载列表（管理员在别处启用集成后回本页即可消黄条） */
+function refreshAll(): void {
+  void loadGitlabConfig()
+  void load()
 }
 
 async function load(silent = false): Promise<void> {
@@ -174,13 +204,22 @@ const rowNotice = ref<{ kind: 'warning' | 'danger'; text: string } | null>(null)
 
 const integrationDialog = reactive({ visible: false, reason: '' as string })
 
+const CHECK_BLOCKED_TEXT: Record<GitlabCapability, string> = {
+  ENABLED: '',
+  DISABLED: 'GitLab 集成未启用，核验不会发起请求；请先在「集成配置」启用 GITLAB。',
+  UNREADABLE: '当前账号无法读取 GitLab 集成配置，核验不会发起请求；如需核验请联系集成管理员。',
+}
+
 async function onCheck(row: PolicyRow): Promise<void> {
   if (!canEdit.value || checkingId.value !== null) return
   rowNotice.value = null
-  if (!gitlabConfig.value) await loadGitlabConfig()
-  if (!gitlabConfig.value?.enabled) {
-    integrationDialog.reason = 'INTEGRATION_DISABLED'
-    integrationDialog.visible = true
+  if (gitlabCapability.value === null) await loadGitlabConfig()
+  // 三态闸门必须早于 checkPolicy()：DISABLED / UNREADABLE 下点核验一律不发 POST
+  if (gitlabCapability.value !== 'ENABLED') {
+    rowNotice.value = {
+      kind: 'warning',
+      text: CHECK_BLOCKED_TEXT[gitlabCapability.value ?? 'UNREADABLE'],
+    }
     return
   }
   checkingId.value = row.id
@@ -440,15 +479,39 @@ function goIntegration(): void {
         </span>
       </div>
       <div class="dl-head__actions">
-        <el-button size="small" :disabled="loading" @click="load()">刷新</el-button>
+        <el-button size="small" :disabled="loading" @click="refreshAll()">刷新</el-button>
         <el-button v-if="canEdit" size="small" type="primary" @click="openCreate">新增规则</el-button>
       </div>
     </header>
 
     <p class="dl-hint policy-hint">
       平台只登记规则；push / merge / 建分支的拦截由 GitLab 执行。
-      <button type="button" class="policy-link" @click="router.push({ name: 'admin-integrations' })">集成配置</button>
+      <button
+        v-if="canManageIntegration"
+        type="button"
+        class="policy-link"
+        @click="router.push({ name: 'admin-integrations' })"
+      >
+        集成配置
+      </button>
     </p>
+
+    <div
+      v-if="capabilityNotice"
+      class="policy-notice policy-notice--warning policy-capability"
+      role="status"
+      data-testid="policy-capability-notice"
+    >
+      <span>{{ capabilityNotice.text }}</span>
+      <button
+        v-if="capabilityNotice.withLink"
+        type="button"
+        class="policy-link policy-notice__action"
+        @click="goIntegration"
+      >
+        去集成配置
+      </button>
+    </div>
 
     <div class="dl-filters">
       <el-select v-model="filters.domainId" placeholder="全部业务域" clearable size="small" @change="resetPage">
@@ -830,6 +893,14 @@ function goIntegration(): void {
   background: var(--color-warning-bg, #fff7e6);
   border: 1px solid #f2d59b;
   color: var(--warning-ink, #9a5b00);
+}
+
+.policy-capability {
+  margin: 0 0 12px;
+}
+
+.policy-notice__action {
+  margin-left: auto;
 }
 
 .policy-notice--danger {

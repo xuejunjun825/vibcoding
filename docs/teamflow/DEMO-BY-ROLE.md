@@ -79,6 +79,8 @@ make platform-down          # 演示结束
 
 > 判据是**两段同源**：菜单看 `navVisible()`，路由看 `meta.functionCode`，`nav` 的码是 `meta` 的码的子集，故"看得见"与"点得开"不会再分叉（§6 P0-2）。
 
+> 口径补充（r8）：`/code-policies` 一行的 ✅ 只表示**路由准入**通过；页内「核验」能否发起还取决于可选能力 `integration:manage` 的探测结果。`dev1` 属"准入通过、能力不可读"：页面停留、表格照常渲染、常驻黄条说明原因（§4.5、§7.2）。**不要把 dev1 的 200 当成"页面全可用"。**
+
 ---
 
 ## 4. 各角色演示脚本
@@ -119,6 +121,8 @@ make platform-down          # 演示结束
 ### 4.5 研发 `dev1` / `dev2`（权限 24）
 - 可演示：需求池、版本计划、审批中心、缺陷（处理/转测试）、用例库、甘特（可编辑改期）、Wiki（可编辑）、追溯矩阵、质量门、分支策略。
 - 不可演示（矩阵拒绝）：测试计划、价值流、管理后台。
+- **`/code-policies` 实测（r8 修复后 · 2026-11-10）**：`dev1` 打开后 **URL 仍为 `/code-policies`**（不跳 `/403`），策略表格渲染 2 行（`demo-group/demo-project`、`demo/supply-chain-platform`），页面顶部常驻黄条：**「当前账号无法读取 GitLab 集成配置（需 `integration:manage`），核验结果将保持「未核验」；如需核验请联系集成管理员。」**
+- **口径（下一轮别再误读）**：**准入通过（路由码 `CCODE_POLICY_VIEW`）与能力可读（`integration:manage`）是两件事**。`dev1` 只有 VIEW、没有 EDIT 也没有 `integration:manage`，所以「核验」按钮置灰、页面**不会**发核验请求，列表里的「未核验」是**权限原因**、不是"没配置"——页内黄条与行内 pill 都不得说成「未配置/未启用」。dev1 打开该页 200 只证明准入通过，页面可用与否以本条 + 截图为准。
 - `vendor2` 用于演示厂商 0 承接：用它的 token 调 `/requirements` 返回 `total=0`。
 
 ### 4.6 测试 `qa1` / `qa2`（权限 33，权限最完整的业务角色）
@@ -227,6 +231,12 @@ node scripts/tests/access/a4-nav-visibility.mjs       # 只跑角色可见集推
 | ![qa1 用例库](demo-shots/qa1-testcases.png)<br>qa1：用例库（版本化、评审状态） | ![qa1 质量门](demo-shots/qa1-quality-gates.png)<br>qa1：质量门（报告/规则/豁免） |
 | ![dev1 缺陷](demo-shots/dev1-defects.png)<br>dev1：缺陷列表 | ![pm 缺陷看板](demo-shots/pm-defect-board.png)<br>pm：缺陷看板 |
 | ![vendor1 甘特](demo-shots/vendor1-gantt.png)<br>vendor1：甘特（只见本厂商承接） | ![po1 追溯](demo-shots/po1-traceability.png)<br>po1：追溯矩阵（二级企业视角） |
+
+**r8 新增：dev1 打开分支策略（修复后）**
+
+![dev1 分支策略（修复后）](demo-shots/dev1-code-policies-fixed.png)
+
+`dev1`（DEV，24 权限码）打开 `/code-policies` 的实测：URL 停在 `/code-policies`、筛选器与表格正常渲染 2 行、顶部常驻黄条写明「当前账号无法读取 GitLab 集成配置（需 integration:manage）」，行内 pill 为「未核验」。这张图是**页面级**证据：状态码 200 证明不了表格真的挂载、也证明不了黄条说的是权限原因。取证脚本 `logs/teamflow/tf-mwa402ox-br1nqs/scripts/shot-dev1-code-policies.mjs`（12 条断言：停留 / 无整页错误 / 表格 ≥1 行 / 黄条三关键词 / 禁词 / 1440×900）。
 
 ### 7.3 修复前证据（历史对照）
 

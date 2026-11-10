@@ -25,6 +25,7 @@
 - 仓洁新增：`node_modules/`、`dist/`、`.vite/`、`.pnpm-store/`、`coverage/`、`*.tsbuildinfo`、`.env.*`（`.env.example` 入库）必须忽略。
 - 协作/代码/测试治理（M8，20261109-r6）：五个单点必须复用——`WikiVisibility`（列表/树/详情/搜索/回收站/附件六出口唯一谓词）、`GanttWarnings`（告警唯一计算，前端只渲染 code）、`FlowMetricFormulas`（均值/P90/效率/瓶颈且字典预览委托）、`ExecutorHealth`（24/72h 阈值常量）、`ActualPeriodRecorder`（实际期唯一写入，与 V9 回填同口径）；新增能力禁止第二套告警/公式/阈值/实际期/diff，权限码进 `PermissionMatrix`（当前 56 格）与 `PermissionRouteTable`。新门禁 `make collab-verify`（s0–s8）与 `make collab-perf` 纳入回归。
 - 演示与准入（r7）：页面显示字典统一走只读 `GET /api/req/dictionaries/{domains,vendors,users}`（登录可读、按 §7 裁剪、无管理字段），管理页仍用 `/admin/*`；导航每条必须显式 `functionCode`（登录即可读的页面用哨兵 `AUTHENTICATED`），无权限不渲染；`make platform-demo-reset` 是显式幂等的演示数据重建，不进自动门禁。
+- 可选能力探测（r8）：页面内「读不到也不阻断」的调用（集成配置、执行器台账、审批角标、字典）必须在同一次 http 调用上声明 `silentForbidden`，403 只降级为页面内可读状态（并说明真实原因），绝不触发全局 `/403` 导航；无权限深链的默认跳转语义不变，`make access-verify` 的 a5 段用「运行时角色矩阵 + 调用点静态审计 + 审计器自检」钉住这一点。
 - 已知待办（M8 P3，不阻断）：D-04 s8 无第二租户时 INFO 跳过、D-05 `audit_log` 的 `idx_audit_req` 与 `idx_audit_biz` 重复、N-06 collab 子集模式仍按 60 断言守卫、N-07/N-08/N-09 检查器多租户/夹具/前置清理；真实 GitLab/Sonar 联调与浏览器视觉走查待客户环境。
 
 ## 已解决（20261108-r1 修复轮实测复核，勿按旧结论排障）

@@ -88,8 +88,17 @@ export interface IntegrationConfigCmd {
   confirmName?: string
 }
 
-export function listConfigs(system?: IntegrationSystem | string): Promise<IntegrationConfigView[]> {
-  return http.get<IntegrationConfigView[]>(`${REQ}/integration/configs`, system ? { system } : undefined)
+export function listConfigs(
+  system?: IntegrationSystem | string,
+  options?: { silentForbidden?: boolean },
+): Promise<IntegrationConfigView[]> {
+  // 第二参只给「非管理页的可选能力探测」用：调用点声明 silentForbidden 后，403 只降级为
+  // 页面内状态，不再由 client.ts 全局跳 /403；管理面自己不传，行为不变（同 listApiClients 的约定）。
+  return http.get<IntegrationConfigView[]>(
+    `${REQ}/integration/configs`,
+    system ? { system } : undefined,
+    options,
+  )
 }
 
 export function createConfig(body: IntegrationConfigCmd): Promise<IntegrationConfigView> {

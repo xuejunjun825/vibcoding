@@ -25,6 +25,13 @@ table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
 th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
 td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
 tr:hover td{background:#F7F9FC}
+img{max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;display:block;background:#fff}
+/* 截图对照表：两列等宽，图满格，说明文字贴在各自图下方，避免 auto 布局把两列拉成一宽一窄 */
+table.shot-pair{table-layout:fixed;width:100%}
+table.shot-pair td{width:50%;vertical-align:top}
+table.shot-pair td img{width:100%}
+.shot-pair a{display:block;line-height:0;cursor:zoom-in}
+.shot-pair a:hover img{border-color:var(--primary)}
 code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;
   font-family:"SF Mono",Menlo,Consolas,monospace}
 pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
@@ -61,6 +68,7 @@ td:first-child,th:first-child{white-space:nowrap}
 <p>生成时间：2026-11-10（r7 角色准入修复轮） · 代码基线 <code>main = ea877fa</code> + 本轮改动 · 环境 <code>make platform-up</code>（req 8082 / deliver 8083 / gateway 8080 / web 5173 / MySQL <code>devops_platform</code>）<br>
 本文的权限码与准入格取自 <code>PermissionMatrix.java</code> 与本轮路由 <code>meta.functionCode</code>，可用 <code>make access-verify</code> 在本机复核（见 §6.3）。<strong>先说结论：功能面是齐的，r7 修掉的两条 P0（字典 403、菜单与路由不同源）已交付并有自动化证据</strong>，见 §6。</p>
 </blockquote>
+<p class="meta-note">本页是 <a href="DEMO-BY-ROLE.md"><code>DEMO-BY-ROLE.md</code></a> 的可读 HTML 版：仓库里没有生成器，靠手工同步，<strong>两份不一致时以 md 为准</strong>，改演示手册时请同时改这两份文件。本次同步：<strong>r8</strong>（2026-11-10，分支策略页可选能力探测收口）—— 已并入 md 的 §3 口径补充、§4.5 两条实测与 §7.2 新增截图，另在 §7.3 补挂 r7 的 5 张修复后截图。</p>
 <hr>
 <h2 id="sec1">1. 演示环境与账号</h2>
 <pre><code>make platform-up            # 拉起 MySQL + req + deliver + web，末尾打印 READY
@@ -140,6 +148,9 @@ make platform-down          # 演示结束</code></pre>
 <blockquote>
 <p>判据是<strong>两段同源</strong>：菜单看 <code>navVisible()</code>，路由看 <code>meta.functionCode</code>，<code>nav</code> 的码是 <code>meta</code> 的码的子集，故“看得见”与“点得开”不会再分叉（§6 P0-2）。</p>
 </blockquote>
+<blockquote>
+<p><strong>口径补充（r8）</strong>：<code>/code-policies</code> 一行的 ✅ 只表示<strong>路由准入</strong>通过；页内「核验」能否发起还取决于可选能力 <code>integration:manage</code> 的探测结果。<code>dev1</code> 属“准入通过、能力不可读”：页面停留、表格照常渲染、常驻黄条说明原因（§4.5、§7.2）。<strong>不要把 dev1 的 200 当成“页面全可用”。</strong></p>
+</blockquote>
 <hr>
 <h2 id="sec4">4. 各角色演示脚本</h2>
 <h3 id="s41">4.1 平台管理员 <code>admin</code>（可走通全流程的角色）</h3>
@@ -183,6 +194,8 @@ curl -s -H &quot;Authorization: Bearer $TOKEN&quot; -H 'X-Tenant-Id: 1' \
 <ul>
 <li>可演示：需求池、版本计划、审批中心、缺陷（处理/转测试）、用例库、甘特（可编辑改期）、Wiki（可编辑）、追溯矩阵、质量门、分支策略。</li>
 <li>不可演示（矩阵拒绝）：测试计划、价值流、管理后台。</li>
+<li><strong><code>/code-policies</code> 实测（r8 修复后 · 2026-11-10）</strong>：<code>dev1</code> 打开后 <strong>URL 仍为 <code>/code-policies</code></strong>（不跳 <code>/403</code>），策略表格渲染 2 行（<code>demo-group/demo-project</code>、<code>demo/supply-chain-platform</code>），页面顶部常驻黄条：<strong>「当前账号无法读取 GitLab 集成配置（需 <code>integration:manage</code>），核验结果将保持「未核验」；如需核验请联系集成管理员。」</strong></li>
+<li><strong>口径（下一轮别再误读）</strong>：<strong>准入通过（路由码 <code>CCODE_POLICY_VIEW</code>）与能力可读（<code>integration:manage</code>）是两件事</strong>。<code>dev1</code> 只有 VIEW、没有 EDIT 也没有 <code>integration:manage</code>，所以「核验」按钮置灰、页面<strong>不会</strong>发核验请求，列表里的「未核验」是<strong>权限原因</strong>、不是“没配置”——页内黄条与行内 pill 都不得说成「未配置/未启用」。dev1 打开该页 200 只证明准入通过，页面可用与否以本条 + 截图为准。</li>
 <li><code>vendor2</code> 用于演示厂商 0 承接：用它的 token 调 <code>/requirements</code> 返回 <code>total=0</code>。</li>
 </ul>
 <h3 id="s46">4.6 测试 <code>qa1</code> / <code>qa2</code>（权限 33，权限最完整的业务角色）</h3>
@@ -291,16 +304,26 @@ node scripts/tests/access/a4-nav-visibility.mjs       # 只跑角色可见集推
 </tbody>
 </table>
 <h3 id="s72">7.2 业务角色视角</h3>
-<table>
+<table class="shot-pair">
 <tbody>
 <tr><td><img src="demo-shots/qa1-testcases.png" alt="qa1 用例库"><br>qa1：用例库（版本化、评审状态）</td><td><img src="demo-shots/qa1-quality-gates.png" alt="qa1 质量门"><br>qa1：质量门（报告/规则/豁免）</td></tr>
 <tr><td><img src="demo-shots/dev1-defects.png" alt="dev1 缺陷"><br>dev1：缺陷列表</td><td><img src="demo-shots/pm-defect-board.png" alt="pm 缺陷看板"><br>pm：缺陷看板</td></tr>
 <tr><td><img src="demo-shots/vendor1-gantt.png" alt="vendor1 甘特"><br>vendor1：甘特（只见本厂商承接）</td><td><img src="demo-shots/po1-traceability.png" alt="po1 追溯"><br>po1：追溯矩阵（二级企业视角）</td></tr>
 </tbody>
 </table>
-<h3 id="s73">7.3 修复前证据（历史对照）</h3>
-<p><img src="demo-shots/po1-requirements-403.png" alt="po1 打开需求池被 403"></p>
-<p>这张图是 r7 <strong>修复前</strong>的故障态，保留作对照：二级企业负责人 <code>po1</code> 打开 <code>/requirements</code> 直接落到全局 403 页（根因见 §6.1）。修复后 <code>po1</code> 打开需求池为 200 且看到 8 条，由 <code>make access-verify</code> 的 a2（状态码）与 a4（可见集）持续断言；页面级证据请按 §7.4 现截。</p>
+<h4>r8 新增：dev1 打开分支策略（修复后）</h4>
+<p><img src="demo-shots/dev1-code-policies-fixed.png" alt="dev1 分支策略（修复后）"></p>
+<p><code>dev1</code>（DEV，24 权限码）打开 <code>/code-policies</code> 的实测：URL 停在 <code>/code-policies</code>、筛选器与表格正常渲染 2 行、顶部常驻黄条写明「当前账号无法读取 GitLab 集成配置（需 <code>integration:manage</code>）」，行内 pill 为「未核验」。这张图是<strong>页面级</strong>证据：状态码 200 证明不了表格真的挂载、也证明不了黄条说的是权限原因。取证脚本 <code>logs/teamflow/tf-mwa402ox-br1nqs/scripts/shot-dev1-code-policies.mjs</code>（12 条断言：停留 / 无整页错误 / 表格 ≥1 行 / 黄条三关键词 / 禁词 / 1440×900）。</p>
+<h3 id="s73">7.3 修复前 / 修复后证据（历史对照）</h3>
+<p>同一批“一开页就落 403”的受害页，按 r7 修复前 / 修复后对照看。<strong>修复前</strong>（第一张）：二级企业负责人 <code>po1</code> 打开 <code>/requirements</code> 直接落到全局 403 页（根因见 §6.1）；<strong>修复后</strong>（其余 5 张）：同一账号停在本页、列表正常渲染，由 <code>make access-verify</code> 的 a2（状态码）与 a4（可见集）持续断言。</p>
+<table class="shot-pair">
+<tbody>
+<tr><td><a href="demo-shots/po1-requirements-403.png" target="_blank" rel="noopener" title="po1-requirements-403.png（1440×900，点开原图）"><img src="demo-shots/po1-requirements-403.png" alt="po1 打开需求池被 403"></a><br><strong>修复前</strong>：po1 打开需求池 → 全局 403</td><td><a href="demo-shots/po1-requirements-fixed.png" target="_blank" rel="noopener" title="po1-requirements-fixed.png（1440×900，点开原图）"><img src="demo-shots/po1-requirements-fixed.png" alt="po1 需求池（修复后）"></a><br><strong>修复后</strong>：po1 打开需求池 → 停留本页（数据范围「业务单元」）</td></tr>
+<tr><td><a href="demo-shots/admin-requirements-fixed.png" target="_blank" rel="noopener" title="admin-requirements-fixed.png（1440×900，点开原图）"><img src="demo-shots/admin-requirements-fixed.png" alt="admin 需求池（修复后）"></a><br>admin：需求池（修复后，基线对照）</td><td><a href="demo-shots/pm-approvals-fixed.png" target="_blank" rel="noopener" title="pm-approvals-fixed.png（1440×900，点开原图）"><img src="demo-shots/pm-approvals-fixed.png" alt="pm 审批中心（修复后）"></a><br>pm：审批中心（修复后，我的待办 / 已办 / 我发起）</td></tr>
+<tr><td><a href="demo-shots/qa1-testplans-fixed.png" target="_blank" rel="noopener" title="qa1-testplans-fixed.png（1440×900，点开原图）"><img src="demo-shots/qa1-testplans-fixed.png" alt="qa1 测试计划（修复后）"></a><br>qa1：测试计划（修复后，状态计数 + 计划列表）</td><td><a href="demo-shots/vendor1-requirements-fixed.png" target="_blank" rel="noopener" title="vendor1-requirements-fixed.png（1440×900，点开原图）"><img src="demo-shots/vendor1-requirements-fixed.png" alt="vendor1 需求池（修复后）"></a><br>vendor1：需求池（修复后，数据范围「厂商」）</td></tr>
+</tbody>
+</table>
+<p class="meta-note">口径：修复后的 5 张截于 r7 修复验证当时（<code>make platform-demo-reset</code> 之前），故 <code>admin</code> 显示 20 条、<code>po1</code> 显示 16 条，与 §1/§4 的干净数据集（12 / 8）条数不同；它们证明的是“不再落 <code>/403</code> 且列表正常渲染”，条数以 <code>make platform-demo-reset</code> 后的实测为准。</p>
 <h3 id="s74">7.4 复现命令</h3>
 <pre><code>make platform-up
 make platform-demo-reset   # 干净演示数据（12 需求 / po1 见 8 / vendor1 见 3 / vendor2 见 0）

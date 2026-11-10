@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 # access-verify.sh — 角色×页面×菜单准入验收（20261110-r7 P0 修复的门禁）
 #
-# 五段按关注点分段，失败能定位到「字典契约 / 隔离 / 页面矩阵 / 导航声明 / 菜单可见集」：
+# 六段按关注点分段，失败能定位到「字典契约 / 隔离 / 页面矩阵 / 导航声明 / 菜单可见集 / 能力探测」：
 #   a0 字典契约（29）· a1 租户与厂商隔离（8）· a2 5 页 × 7 角色精确状态码（35）
-#   a3 导航静态审计（8）· a4 7 角色真实权限 → 菜单可见集（14）
+#   a3 导航静态审计（9）· a4 7 角色真实权限 → 菜单可见集（14）
+#   a5 可选能力探测：7 账号 × 2 端点 + 调用点静态审计 + 审计器自检（22）
 # 聚合器只做编排：各段自己打印断言明细并写一行计数到 ${ACCESS_COUNTS}，
-# 这里求和后做 PASS==TOTAL、五段齐全、总数 ≥45（PRD AC-16 下限）三道守卫。
+# 这里求和后做 PASS==TOTAL、六段齐全、总数 ≥115（PRD AC-5）、分段下限四道守卫。
+# 分段下限比总数更早定位「哪一段掉了几条」；只对本次实际跑过的段生效（调试子集不误伤）。
 #
 # 用法：
-#   ./scripts/access-verify.sh            # 全部五段（需 make platform-up + platform-seed）
+#   ./scripts/access-verify.sh            # 全部六段（需 make platform-up + platform-seed）
 #   ./scripts/access-verify.sh a0 a2      # 只跑指定段（调试用，仍要求栈就绪）
 set -uo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 ACCESS_DIR="$ROOT/scripts/tests/access"
-ALL_SEGMENTS=(a0 a1 a2 a3 a4)
+ALL_SEGMENTS=(a0 a1 a2 a3 a4 a5)
 
 SELECTED=()
 if (( $# > 0 )); then
@@ -34,7 +36,7 @@ fi
 segment_cmd() {
     case "$1" in
         a0|a1|a2) printf 'bash %s/%s-*.sh' "$ACCESS_DIR" "$1" ;;
-        a3|a4)    printf 'node %s/%s-*.mjs' "$ACCESS_DIR" "$1" ;;
+        a3|a4|a5) printf 'node %s/%s-*.mjs' "$ACCESS_DIR" "$1" ;;
     esac
 }
 segment_file() {
@@ -44,10 +46,26 @@ segment_file() {
         a2) printf '%s/a2-page-matrix.sh' "$ACCESS_DIR" ;;
         a3) printf '%s/a3-nav-audit.mjs' "$ACCESS_DIR" ;;
         a4) printf '%s/a4-nav-visibility.mjs' "$ACCESS_DIR" ;;
+        a5) printf '%s/a5-capability-probe.mjs' "$ACCESS_DIR" ;;
     esac
 }
 
-printf '\033[1;34m角色×页面准入验收（20261110-r7）：%d 段\033[0m\n' "${#SELECTED[@]}"
+# 分段下限（TECHNICAL §8.3）：总数守卫看得见「少了」，分段下限直接指出「哪段少了」。
+# 这里用 case 而不是 declare -A：macOS 自带 bash 3.2 没有关联数组，聚合器必须在
+# 默认 shell 下就能跑（a0–a4 的既有断言数一条不减少，a5 下限 20）。
+segment_min() {
+    case "$1" in
+        a0) printf 29 ;;
+        a1) printf 8 ;;
+        a2) printf 35 ;;
+        a3) printf 9 ;;
+        a4) printf 14 ;;
+        a5) printf 20 ;;
+        *)  printf 0 ;;
+    esac
+}
+
+printf '\033[1;34m角色×页面准入验收（20261110-r7 / r8 a5）：%d 段\033[0m\n' "${#SELECTED[@]}"
 printf '  req %s · web %s · 网关 %s\n' "$REQ_URL" "$WEB_URL" "$GATEWAY_URL"
 
 # ---- 0. 栈就绪：栈没起就断言，只会得到一串误导性的 401/000 ----
@@ -79,7 +97,7 @@ for seg in "${SELECTED[@]}"; do
     [[ -f "$file" ]] || { err "缺少脚本: ${file}"; FAILED_SEGMENTS+=("${seg}(缺失)"); continue; }
     printf '\n\033[1;35m────────── %s ──────────\033[0m\n' "$(basename "$file")"
     start=$(date +%s)
-    if [[ "$seg" == a3 || "$seg" == a4 ]]; then
+    if [[ "$seg" == a3 || "$seg" == a4 || "$seg" == a5 ]]; then
         node "$file"; rc=$?
     else
         bash "$file"; rc=$?
@@ -92,21 +110,27 @@ done
 # ---- 2. 汇总：每段必须留下 "aN pass total" 一行，缺失 = 该段中途死了 ----
 TOTAL=0; PASS=0
 MISSING=()
+SEG_BELOW=()
 for seg in "${SELECTED[@]}"; do
     line="$(grep -E "^${seg} [0-9]+ [0-9]+\$" "$COUNTS_FILE" 2>/dev/null | tail -n1 || true)"
     if [[ -z "$line" ]]; then MISSING+=("$seg"); continue; fi
     read -r _ p t <<<"$line"
     PASS=$(( PASS + p )); TOTAL=$(( TOTAL + t ))
-    printf '  %s: %s/%s\n' "$seg" "$p" "$t"
+    min="$(segment_min "$seg")"
+    printf '  %s: %s/%s（下限 %s）\n' "$seg" "$p" "$t" "$min"
+    if (( t < min )); then
+        SEG_BELOW+=("${seg}(${t}<${min})")
+    fi
 done
 
 printf '\n'
+(( ${#SEG_BELOW[@]} == 0 )) || err "以下段断言数低于下限（该段被删断言或中途失败）: ${SEG_BELOW[*]}"
 (( ${#MISSING[@]} == 0 )) || err "以下段没有产出计数（脚本中途失败）: ${MISSING[*]}"
 (( ${#FAILED_SEGMENTS[@]} == 0 )) || err "失败段: ${FAILED_SEGMENTS[*]}"
 
-# 45 条是「全量五段」的下限；调试子集（如 a0 a3）不适用，否则调试永远红
-if (( ${#SELECTED[@]} == ${#ALL_SEGMENTS[@]} && TOTAL < 45 )); then
-    err "断言总数 ${TOTAL} < 45（PRD AC-16 下限）：有段没跑起来，或断言被删"
+# 115 条是「全量六段」的下限（PRD AC-5）；调试子集（如 a0 a3）不适用，否则调试永远红
+if (( ${#SELECTED[@]} == ${#ALL_SEGMENTS[@]} && TOTAL < 115 )); then
+    err "断言总数 ${TOTAL} < 115（PRD AC-5 下限）：有段没跑起来，或断言被删（a0–a4 一条都不许减少）"
     exit 1
 fi
 if (( PASS != TOTAL )); then
@@ -117,4 +141,4 @@ if (( ${#MISSING[@]} > 0 || ${#FAILED_SEGMENTS[@]} > 0 )); then
     exit 1
 fi
 
-ok "角色×页面准入验收通过：${PASS}/${TOTAL} 项（字典契约 / 隔离 / 页面矩阵 / 导航声明 / 菜单可见集）"
+ok "角色×页面准入验收通过：${PASS}/${TOTAL} 项（字典契约 / 隔离 / 页面矩阵 / 导航声明 / 菜单可见集 / 能力探测）"
