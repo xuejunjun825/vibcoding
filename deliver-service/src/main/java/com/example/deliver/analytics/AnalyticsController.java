@@ -32,6 +32,17 @@ public class AnalyticsController {
     }
 
     /**
+     * {@code GET /analytics/datasets} — the dataset catalogue (the editor's field panel).
+     *
+     * <p>No cache header: the catalogue is a static whitelist, so there is no query to cache and
+     * nothing to evict. {@code /reports/datasets} returns the same {@code catalog()} instance.</p>
+     */
+    @GetMapping("/analytics/datasets")
+    public AnalyticsDatasets.DatasetList datasets() {
+        return AnalyticsDatasets.catalog();
+    }
+
+    /**
      * {@code GET /analytics/metrics} — one tile row.
      *
      * @param keys comma separated metric keys; omitted means the workbench strip

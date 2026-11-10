@@ -62,6 +62,21 @@ class PermissionMatrixGridTest {
     }
 
     @Test
+    @DisplayName("M9: REPORT_SHARE covers PMO/PRODUCT/MGMT plus the business-owner role (po1)")
+    void reportShareCells() {
+        // PRD AC-9: pm / po1 / mgr1 share their own report successfully, a role without the
+        // code (dev1) is refused. po1's sys_role.code is SUB_BUSINESS_LEADER — that cell is
+        // the one QA D-2 caught missing.
+        assertEquals(Access.ALLOW, PermissionMatrix.accessFor("SUB_BUSINESS_LEADER", "REPORT_SHARE"));
+        for (String role : List.of("PMO", "PRODUCT", "MGMT", "PLATFORM_ADMIN")) {
+            assertEquals(Access.ALLOW, PermissionMatrix.accessFor(role, "REPORT_SHARE"), role);
+        }
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("DEV", "REPORT_SHARE"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("QA", "REPORT_SHARE"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("SUB_BUSINESS", "REPORT_SHARE"));
+    }
+
+    @Test
     @DisplayName("the two AC-5 spot checks: dev1 cannot manage tenants, qa1 can manage cases")
     void acceptanceCells() {
         assertEquals(Access.DENY, PermissionMatrix.accessFor("DEV", "tenant:manage"));

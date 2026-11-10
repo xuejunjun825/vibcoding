@@ -310,8 +310,8 @@ public class AnalyticsQueryService {
         }
         String asOf = dataAsOf();
         long groups = countGroups(dataset, def, resolved);
-        if (groups > MAX_GROUPS) {
-            throw AnalyticsErrors.groupLimit(groups);
+        if (groups > cap) {
+            throw AnalyticsErrors.groupLimit(groups, cap);
         }
 
         List<String> dims = def.dimensions();
@@ -836,7 +836,7 @@ public class AnalyticsQueryService {
             + " SUM(CASE WHEN rel.planned_release_date IS NOT NULL THEN 1 ELSE 0 END) AS planned_n,"
             + " SUM(CASE WHEN rel.planned_release_date IS NOT NULL AND rel.released_at IS NOT NULL"
             + " AND DATE(rel.released_at) <= rel.planned_release_date THEN 1 ELSE 0 END) AS ontime"
-            + " FROM release rel WHERE /*scope:rel*/ AND rel.released_at >= :fromTs"
+            + " FROM `release` rel WHERE /*scope:rel*/ AND rel.released_at >= :fromTs"
             + " AND rel.released_at < :toTs";
 
     private static final String APPROVAL_SQL = "SELECT COUNT(*) AS n,"

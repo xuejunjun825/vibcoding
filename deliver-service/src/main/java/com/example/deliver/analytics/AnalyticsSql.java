@@ -145,7 +145,7 @@ public final class AnalyticsSql {
                         + " WHERE /*scope:r*/");
         bases.put(AnalyticsDatasets.DELIVERY,
                 "FROM requirement r"
-                        + " LEFT JOIN release rel ON rel.id = r.release_id AND rel.tenant_id = r.tenant_id"
+                        + " LEFT JOIN `release` rel ON rel.id = r.release_id AND rel.tenant_id = r.tenant_id"
                         + " LEFT JOIN biz_domain bd ON bd.id = r.domain_id AND bd.tenant_id = r.tenant_id"
                         + " LEFT JOIN sys_vendor sv ON sv.id = r.assignee_vendor_id AND sv.tenant_id = r.tenant_id"
                         + " WHERE /*scope:r*/");
@@ -157,7 +157,7 @@ public final class AnalyticsSql {
                         + " AND wi.biz_type IN ('REQ_SUBMIT','REQ_REVIEW')");
         bases.put(AnalyticsDatasets.QUALITY,
                 "FROM requirement r"
-                        + " LEFT JOIN release rel ON rel.id = r.release_id AND rel.tenant_id = r.tenant_id"
+                        + " LEFT JOIN `release` rel ON rel.id = r.release_id AND rel.tenant_id = r.tenant_id"
                         + " LEFT JOIN biz_domain bd ON bd.id = r.domain_id AND bd.tenant_id = r.tenant_id"
                         + " LEFT JOIN sys_vendor sv ON sv.id = r.assignee_vendor_id AND sv.tenant_id = r.tenant_id"
                         + " WHERE /*scope:r*/");

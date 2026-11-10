@@ -351,10 +351,12 @@ public final class PermissionMatrix {
         }
         // PORTAL_CONFIG（管理员改四张卡的显隐）不在这里授予：PLATFORM_ADMIN 已由上面的
         // catch-all 拿到，其余九个角色保持 DENY——卡片显隐是模板治理，不是个人偏好。
-        // REPORT_SHARE 是「把报表定义共享给别人」的写动作，只有治理/管理侧三档 + 平台管理员。
+        // REPORT_SHARE 是「把报表定义共享给别人」的写动作，只有治理/管理侧三档 + 业务方负责人
+        // （po1 = SUB_BUSINESS_LEADER，PRD AC-9 要求其共享自己的报表）+ 平台管理员。
         allow(matrix, "PMO", "REPORT_SHARE");
         allow(matrix, "PRODUCT", "REPORT_SHARE");
         allow(matrix, "MGMT", "REPORT_SHARE");
+        allow(matrix, "SUB_BUSINESS_LEADER", "REPORT_SHARE");
 
         Map<String, Map<String, Access>> frozen = new LinkedHashMap<>();
         matrix.forEach((role, row) -> frozen.put(role, Map.copyOf(row)));

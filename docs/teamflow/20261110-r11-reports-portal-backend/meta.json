@@ -1,0 +1,7 @@
+{
+  "reqId": "req-11",
+  "runId": "tf-mwael1p2-le57sx",
+  "title": "继续把 r9 的后端接口做完（本轮只做后端，不碰前端与门禁脚本）：在 feat/workbench-reports 分支上补齐 /api/deliver/ana",
+  "mode": "full",
+  "createdAt": 1794297803240
+}

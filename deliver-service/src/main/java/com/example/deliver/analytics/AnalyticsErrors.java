@@ -2,6 +2,7 @@ package com.example.deliver.analytics;
 
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.example.platform.common.error.ApiException;
@@ -28,6 +29,8 @@ public final class AnalyticsErrors {
     public static final String NOT_FOUND = "REPORT_NOT_FOUND";
     public static final String SCOPE_FORBIDDEN = "REPORT_SCOPE_FORBIDDEN";
     public static final String CARD_LIMIT = "PORTAL_CARD_LIMIT";
+    public static final String UNKNOWN_CARD = "PORTAL_UNKNOWN_CARD";
+    public static final String FORBIDDEN = "FORBIDDEN";
 
     private AnalyticsErrors() {
     }
@@ -100,12 +103,17 @@ public final class AnalyticsErrors {
                 "时间跨度超过 " + AnalyticsRequest.MAX_SPAN_DAYS + " 天：" + from + " ~ " + to, detail);
     }
 
-    public static ApiException groupLimit(long groups) {
+    /**
+     * Group cap is the caller's {@code cap}, not the page constant: the export path raises it to
+     * {@link AnalyticsQueryService#EXPORT_MAX_ROWS}, and an error that reported 5000 for a
+     * 10001-group export would name a limit the caller never used.
+     */
+    public static ApiException groupLimit(long groups, int cap) {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("groups", groups);
-        detail.put("maxGroups", AnalyticsQueryService.MAX_GROUPS);
+        detail.put("maxGroups", cap);
         return new ApiException(400, GROUP_LIMIT,
-                "分组数 " + groups + " 超过上限 " + AnalyticsQueryService.MAX_GROUPS
+                "分组数 " + groups + " 超过上限 " + cap
                         + "，请增加筛选或减少维度", detail);
     }
 
@@ -135,9 +143,40 @@ public final class AnalyticsErrors {
         return new ApiException(403, SCOPE_FORBIDDEN, "当前角色不能" + action, detail);
     }
 
-    public static ApiException cardLimit(int max) {
+    /**
+     * The card caps, in both flavours: {@code PUT /portal/config} rejects an over-long key list
+     * with 400, while pinning the fifth card is a state conflict (409) that must hand back the
+     * four cards already pinned so the dialog can show what would have to go.
+     */
+    public static ApiException cardLimit(int status, int maxCards, List<Map<String, Object>> cards,
+                                         List<String> cardKeys) {
         Map<String, Object> detail = new LinkedHashMap<>();
-        detail.put("maxCards", max);
-        return new ApiException(409, CARD_LIMIT, "工作台最多固定 " + max + " 张卡片", detail);
+        detail.put("maxCards", maxCards);
+        detail.put("cards", cards == null ? List.of() : List.copyOf(cards));
+        detail.put("cardKeys", cardKeys == null ? List.of() : List.copyOf(cardKeys));
+        return new ApiException(status, CARD_LIMIT, "工作台最多固定 " + maxCards + " 张卡片", detail);
+    }
+
+    /** An unknown template card key: the editor sent a key no template declares. */
+    public static ApiException unknownCard(String key, List<String> known) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("cardKey", key);
+        detail.put("known", known == null ? List.of() : List.copyOf(known));
+        return new ApiException(400, UNKNOWN_CARD, "未知工作台卡片：" + key, detail);
+    }
+
+    /**
+     * A 403 that names the permission it wanted. The interceptor's own 403 has the same body shape;
+     * this factory exists for the checks a controller performs itself (a non-admin reading/writing
+     * another role's card config), so those refusals are not hand-built Maps at the call site.
+     */
+    public static ApiException forbidden(String function, String method, String path) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("function", function);
+        detail.put("functions", List.of(function));
+        detail.put("method", method);
+        detail.put("path", path);
+        return new ApiException(403, FORBIDDEN,
+                "缺少权限：" + function + "（" + method + " " + path + "）", detail);
     }
 }

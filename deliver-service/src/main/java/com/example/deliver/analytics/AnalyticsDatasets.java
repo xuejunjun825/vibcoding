@@ -237,4 +237,23 @@ public final class AnalyticsDatasets {
         }
         return keys;
     }
+
+    /**
+     * The dataset catalogue envelope, exactly what {@code GET /analytics/datasets} (and its
+     * {@code /reports/datasets} alias) return.
+     *
+     * <p>It lives next to the whitelist rather than in {@code AnalyticsViews} because the two
+     * endpoints must return literally the same record instance: one {@code catalog()} value is
+     * serialised twice, so the alias cannot drift by a field from the canonical path.</p>
+     */
+    public record DatasetList(List<AnalyticsViews.Dataset> items) {
+    }
+
+    private static final DatasetList CATALOG =
+            new DatasetList(CODES.stream().map(DATASETS::get).toList());
+
+    /** The whole catalogue, in code order ({@code requirement, delivery, approval, quality}). */
+    public static DatasetList catalog() {
+        return CATALOG;
+    }
 }
