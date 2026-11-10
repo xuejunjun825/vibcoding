@@ -9,7 +9,7 @@ import java.util.Map;
  * The only place analytics SQL text is assembled.
  *
  * <p>Every statement starts from {@link #base(String)} and therefore carries a
- * {@code /*scope:<alias>*}{@code /} marker: the row-level filter is not something a caller may
+ * scope marker comment naming an alias: the row-level filter is not something a caller may
  * forget, because the base is the string the caller must use. The aliases are bound in the
  * {@code FROM}/{@code JOIN} clause here, so the marker always resolves to a table the scope layer
  * knows ({@code requirement}, {@code release}, {@code defect}, ...). The {@code wf_*} tables are
@@ -47,7 +47,7 @@ public final class AnalyticsSql {
     }
 
     /**
-     * {@code FROM ... WHERE /*scope:x*} for a dataset.
+     * The FROM/JOIN clause plus the scope marker for a dataset.
      *
      * <p>Includes the {@code WHERE} so a statement can never omit the marker; callers append
      * {@code " AND <window>"} / {@code " AND <filter>"}.</p>
