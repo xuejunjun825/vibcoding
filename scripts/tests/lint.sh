@@ -256,6 +256,53 @@ report_aggregation_single_source() {
     fi
 }
 
+# ---- L15 分析域取数原语单点：portal/dashboard/editor 三页共用 useAnalyticsFeed（D2 的类） ----
+# 缺陷现场：编辑器自建 runTimer/runSeq/inflight 与手动防抖，与另两页各写一套；
+# 这条断言把「三页共用一层」钉死：负向禁止自建原语，正向要求三页都 import 单点。
+analytics_feed_single_source() {
+    local root="$ROOT/web/src" composable="$ROOT/web/src/composables/useAnalyticsFeed.ts"
+    local f missing="" hand=""
+    [[ -f "$composable" ]] || { echo "缺少 web/src/composables/useAnalyticsFeed.ts"; return 1; }
+    grep -q 'AbortController' "$composable" \
+        || { echo "useAnalyticsFeed 未持 AbortController：abort 不再有单点"; return 1; }
+    for f in "$root/views/portal/PortalView.vue" "$root/views/analytics/DashboardView.vue" \
+             "$root/views/reports/ReportEditorView.vue"; do
+        [[ -f "$f" ]] || { echo "取数页缺失: $f"; return 1; }
+        grep -q "@/composables/useAnalyticsFeed" "$f" || missing="$missing $f"
+    done
+    if [[ -n "$missing" ]]; then
+        echo "以下取数页未 import useAnalyticsFeed（会各写一套防抖+abort+竞态）:"
+        printf '%s\n' "$missing"
+        return 1
+    fi
+    # 自检：判据必须命中修复前的真实写法，否则这条门禁形同虚设
+    if ! printf '%s\n' 'const controller = new AbortController()' 'const current = ++runSeq' \
+        | grep -qE 'new[[:space:]]+AbortController[[:space:]]*\(|(runSeq|requestSeq|loadSeq)[[:space:]]*(\+\+|=)'; then
+        echo "L15 自检失效：判据已不再命中修复前写法（提取器坏了）"
+        return 1
+    fi
+    local hits
+    hits="$(grep -rnE 'new[[:space:]]+AbortController[[:space:]]*\(|(runSeq|requestSeq|loadSeq)[[:space:]]*(\+\+|=)' \
+        "$root/views/portal" "$root/views/analytics" "$root/views/reports" 2>/dev/null \
+        | grep -vE ':[0-9]+:[[:space:]]*(\*|//)' || true)"
+    if [[ -n "$hits" ]]; then
+        echo "views 内自建取数原语（只允许存在于 useAnalyticsFeed）:"
+        printf '%s\n' "$hits"
+        return 1
+    fi
+    # 手写防抖：同一视图里既有 DEBOUNCE 常量又调用 setTimeout(
+    for f in $(grep -rl 'DEBOUNCE' "$root/views/portal" "$root/views/analytics" "$root/views/reports" 2>/dev/null || true); do
+        if grep -q 'setTimeout[[:space:]]*(' "$f"; then
+            hand="$hand $f"
+        fi
+    done
+    if [[ -n "$hand" ]]; then
+        echo "视图内手写防抖定时器（应改用 useAnalyticsFeed 的 load/reload）:"
+        printf '%s\n' "$hand"
+        return 1
+    fi
+}
+
 log "静态门禁：脚本语法 / 变量插值 / 单点实现 / 错误提示 / 文档一致性"
 run_check "L1 所有脚本 bash -n 语法通过" syntax_ok
 run_check "L2 无 \$VAR 紧跟全角标点（防 set -u 吞变量名）" no_bare_var_before_wide_char
@@ -273,6 +320,7 @@ run_check "L11 deliver 不写 req 侧表（只走 ReqReadModel）" deliver_does_
 run_check "L12 前端 views 不复制状态中文文案" frontend_has_no_status_literals
 run_check "L13 .gitignore 覆盖前端产物与运行态" gitignore_covers_artifacts
 run_check "L14 报告取数只经 QualityAggregator（禁止 SUM(pc.result=...)）" report_aggregation_single_source
+run_check "L15 分析域取数原语单点（三页共用 useAnalyticsFeed）" analytics_feed_single_source
 
 if (( FAILED > 0 )); then
     err "lint 失败 ${FAILED}/${TOTAL} 项：按上面的行号修正后重跑 make lint"

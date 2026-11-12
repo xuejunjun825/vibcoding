@@ -2,16 +2,17 @@ import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import type { RouteLocationNormalizedLoaded, RouteLocationRaw, Router } from 'vue-router'
 import type { AnalyticsQuery, CacheState, PresetKey } from '@/api/analytics'
+import type { RequirementType } from '@/api/types'
 
 /**
  * 分析域三页共享的筛选 store（T6 · TECHNICAL §6 / DESIGN §5.1）。
  *
  * 唯一的真相是 **URL query**：`filter` 是从当前路由 `query` 派生的 computed，
- * 组件里不保留第二份筛选副本；所有变更都走 `applyToRoute()` → `router.replace()`，
- * 因此刷新 / 前进后退 / 复制链接都能还原（AC-1）。
+ * 组件里不保留第二份筛选副本；所有变更都走 `applyToRoute()` → `router.push()`：
+ * 每次筛选变化留一条历史，浏览器前进/后退才能逐次还原（AC-7），刷新 / 复制链接同样还原。
  *
- * 三页共享同一段 query schema：`domainId / vendorId / from / to / preset`。
- * 非法键（未知 preset、坏日期、跨度 > 366 天、负数 id）在这一层被丢弃并记进
+ * 三页共享同一段 query schema：`domainId / vendorId / reqType / from / to / preset`。
+ * 非法键（未知 preset、坏日期、跨度 > 366 天、负数 id、未知需求类型）在这一层被丢弃并记进
  * `droppedKeys`，页面据此显示 12px「部分筛选已重置」，不白屏。
  */
 
@@ -35,10 +36,15 @@ export const DEBOUNCE_MS = 300
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
+/** 需求类型白名单（与 `web/src/api/types.ts` 的 `RequirementType` 同源，运行时校验用） */
+const REQ_TYPES: RequirementType[] = ['BUS', 'PDR', 'RD']
+
 export interface AnalyticsFilter {
   /** null = 本域（由服务端按账号 Scope 收口），不是「全部域」 */
   domainId: number | null
   vendorId: number | null
+  /** null = 全部需求类型 */
+  reqType: RequirementType | null
   from: string
   to: string
   preset: PresetKey
@@ -77,7 +83,7 @@ function rangeOfPreset(preset: Exclude<PresetKey, 'custom'>, today = new Date())
 }
 
 function defaultFilter(today = new Date()): AnalyticsFilter {
-  return { domainId: null, vendorId: null, preset: '30d', ...rangeOfPreset('30d', today) }
+  return { domainId: null, vendorId: null, reqType: null, preset: '30d', ...rangeOfPreset('30d', today) }
 }
 
 function pickFirst(value: unknown): unknown {
@@ -95,6 +101,15 @@ function readId(value: unknown, key: string, dropped: string[]): number | null {
   return parsed
 }
 
+/** URL 里的需求类型：只接受 `BUS|PDR|RD`，其它值丢弃并记一笔（不猜、不回落成 BUS） */
+function readReqType(value: unknown, dropped: string[]): RequirementType | null {
+  const raw = pickFirst(value)
+  if (raw === undefined || raw === null || raw === '') return null
+  if (REQ_TYPES.includes(raw as RequirementType)) return raw as RequirementType
+  dropped.push('reqType')
+  return null
+}
+
 /**
  * URL → 筛选（纯函数，store 与测试共用）。
  * 默认「本域 + 近 30 天」；`preset=custom` 缺合法 from/to 时退回近 30 天。
@@ -106,6 +121,7 @@ export function filterFromQuery(
   const dropped: string[] = []
   const domainId = readId(query.domainId, 'domainId', dropped)
   const vendorId = readId(query.vendorId, 'vendorId', dropped)
+  const reqType = readReqType(query.reqType, dropped)
 
   const rawPreset = pickFirst(query.preset)
   let preset: PresetKey | null = null
@@ -137,7 +153,7 @@ export function filterFromQuery(
     )
     const resolved: PresetKey = preset === 'custom' ? 'custom' : (matched ?? 'custom')
     return {
-      filter: { domainId, vendorId, from: fromText, to: toText, preset: resolved },
+      filter: { domainId, vendorId, reqType, from: fromText, to: toText, preset: resolved },
       dropped,
     }
   }
@@ -145,14 +161,14 @@ export function filterFromQuery(
   if (preset === 'custom' || preset === null) {
     // 界面上「自定义」却没有任何合法日期 = 半截 URL，按默认重来并记一笔
     if (preset === 'custom' && !dropped.includes('from') && !dropped.includes('to')) dropped.push('preset')
-    return { filter: { ...defaultFilter(today), domainId, vendorId }, dropped }
+    return { filter: { ...defaultFilter(today), domainId, vendorId, reqType }, dropped }
   }
 
   // 只有预设：由预设算出窗口，写回 URL 时三键齐全（刷新可还原）
-  return { filter: { domainId, vendorId, preset, ...rangeOfPreset(preset, today) }, dropped }
+  return { filter: { domainId, vendorId, reqType, preset, ...rangeOfPreset(preset, today) }, dropped }
 }
 
-/** 筛选 → URL query（五键齐全，刷新/复制链接不依赖内存默认值） */
+/** 筛选 → URL query（六键齐全，刷新/复制链接不依赖内存默认值；空值不落键） */
 export function filterToQuery(filter: AnalyticsFilter): Record<string, string> {
   const query: Record<string, string> = {
     from: filter.from,
@@ -161,6 +177,7 @@ export function filterToQuery(filter: AnalyticsFilter): Record<string, string> {
   }
   if (filter.domainId !== null) query.domainId = String(filter.domainId)
   if (filter.vendorId !== null) query.vendorId = String(filter.vendorId)
+  if (filter.reqType !== null) query.reqType = filter.reqType
   return query
 }
 
@@ -170,6 +187,9 @@ export function normalizeFilter(input: Partial<AnalyticsFilter>, today = new Dat
     input.preset && PRESETS.includes(input.preset) ? input.preset : ('30d' as PresetKey)
   const domainId = input.domainId ?? null
   const vendorId = input.vendorId ?? null
+  // 非白名单（含调用方传进的脏值）一律清成「全部类型」，与 filterFromQuery 同口径
+  const reqType =
+    input.reqType && REQ_TYPES.includes(input.reqType) ? input.reqType : null
 
   const fromText = input.from ?? ''
   const toText = input.to ?? ''
@@ -180,15 +200,19 @@ export function normalizeFilter(input: Partial<AnalyticsFilter>, today = new Dat
     spanDays(fromText, toText) <= MAX_SPAN_DAYS
 
   if (preset === 'custom') {
-    if (datesValid) return { domainId, vendorId, preset, from: fromText, to: toText }
-    return { domainId, vendorId, preset: '30d', ...rangeOfPreset('30d', today) }
+    if (datesValid) return { domainId, vendorId, reqType, preset, from: fromText, to: toText }
+    return { domainId, vendorId, reqType, preset: '30d', ...rangeOfPreset('30d', today) }
   }
   // 预设优先：窗口由预设重算，避免「preset=7d 但 from/to 还是 30 天」的半截状态
-  return { domainId, vendorId, preset, ...rangeOfPreset(preset, today) }
+  return { domainId, vendorId, reqType, preset, ...rangeOfPreset(preset, today) }
 }
 
+/**
+ * 请求签名：**每一个会改变请求结果的键都必须在列**。
+ * 漏掉 `reqType` 会让「从 RD 切到 BUS」被判定为同签名而**不重发**（隐性缺陷）。
+ */
 function signature(query: Record<string, unknown>): string {
-  const keys = ['domainId', 'vendorId', 'from', 'to', 'preset']
+  const keys = ['domainId', 'vendorId', 'reqType', 'from', 'to', 'preset']
   return keys.map((key) => `${key}=${String(pickFirst(query[key]) ?? '')}`).join('&')
 }
 
@@ -226,7 +250,8 @@ export const useAnalyticsStore = defineStore('analytics', () => {
   }
 
   /**
-   * 改筛选 → `router.replace`（不污染历史）。
+   * 改筛选 → `router.push`（**每一个筛选态一条历史**：AC-7 要求前进/后退逐次还原
+   * 筛选与数据；用 replace 会让后退直接离开页面，历史里没有上一个筛选态）。
    * 与当前 URL 同签名时**不导航**，避免 watch(route.query) ↔ applyToRoute 互相触发。
    */
   function applyToRoute(router: Router, patch: Partial<AnalyticsFilter> = {}): void {
@@ -234,13 +259,14 @@ export const useAnalyticsStore = defineStore('analytics', () => {
     const current = router.currentRoute.value.query as Record<string, unknown>
     const merged: Record<string, string> = { ...filterToQuery(next) }
     for (const [key, value] of Object.entries(current)) {
-      if (key === 'domainId' || key === 'vendorId' || key === 'from' || key === 'to' || key === 'preset') continue
+      // 六个筛选键全部由 filterToQuery 重新生成：这里若漏掉一个，旧值会被原样搬进新 URL
+      if (key === 'domainId' || key === 'vendorId' || key === 'reqType' || key === 'from' || key === 'to' || key === 'preset') continue
       const flat = pickFirst(value)
       if (flat !== undefined && flat !== null) merged[key] = String(flat)
     }
     if (signature(merged) === signature(current)) return
     const target: RouteLocationRaw = { query: merged }
-    void router.replace(target)
+    void router.push(target)
   }
 
   /** 回到默认（本域 + 近 30 天） */

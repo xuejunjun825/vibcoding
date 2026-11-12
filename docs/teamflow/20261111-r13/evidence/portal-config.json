@@ -1,0 +1,1 @@
+{"roleCode":"admin","cardKeys":["admin.members","admin.req","admin.approval","admin.quality"],"maxCards":4,"cards":[{"key":"admin.members","title":"成员规模"},{"key":"admin.req","title":"需求总览"},{"key":"admin.approval","title":"审批效率"},{"key":"admin.quality","title":"质量健康"}]}

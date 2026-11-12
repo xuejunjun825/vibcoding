@@ -1,5 +1,5 @@
 import { download, http } from './client'
-import type { PageResponse } from './types'
+import type { PageResponse, RequirementType } from './types'
 
 /**
  * 分析域客户端（T6 · TECHNICAL §3–§7）：岗位工作台 / 数据看板 / 自助报表。
@@ -28,6 +28,8 @@ export type CacheState = 'HIT' | 'MISS'
 export interface AnalyticsQuery {
   domainId?: number | null
   vendorId?: number | null
+  /** 需求类型（`RequirementType`）：空 = 全部类型，不是「不限」以外的语义 */
+  reqType?: RequirementType | null
   /** YYYY-MM-DD */
   from?: string
   /** YYYY-MM-DD */
@@ -94,8 +96,8 @@ export interface CrossRow {
 
 /**
  * 交叉表响应（页面 `maxRows=5000`、导出 `maxRows=10000` 都由服务端定）。
- * 表头是**叶子表头**（长度 = values 长度）；有列维时 `colGroups` 给第一层分组跨度，
- * 缺省时前端按「无列维」渲染单层表头。
+ * 表头是**叶子表头**（长度 = values 长度），没有列维时 `colHeaders` 只有一个值。
+ * `subtotal`/`total` 可为 `null`（无可聚合样本），渲染时整行不出现，不是 0 行。
  */
 export interface CrossTab {
   rowHeaders: string[]
@@ -103,32 +105,32 @@ export interface CrossTab {
   rows: CrossRow[]
   subtotal: CrossRow | null
   total: CrossRow | null
+  /** 分组数（截断前），工具条「128 组」 */
+  groups: number
   /** 分组数是否被截断（截断提示「已截断至 5,000」） */
   truncated: boolean
-  /** 截断前的分组总数（工具条「128 组」） */
-  groups?: number
-  /** 列维的两层表头：label + 该组占几列 */
-  colGroups?: Array<{ label: string; span: number }>
   dataAsOf: string
   cache: CacheState | string
 }
 
 /* ------------------------------------------------------------------ 看板 */
 
-/** 需求量多维：行维值 × 列维值 的一张矩阵 */
+/**
+ * 看板第一块：字面意义就是一张交叉表（行维值在 `rows[].key`，列维值在 `colHeaders`）。
+ * 与 `CrossTab` 同构，只是少了 `groups/truncated/dataAsOf/cache`（整页一个戳）。
+ */
 export interface Breakdown {
   key: string
-  title: string
-  rowHeaders: string[]
+  label: string
   colHeaders: string[]
   rows: CrossRow[]
+  subtotal: CrossRow | null
   total: CrossRow | null
-  truncated: boolean
 }
 
 export interface TrendPoint {
   /** 周期标签（如 2026-W45 / 2026-11） */
-  period: string
+  bucket: string
   current: number | null
   previous: number | null
   /** 环比变化率（0.021 = +2.1%），服务端算 */
@@ -136,22 +138,21 @@ export interface TrendPoint {
 }
 
 export interface Trend {
-  bucket: 'WEEK' | 'MONTH'
   unit: string
   points: TrendPoint[]
 }
 
-/** 周期分段（5 段：<=3 / 4-7 / 8-14 / 15-30 / >30 天） */
+/** 周期分段（5 段：<=3 / 4-7 / 8-15 / 16-30 / >30 天） */
 export interface Segment {
   key: string
   label: string
   count: number
-  /** 占全部完成需求的比例（0..1） */
-  share: number
-  avgDays: number | null
-  p90Days: number | null
+  /** 段内平均周期（天），无样本为 null */
+  avg: number | null
+  /** 段内 P90（天），无样本为 null */
+  p90: number | null
   /** 长尾段（>30 天）标记，仅渲染用 */
-  longTail: boolean
+  tail: boolean
 }
 
 /** 人天三列：预估 / 实际 / 偏差；`missingEstimate` 是无预估的需求数 */
@@ -160,6 +161,7 @@ export interface Effort {
   actual: number | null
   deviation: number | null
   missingEstimate: number
+  unit: string
 }
 
 export interface VendorRankRow {
@@ -168,30 +170,27 @@ export interface VendorRankRow {
   vendorName: string
   /** 当前账号所属厂商：置顶展示但名次不变 */
   mine: boolean
-  done: number
+  completed: number
   /** 0..1 */
   onTimeRate: number | null
-  avgCycleDays: number | null
+  avgCycle: number | null
 }
 
-export type QualityLevel = 'GOOD' | 'WARN' | 'BAD' | 'UNKNOWN'
+export type QualityLevel = 'GOOD' | 'WARN' | 'BAD' | 'NONE'
 
-/** 交付质量卡：阈值与等级都由服务端给，前端不写死阈值 */
-export interface QualityIndex {
+/** 交付质量卡：等级由服务端判（`level`），前端不写死阈值 */
+export interface QualityCard {
   key: string
   label: string
+  value: number | null
   unit: string
   digits: number
-  value: number | null
-  /** 人读阈值（如「<= 5%」），展示用 */
-  threshold: string
   level: QualityLevel
-  sample: number | null
-  hint?: string | null
+  sample: number
 }
 
 export interface Quality {
-  items: QualityIndex[]
+  cards: QualityCard[]
 }
 
 export interface Dashboard {
@@ -277,7 +276,8 @@ export interface PortalConfigCmd {
 
 /* ------------------------------------------------------------------ 报表 */
 
-export type ReportScope = 'PRIVATE' | 'ROLE' | 'DOMAIN' | 'PUBLIC'
+/** 五档共享（后端 `ShareVisibility`）：私有 / 角色 / 域 / 厂商 / 公开 */
+export type ReportScope = 'PRIVATE' | 'ROLE' | 'DOMAIN' | 'VENDOR' | 'PUBLIC'
 
 export type ChartType = 'TABLE' | 'BAR' | 'LINE' | 'PIE'
 
@@ -317,9 +317,9 @@ export interface ReportSummary {
 
 export interface ReportDetail extends ReportSummary {
   definition: ReportDefinition
-  /** 服务端判定的写权限；缺省时前端不据此禁用，仍以 403 为准 */
-  canWrite?: boolean
-  canShare?: boolean
+  /** 服务端判定的写权限（属主 && REPORT_WRITE）；只用于预置按钮态，403 仍以响应为准 */
+  canWrite: boolean
+  canShare: boolean
 }
 
 export interface ReportCmd {
@@ -363,8 +363,12 @@ export function listPortal(
   return http.get<Portal>(`${DELIVER}/portal`, { ...params }, { signal })
 }
 
-export function fetchPortalConfig(): Promise<PortalConfig> {
-  return http.get<PortalConfig>(`${DELIVER}/portal/config`)
+/**
+ * `GET /portal/config?roleCode=` — 省略 `roleCode` 即「我」的角色。
+ * 管理员传目标角色码读该角色的卡片复选。
+ */
+export function fetchPortalConfig(roleCode?: string): Promise<PortalConfig> {
+  return http.get<PortalConfig>(`${DELIVER}/portal/config`, roleCode ? { roleCode } : undefined)
 }
 
 /** 管理员只做 4 张卡显隐（不扩契约：不能加卡、不能改顺序） */
@@ -421,9 +425,14 @@ export function deleteReport(id: number | string): Promise<void> {
   return http.del<void>(`${DELIVER}/reports/${id}`)
 }
 
-/** 共享只共享定义，数据永远按查看者 Scope 重算 */
+/**
+ * 共享只共享定义，数据永远按查看者 Scope 重算。
+ *
+ * `silentForbidden`：无权共享（非属主 / 无 `REPORT_SHARE`）时把 403 交回调用方，
+ * 由 ShareDialog 在弹层内联提示（AC-10），**不跳** `/403`。
+ */
 export function shareReport(id: number | string, body: ReportShareCmd): Promise<ReportDetail> {
-  return http.post<ReportDetail>(`${DELIVER}/reports/${id}/share`, body)
+  return http.post<ReportDetail>(`${DELIVER}/reports/${id}/share`, body, { silentForbidden: true })
 }
 
 /** 设为工作台卡片；第 5 张 → 409 `PORTAL_CARD_LIMIT`（不静默替换） */
@@ -431,13 +440,17 @@ export function pinReport(id: number | string): Promise<PinResult> {
   return http.post<PinResult>(`${DELIVER}/reports/${id}/pin`)
 }
 
-/** 运行报表：省略 `body.definition` 即用已存定义；编辑器未保存时传草稿 */
+/**
+ * 运行报表：`body` **只放 `{definition?}`**（省略即用已存定义；编辑器未保存时传草稿）。
+ * 筛选条件（含 `reqType`）走 query —— `RunCmd` 里没有 `reqType` 字段，塞进 body 会被静默丢弃。
+ */
 export function runReport(
   id: number | string,
-  body?: { definition?: ReportDefinition } & AnalyticsQuery,
+  body?: { definition?: ReportDefinition },
+  params?: AnalyticsQuery,
   signal?: AbortSignal,
 ): Promise<CrossTab> {
-  return http.post<CrossTab>(`${DELIVER}/reports/${id}/run`, body ?? {}, { signal })
+  return http.post<CrossTab>(`${DELIVER}/reports/${id}/run`, body ?? {}, { params: { ...params }, signal })
 }
 
 /**
