@@ -17,6 +17,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const ROOT = path.resolve(HERE, '../../..')
 const WEB = path.join(ROOT, 'web/src')
 
+// ---------------------------------------------------------------- 基线
+// R1 的条目数基线：r13（分析域四页）落盘后侧栏 33 → 36，顶栏 8 不变。
+// 这里收成常量，新增入口时只改这一处数字，规则本身不放松。
+const SIDEBAR_BASELINE = 36
+const TOP_BASELINE = 8
+
 // ---------------------------------------------------------------- 通用解析
 /** 去掉整行注释（避免注释里的 `functionCode` 字样被当成声明） */
 function stripCommentLines(src) {
@@ -69,7 +75,7 @@ function blockBetween(src, fromMarker, toMarker) {
   return src.slice(start, end < 0 ? src.length : end)
 }
 
-/** 解析 nav.ts：NAV_GROUPS 的 33 条侧栏项 + TOP_NAV 的 8 条顶栏项 */
+/** 解析 nav.ts：NAV_GROUPS 的 36 条侧栏项（r13 起）+ TOP_NAV 的 8 条顶栏项 */
 export function parseNav() {
   const src = readFileSync(path.join(WEB, 'layouts/nav.ts'), 'utf8')
   const sidebar = []
@@ -170,13 +176,13 @@ export function runAudit({ quiet = false } = {}) {
   const matrix = parseMatrixCodes()
   const all = [...sidebar, ...top]
 
-  // R1：33 + 8 每条都显式声明 functionCode（必填字段，漏写即红）
+  // R1：36 + 8 每条都显式声明 functionCode（必填字段，漏写即红）
   const missing = all.filter((it) => !it.codes || it.codes.length === 0).map((it) => it.label)
-  if (sidebar.length === 33 && top.length === 8 && missing.length === 0) {
-    ok('R1', `33 条侧栏 + 8 条顶栏均声明 functionCode（实际 ${sidebar.length}+${top.length}）`)
-  } else if (sidebar.length !== 33 || top.length !== 8) {
-    bad('R1', `导航条目数漂移：侧栏 ${sidebar.length}（期望 33）/ 顶栏 ${top.length}（期望 8）`,
-      '新增/删除入口时同步更新 a3 的 33+8 基线，并确认新入口有 functionCode')
+  if (sidebar.length === SIDEBAR_BASELINE && top.length === TOP_BASELINE && missing.length === 0) {
+    ok('R1', `${SIDEBAR_BASELINE} 条侧栏 + ${TOP_BASELINE} 条顶栏均声明 functionCode（实际 ${sidebar.length}+${top.length}）`)
+  } else if (sidebar.length !== SIDEBAR_BASELINE || top.length !== TOP_BASELINE) {
+    bad('R1', `导航条目数漂移：侧栏 ${sidebar.length}（期望 ${SIDEBAR_BASELINE}）/ 顶栏 ${top.length}（期望 ${TOP_BASELINE}）`,
+      `新增/删除入口时同步更新 a3 的 SIDEBAR_BASELINE（${SIDEBAR_BASELINE}）+ TOP_BASELINE（${TOP_BASELINE}），并确认新入口有 functionCode`)
   } else {
     bad('R1', `未声明 functionCode 的入口：${missing.join('、')}`,
       'NavItem.functionCode 是必填字段；登录可读页写 AUTHENTICATED（AC-7）')

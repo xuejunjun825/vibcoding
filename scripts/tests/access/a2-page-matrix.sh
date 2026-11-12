@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# a2-page-matrix.sh — 5 页 × 7 角色准入矩阵（PRD AC-5；TECHNICAL §5；35 断言）
+# a2-page-matrix.sh — 9 页 × 7 角色准入矩阵（PRD AC-5 / r13 AC-17；TECHNICAL §5；63 断言）
 #
 # 每格断言的是**精确状态码**：⛔ 必须 403（200 也算红），✅ 必须 200（403 说明字典修复
 # 只修了一半）。探测端点取各页首屏请求，与真实页面同一条链路（网关 → JWT → 权限码）。
@@ -35,15 +35,22 @@ report_counts() {
 }
 
 # ---------------------------------------------------------------- 矩阵定义
-PAGE_LABELS=("需求池" "版本计划" "审批中心" "测试计划" "分支策略")
+# r13 新增末四页（岗位工作台 / 数据看板 / 自助报表 / 报表编辑器）：权限矩阵给十角色
+# 全开 PORTAL_VIEW 与 REPORT_VIEW（PermissionMatrix），因此这 28 格期望一律 200，
+# 不写任何 403 —— 若后端真收紧，会以 FAIL 暴露而不是被静默放宽。
+PAGE_LABELS=("需求池" "版本计划" "审批中心" "测试计划" "分支策略" "岗位工作台" "数据看板" "自助报表" "报表编辑器")
 PAGE_ENDPOINTS=(
     "/api/req/requirements"
     "/api/req/releases"
     "/api/req/approvals/todo?page=1&size=5"
     "/api/deliver/test-plans?page=1&size=5"
     "/api/req/code/policies"
+    "/api/deliver/portal"
+    "/api/deliver/analytics/dashboard"
+    "/api/deliver/reports?page=1&size=5"
+    "/api/deliver/reports/datasets"
 )
-PAGE_GUARDS=("仅认证" "release:plan" "仅认证" "plan:manage" "CCODE_POLICY_VIEW")
+PAGE_GUARDS=("仅认证" "release:plan" "仅认证" "plan:manage" "CCODE_POLICY_VIEW" "PORTAL_VIEW" "PORTAL_VIEW" "REPORT_VIEW" "REPORT_VIEW")
 ROLES=(admin pm tl1 po1 dev1 qa1 vendor1)
 
 # expected_code <page-index> <role> → 精确状态码（TECHNICAL §5 的 5 个 ⛔）
@@ -51,12 +58,12 @@ expected_code() {
     case "$1:$2" in
         3:po1|3:dev1) echo 403 ;;          # 测试计划：PRODUCT / DEV 对 plan:manage 是 DENY
         4:pm|4:po1|4:qa1) echo 403 ;;      # 分支策略：PMO / SUB_BUSINESS_LEADER / QA 无 CCODE_POLICY_VIEW
-        *) echo 200 ;;
+        *) echo 200 ;;                     # 含 r13 新增四页：十角色全开 PORTAL_VIEW/REPORT_VIEW
     esac
 }
 
 # =====================================================================
-section "5 页 × 7 角色：精确状态码（30 ✅ / 5 ⛔）"
+section "9 页 × 7 角色：精确状态码（58 ✅ / 5 ⛔）"
 for i in "${!PAGE_LABELS[@]}"; do
     printf '\n  \033[1m%s\033[0m（%s，守码 %s）\n' "${PAGE_LABELS[$i]}" "${PAGE_ENDPOINTS[$i]}" "${PAGE_GUARDS[$i]}"
     for role in "${ROLES[@]}"; do
@@ -90,4 +97,4 @@ if (( PASS != TOTAL )); then
     exit 1
 fi
 report_counts
-ok "a2-page-matrix: ${PASS}/${TOTAL} 项通过（5 页 × 7 角色精确匹配）"
+ok "a2-page-matrix: ${PASS}/${TOTAL} 项通过（9 页 × 7 角色精确匹配）"
