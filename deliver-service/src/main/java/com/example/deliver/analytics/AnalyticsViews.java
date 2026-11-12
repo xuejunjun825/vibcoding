@@ -51,7 +51,36 @@ public final class AnalyticsViews {
      */
     public record CrossTab(List<String> rowHeaders, List<String> colHeaders, List<CrossRow> rows,
                            CrossRow subtotal, CrossRow total, int groups, boolean truncated,
-                           String dataAsOf, String cache) {
+                           String dataAsOf, String cache,
+                           // r14：机器可读的原始取值，与 *Headers 同长同序；「合计」列/行的 code 为 null。
+                           // 追加在末尾：既有字段顺序与语义不变，旧调用方（含 9 参构造）不受影响。
+                           List<String> colCodes, List<String> rowCodes) {
+
+        /**
+         * 9 参兼容构造：拿不到 code 的调用方（测试、缓存重建前的旧路径）落空列表，
+         * 前端已按「可选字段」处理，不会按下标索引。
+         */
+        public CrossTab(List<String> rowHeaders, List<String> colHeaders, List<CrossRow> rows,
+                        CrossRow subtotal, CrossRow total, int groups, boolean truncated,
+                        String dataAsOf, String cache) {
+            this(rowHeaders, colHeaders, rows, subtotal, total, groups, truncated, dataAsOf, cache,
+                    List.of(), List.of());
+        }
+
+        /**
+         * 导出用行标签：数据行优先用与 {@code rows} 同长同序的中文 {@code rowHeaders}；
+         * 小计/总计（下标越界）或旧调用方（表头缺失/长度不符）回退到行自身的 key（本已是中文）。
+         * 导出与页面因此读同一份显示串，{@code rowCodes} 只作机器可读值，绝不直接上屏。
+         */
+        public String rowLabel(int index, CrossRow row) {
+            if (row != null && rowHeaders != null && rows != null
+                    && rowHeaders.size() == rows.size()
+                    && index >= 0 && index < rowHeaders.size()) {
+                String label = rowHeaders.get(index);
+                return label == null ? "" : label;
+            }
+            return row == null || row.key() == null ? "" : row.key();
+        }
     }
 
     /** Dashboard block 1: literally a cross table, so it cannot read differently. */

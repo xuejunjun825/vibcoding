@@ -303,6 +303,31 @@ analytics_feed_single_source() {
     fi
 }
 
+# ---- L16 体检可重复：密度按容差判等 + 门禁自建缺陷自清理（D6 的类） ----
+# 缺陷现场：platform-verify.sh 用 awk printf "%.2f" 与服务端 BigDecimal HALF_UP 的两位小数做串相等，
+# d/r 恰为 x.xx5 时 0.125 被判 0.12 vs 0.13 → 假红；AC-13 每次新建「验证缺陷-<HHMMSS>」且无人删除，
+# 同一 DB 连跑会让 d/r 逐次漂移。两条一起才可重复，缺一不可。
+verify_gate_repeatable() {
+    local f="$ROOT/scripts/platform-verify.sh" n
+    [[ -f "$f" ]] || { echo "缺少 scripts/platform-verify.sh"; return 1; }
+    # 自检：负向判据必须命中修复前的真实写法，否则这条门禁形同虚设
+    if ! printf '%s\n' '[[ "$CALC" == "$GOT" ]]' | grep -qF '[[ "$CALC" == "$GOT" ]]'; then
+        echo "L16 自检失效：负向判据不再命中修复前写法（提取器坏了）"
+        return 1
+    fi
+    if grep -qF '[[ "$CALC" == "$GOT" ]]' "$f"; then
+        echo "platform-verify.sh 仍用两位小数串相等判密度：x.xx5 时两侧舍入不同会假红"
+        return 1
+    fi
+    grep -qF 'diff <= 0.0055' "$f" \
+        || { echo "platform-verify.sh 密度缺少 <=0.0055 容差比较（0.005 会被 double 误差击穿）"; return 1; }
+    grep -q 'DELETE FROM defect' "$f" \
+        || { echo "platform-verify.sh 未清理自建的「验证缺陷-*」（d/r 会逐次漂移）"; return 1; }
+    n="$(grep -c '^cleanup_verify_defects$' "$f" || true)"
+    [[ "$n" -ge 2 ]] \
+        || { echo "cleanup_verify_defects 调用点 ${n} 处：创建前清历史 + 断言后清本轮，共需 2 处"; return 1; }
+}
+
 log "静态门禁：脚本语法 / 变量插值 / 单点实现 / 错误提示 / 文档一致性"
 run_check "L1 所有脚本 bash -n 语法通过" syntax_ok
 run_check "L2 无 \$VAR 紧跟全角标点（防 set -u 吞变量名）" no_bare_var_before_wide_char
@@ -321,6 +346,7 @@ run_check "L12 前端 views 不复制状态中文文案" frontend_has_no_status_
 run_check "L13 .gitignore 覆盖前端产物与运行态" gitignore_covers_artifacts
 run_check "L14 报告取数只经 QualityAggregator（禁止 SUM(pc.result=...)）" report_aggregation_single_source
 run_check "L15 分析域取数原语单点（三页共用 useAnalyticsFeed）" analytics_feed_single_source
+run_check "L16 体检可重复：密度容差判等 + 自建缺陷自清理" verify_gate_repeatable
 
 if (( FAILED > 0 )); then
     err "lint 失败 ${FAILED}/${TOTAL} 项：按上面的行号修正后重跑 make lint"

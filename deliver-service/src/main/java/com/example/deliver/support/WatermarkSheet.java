@@ -99,11 +99,14 @@ public final class WatermarkSheet {
             }
 
             int rowIndex = FREEZE_ROWS;
-            for (AnalyticsViews.CrossRow row : tab.rows()) {
-                rowIndex = dataRow(sheet, rowIndex, row, styles, columns);
+            for (int i = 0; i < tab.rows().size(); i++) {
+                AnalyticsViews.CrossRow row = tab.rows().get(i);
+                rowIndex = dataRow(sheet, rowIndex, row, tab.rowLabel(i, row), styles, columns);
             }
-            rowIndex = dataRow(sheet, rowIndex, tab.subtotal(), styles, columns);
-            rowIndex = dataRow(sheet, rowIndex, tab.total(), styles, columns);
+            rowIndex = dataRow(sheet, rowIndex, tab.subtotal(),
+                    tab.rowLabel(tab.rows().size(), tab.subtotal()), styles, columns);
+            rowIndex = dataRow(sheet, rowIndex, tab.total(),
+                    tab.rowLabel(tab.rows().size() + 1, tab.total()), styles, columns);
 
             Row footer = sheet.createRow(rowIndex);
             cell(footer, 0, head.footer(), styles.footer());
@@ -130,11 +133,10 @@ public final class WatermarkSheet {
         }
     }
 
-    private static int dataRow(Sheet sheet, int rowIndex, AnalyticsViews.CrossRow row, Styles styles,
-                               int columns) {
+    private static int dataRow(Sheet sheet, int rowIndex, AnalyticsViews.CrossRow row, String label,
+                               Styles styles, int columns) {
         Row target = sheet.createRow(rowIndex);
-        String key = row == null || row.key() == null ? "" : row.key();
-        cell(target, 0, key, styles.label());
+        cell(target, 0, label, styles.label());
         if (row != null) {
             for (int i = 0; i < row.values().size() && i + 1 < columns; i++) {
                 Double value = row.values().get(i);

@@ -171,25 +171,25 @@ public final class AnalyticsMetrics {
     private static Map<String, AnalyticsViews.MetricSpec> build() {
         Map<String, AnalyticsViews.MetricSpec> map = new LinkedHashMap<>();
 
-        count(map, "req.total", "需求总量", "个", "筛选范围内该 Scope 可见的全部需求数，不受时间窗限制");
+        count(map, "req.total", "需求总量", "个", "筛选范围内可见的全部需求数，不受时间窗限制");
         count(map, "req.newCount", "新增需求", "个", "创建时间落在选中时间窗内的需求数");
-        rate(map, "req.inPoolRate", "入池率", "%", "状态为 POOLED 的需求数 ÷ 窗口内需求数");
+        rate(map, "req.inPoolRate", "入池率", "%", "状态为「已入池」的需求数 ÷ 窗口内需求数");
         rate(map, "req.completionRate", "完成率", "%",
-                "完成态需求数 ÷ 窗口内需求数；完成态取 RequirementStates.completeStatuses()");
+                "处于完成态的需求数 ÷ 窗口内需求数；完成态含已完成、已关闭等流水终态");
         rate(map, "req.splitRate", "拆分率", "%", "存在子需求的需求数 ÷ 窗口内需求数");
         count(map, "req.overdueCount", "逾期需求", "个",
                 "计划完成日早于今天且未完成的需求数");
-        count(map, "req.pendingTest", "待测试", "个", "状态为 PENDING_TEST 的需求数");
+        count(map, "req.pendingTest", "待测试", "个", "状态为「待测试」的需求数");
         count(map, "req.mineOpen", "我的待处理", "个", "负责人是当前用户且未完成的需求数");
         count(map, "req.rejected", "被驳回需求", "个",
-                "最近一次 REQ_SUBMIT/REQ_REVIEW 审批实例为 REJECTED 且需求未终态（BUS 流的驳回是回到 SUBMITTED，没有 REJECTED 状态）");
+                "最近一次「需求评审」或「评审入池」审批结果为「已驳回」且需求未终态的需求数（业务需求的驳回是回到「已提报」，没有单独的驳回状态）");
         avgDays(map, "req.avgDwell", "平均停留", "天",
-                "从创建到关闭（未关闭则到今天）的平均停留天数，nearest-rank 同源公式");
+                "从创建到关闭（未关闭则到今天）的平均停留天数，与流程页同源");
         avgDays(map, "cycle.avg", "平均交付周期", "天", "从创建到关闭的平均天数，仅统计已关闭需求");
         p90Days(map, "cycle.p90", "P90 交付周期", "天",
-                "已关闭需求交付周期的 P90（nearest-rank：ceil(0.9×n)，与流程页同源）");
-        sum(map, "effort.estimate", "预估人天", "人天", "estimate_days 求和，未填按 0 计");
-        sum(map, "effort.actual", "实际人天", "人天", "actual_days 求和，未填按 0 计");
+                "已关闭需求交付周期的 P90（最近秩口径：向上取整 0.9×样本数，与流程页同源）");
+        sum(map, "effort.estimate", "预估人天", "人天", "预估人天逐条求和，未填按 0 计");
+        sum(map, "effort.actual", "实际人天", "人天", "实际人天逐条求和，未填按 0 计");
         dev(map, "effort.deviation", "人天偏差", "%",
                 "(实际人天 − 预估人天) ÷ 预估人天；无预估的需求不计入两侧");
         count(map, "vendor.accepted", "完成需求", "个", "窗口内完成的（完成态、关闭时间在窗口内）需求数");
@@ -198,7 +198,7 @@ public final class AnalyticsMetrics {
         total(map, "delivery.onTime", "按期完成数", "个",
                 "关闭日 ≤ 期望交付日的需求数");
         rate(map, "quality.passRate", "测试通过率", "%",
-                "PASS 的执行数 ÷ 有结论（PASS/FAIL/BLOCKED）的执行数");
+                "结论为「通过」的执行数 ÷ 有结论（通过/失败/阻塞）的执行数");
         density(map, "quality.defectDensity", "缺陷密度", "个/需求",
                 "窗口内新增缺陷数 ÷ 窗口内需求数");
         rate(map, "quality.releaseSuccess", "发布成功率", "%",
@@ -208,10 +208,11 @@ public final class AnalyticsMetrics {
                 "需求评审/评审入池实例的审批任务数（部署审批不在本口径内）");
         avgHours(map, "approval.avgHours", "平均耗时", "小时",
                 "审批任务从创建到处理（未处理则到现在）的平均耗时");
-        p90Hours(map, "approval.p90Hours", "P90 耗时", "小时", "审批任务处理耗时的 P90，nearest-rank");
-        rate(map, "approval.passRate", "审批通过率", "%", "APPROVED 任务数 ÷ 已决策（APPROVED/REJECTED）任务数");
+        p90Hours(map, "approval.p90Hours", "P90 耗时", "小时", "审批任务处理耗时的 P90（最近秩口径）");
+        rate(map, "approval.passRate", "审批通过率", "%",
+                "结果为「已通过」的审批任务数 ÷ 已决策（已通过/已驳回）的任务数");
         count(map, "org.memberCount", "参与成员", "人",
-                "筛选范围内出现过需求负责人的去重数（sys_user 不在 ScopeSql 登记表内，故按需求参与口径统计）");
+                "筛选范围内出现过需求负责人的去重人数（按需求参与口径统计，不含未参与任何需求的账号）");
         count(map, "org.activeReq", "进行中需求", "个", "窗口内创建且未完成的需求数");
         count(map, "workflow.enabled", "启用流程", "个",
                 "窗口内发起过需求评审实例的流程定义去重数");

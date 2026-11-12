@@ -27,6 +27,8 @@ const stamp = computed(() => {
 })
 
 const cacheText = computed(() => (props.cache === 'HIT' || props.cache === 'MISS' ? props.cache : ''))
+// r14 AC-4：徽标上屏只出中文；HIT/MISS 仅留作样式类与语义判断，不再出现在界面文本里
+const cacheLabel = computed(() => (cacheText.value === 'HIT' ? '缓存命中' : cacheText.value === 'MISS' ? '缓存未命中' : ''))
 
 const title = computed(() => {
   const head = stamp.value ? `数据截至 ${stamp.value}` : '数据截至时间未返回'
@@ -48,7 +50,7 @@ const title = computed(() => {
       :class="cacheText === 'HIT' ? 'stamp__cache--hit' : 'stamp__cache--miss'"
       data-testid="data-stamp-cache"
     >
-      {{ cacheText }}
+      {{ cacheLabel }}
     </span>
 
     <span v-if="props.loading" class="stamp__loading" data-testid="data-stamp-loading">

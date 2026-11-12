@@ -4,10 +4,10 @@ SHELL := /bin/bash
 .PHONY: help dev-up dev-down verify build lint test test-negative nacos-status clean distclean \
         platform-up platform-down platform-web platform-verify platform-test-negative \
         platform-seed platform-unit platform-perf quality-verify quality-e2e integration-verify \
-        collab-verify collab-perf access-verify platform-demo-reset
+        collab-verify collab-perf access-verify analytics-i18n-verify platform-demo-reset
 
 help: ## 列出所有命令
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 
 # ---- r1 baseline (unchanged contract) ----
 dev-up: ## 一条命令拉起 Nacos + demo-service + api-gateway，并打印 READY
@@ -84,6 +84,9 @@ collab-perf: ## AC-20 五项 P95 性能基线（甘特 300 条 / Wiki 检索 / �
 
 access-verify: ## 角色×页面准入：字典契约/隔离/5页×7角色矩阵/导航声明/菜单可见集（先 make platform-up）
 	@./scripts/access-verify.sh
+
+analytics-i18n-verify: ## 分析域中文化：三方一致 + 四页/导出 0 英文枚举码（先 make platform-up；--static-only 免栈）
+	@./scripts/analytics-i18n-verify.sh
 
 platform-demo-reset: ## 单事务重建演示数据（12 需求链路 + 4 条不变量自检；先 make platform-up && platform-seed）
 	@./scripts/platform-demo-reset.sh

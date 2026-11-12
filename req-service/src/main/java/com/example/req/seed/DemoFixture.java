@@ -233,9 +233,9 @@ public final class DemoFixture {
 
     /** code, requirementCode, title, severity, priority, status, domain, handler。 */
     private static final String[][] DEFECTS = {
-            {"DEMO-D-01", "DEMO-R-03", "审批通过后状态未流转", "S2", "P1", "IN_PROGRESS", "ORD", "dev1"},
-            {"DEMO-D-02", "DEMO-R-10", "对账单金额精度丢失", "S3", "P2", "NEW", "ORD", ""},
-            {"DEMO-D-03", "DEMO-R-06", "预警阈值边界漏判", "S3", "P2", "CLOSED", "INV", "dev2"},
+            {"DEMO-D-01", "DEMO-R-03", "审批通过后状态未流转", "P1", "P1", "IN_PROGRESS", "ORD", "dev1"},
+            {"DEMO-D-02", "DEMO-R-10", "对账单金额精度丢失", "P2", "P2", "NEW", "ORD", ""},
+            {"DEMO-D-03", "DEMO-R-06", "预警阈值边界漏判", "P2", "P2", "CLOSED", "INV", "dev2"},
     };
 
     public static List<Object[]> defectRows(Map<String, Long> refs) {

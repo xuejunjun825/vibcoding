@@ -81,7 +81,8 @@ const head = computed<HeadCell[]>(() => {
 const bodyRows = computed<ViewRow[]>(() => {
   if (!props.transpose) {
     return props.tab.rows.map((row, index) => ({
-      label: row.key || rowLabels.value[index] || '',
+      // 与服务端同源：行头优先中文显示串（`rowLabels` 已含长度守卫），raw `row.key` 只兜底。
+      label: rowLabels.value[index] || row.key || '',
       values: valuesOf(row),
       counts: countsOf(row),
     }))

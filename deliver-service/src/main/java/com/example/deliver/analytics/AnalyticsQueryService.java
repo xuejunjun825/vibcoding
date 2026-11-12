@@ -351,29 +351,44 @@ public class AnalyticsQueryService {
         Map<String, Mail[]> colAggs = new LinkedHashMap<>();
         Set<String> rowKeys = new LinkedHashSet<>();
         Set<String> colKeys = new LinkedHashSet<>();
+        // r14：raw 与上屏并行采集。key 一律用 raw（cells/rowAggs/colAggs 的键、排序、合并语义都不变），
+        // 显示串单独存一张表，出表头时按 raw 键回查，避免把中文塞进聚合键导致同一列被拆成两列。
+        Map<String, String> rowDisplays = new LinkedHashMap<>();
+        Map<String, String> colDisplays = new LinkedHashMap<>();
         Mail[] grand = newMails(measureCount);
 
         jdbc.stream(sql.toString(), params, row -> {
             StringBuilder rowBuffer = new StringBuilder();
             StringBuilder colBuffer = new StringBuilder();
+            StringBuilder rowShow = new StringBuilder();
+            StringBuilder colShow = new StringBuilder();
             for (int i = 0; i < dims.size(); i++) {
                 String value = text(row.get("d" + i));
+                String shown = AnalyticsLabels.display(dataset, dims.get(i), value);
                 if (i < rowDimCount) {
                     if (rowBuffer.length() > 0) {
                         rowBuffer.append(" / ");
+                        rowShow.append(" / ");
                     }
                     rowBuffer.append(value);
+                    rowShow.append(shown);
                 } else {
                     if (colBuffer.length() > 0) {
                         colBuffer.append(" / ");
+                        colShow.append(" / ");
                     }
                     colBuffer.append(value);
+                    colShow.append(shown);
                 }
             }
             String rowKey = rowBuffer.toString();
             String colKey = colBuffer.length() == 0 ? "合计" : colBuffer.toString();
             rowKeys.add(rowKey);
             colKeys.add(colKey);
+            rowDisplays.putIfAbsent(rowKey, rowShow.toString());
+            if (colBuffer.length() > 0) {
+                colDisplays.putIfAbsent(colKey, colShow.toString());
+            }
             Mail[] cell = cells.computeIfAbsent(rowKey + NO_COLUMN + colKey,
                     ignored -> newMails(measureCount));
             Mail[] rowMail = rowAggs.computeIfAbsent(rowKey, ignored -> newMails(measureCount));
@@ -392,25 +407,33 @@ public class AnalyticsQueryService {
             }
         });
 
-        List<String> rowHeaders = new ArrayList<>(rowKeys);
-        Collections.sort(rowHeaders);
+        // 排序仍对 raw 做：中文排序会打乱列序，与 r13 的逐列对齐会失守（AC-2 列序不变）
+        List<String> sortedKeys = new ArrayList<>(rowKeys);
+        Collections.sort(sortedKeys);
         List<String> orderedCols = new ArrayList<>(colKeys);
         Collections.sort(orderedCols);
 
         List<String> colHeaders = new ArrayList<>();
+        List<String> colCodes = new ArrayList<>();
         List<String> colOrder = new ArrayList<>();
         List<Integer> measureOrder = new ArrayList<>();
         for (String colKey : orderedCols) {
+            String shownCol = colDisplays.getOrDefault(colKey, colKey);
             for (int i = 0; i < measureCount; i++) {
                 String label = AnalyticsMetrics.spec(measures.get(i)).label();
-                colHeaders.add(def.cols().isEmpty() ? label : colKey + " · " + label);
+                colHeaders.add(def.cols().isEmpty() ? label : shownCol + " · " + label);
+                // 无列维时 colCodes 为空数组（PRD AC-3 特例）；有列维时与 colHeaders 同长同序
+                colCodes.add(def.cols().isEmpty() ? null : colKey);
                 colOrder.add(def.cols().isEmpty() ? NO_COLUMN : colKey);
                 measureOrder.add(i);
             }
         }
+        if (def.cols().isEmpty()) {
+            colCodes = new ArrayList<>();
+        }
 
-        List<AnalyticsViews.CrossRow> rows = new ArrayList<>(rowHeaders.size());
-        for (String rowKey : rowHeaders) {
+        List<AnalyticsViews.CrossRow> rows = new ArrayList<>(sortedKeys.size());
+        for (String rowKey : sortedKeys) {
             List<Double> values = new ArrayList<>(colHeaders.size());
             List<Long> counts = new ArrayList<>(colHeaders.size());
             for (int idx = 0; idx < colHeaders.size(); idx++) {
@@ -424,6 +447,13 @@ public class AnalyticsQueryService {
             rows.add(new AnalyticsViews.CrossRow(rowKey, values, counts));
         }
         sortRows(rows);
+        // 行头/行 code 只能在 sortRows 之后按 rows 的 key 生成：sortRows 是按首个度量的值降序重排
+        // （不是按 key），先建行头再排序会让标签错位到别的行——r13 里看不出来只因为前端一直读 row.key。
+        List<String> rowHeaders = rowHeadersOf(rows, rowDisplays);
+        List<String> rowCodes = new ArrayList<>(rows.size());
+        for (AnalyticsViews.CrossRow row : rows) {
+            rowCodes.add(row.key());
+        }
 
         List<Double> subtotalValues = new ArrayList<>(colHeaders.size());
         List<Long> subtotalCounts = new ArrayList<>(colHeaders.size());
@@ -450,7 +480,8 @@ public class AnalyticsQueryService {
         AnalyticsViews.CrossTab result = new AnalyticsViews.CrossTab(rowHeaders, colHeaders, rows,
                 new AnalyticsViews.CrossRow("小计", subtotalValues, subtotalCounts),
                 new AnalyticsViews.CrossRow("总计", totalValues, totalCounts),
-                (int) Math.min(groups, Integer.MAX_VALUE), false, asOf, AnalyticsCache.MISS);
+                (int) Math.min(groups, Integer.MAX_VALUE), false, asOf, AnalyticsCache.MISS,
+                Collections.unmodifiableList(colCodes), Collections.unmodifiableList(rowCodes));
         cache.put(cacheKey, result);
         return result;
     }
@@ -506,6 +537,18 @@ public class AnalyticsQueryService {
             mails[i] = new Mail();
         }
         return mails;
+    }
+
+    /**
+     * 行头与 {@code rows} 同序（r14 AC-3）：rows 已排好序，这里只按 {@code key()} 回查上屏串，
+     * 未登记的 key 原样返回。包级可见，便于单测钉住「行头不会错位到别的行」。
+     */
+    static List<String> rowHeadersOf(List<AnalyticsViews.CrossRow> rows, Map<String, String> displays) {
+        List<String> headers = new ArrayList<>(rows.size());
+        for (AnalyticsViews.CrossRow row : rows) {
+            headers.add(displays.getOrDefault(row.key(), row.key()));
+        }
+        return headers;
     }
 
     private static void sortRows(List<AnalyticsViews.CrossRow> rows) {
@@ -895,9 +938,10 @@ public class AnalyticsQueryService {
     }
 
     private static AnalyticsViews.CrossTab withCache(AnalyticsViews.CrossTab table, String cache) {
+        // 命中缓存也要带上 colCodes/rowCodes：只改主路径会让缓存响应缺字段（AC-3）
         return new AnalyticsViews.CrossTab(table.rowHeaders(), table.colHeaders(), table.rows(),
                 table.subtotal(), table.total(), table.groups(), table.truncated(), table.dataAsOf(),
-                cache);
+                cache, table.colCodes(), table.rowCodes());
     }
 
     private static AnalyticsViews.Dashboard withCache(AnalyticsViews.Dashboard dashboard,

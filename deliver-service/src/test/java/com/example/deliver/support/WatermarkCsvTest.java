@@ -1,6 +1,7 @@
 package com.example.deliver.support;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
@@ -60,6 +61,40 @@ class WatermarkCsvTest {
 
         String text = new String(WatermarkCsv.csv(tab, meta()), StandardCharsets.UTF_8);
         assertTrue(text.contains("\"a,\"\"b\"\"\",1"), text);
+    }
+
+    @Test
+    @DisplayName("首列写中文 rowHeaders，而不是原始 code（导出与页面同源）")
+    void firstColumnUsesChineseRowHeaders() {
+        String text = new String(WatermarkCsv.csv(labeledTab(), meta()), StandardCharsets.UTF_8);
+        if (text.startsWith("\uFEFF")) {
+            text = text.substring(1);
+        }
+        List<String> lines = new ArrayList<>();
+        for (String line : text.split("\r\n")) {
+            if (!line.startsWith("#")) {
+                lines.add(line);
+            }
+        }
+        // 去注释后：0 = 表头，1..3 = 明细，4 = 小计，5 = 总计
+        assertEquals("分组,需求数,平均交付周期", lines.get(0), text);
+        assertEquals("紧急,40,3", lines.get(1), text);
+        assertEquals("高,20,4", lines.get(2), text);
+        assertEquals("中,8,4", lines.get(3), text);
+        assertEquals("小计,68,3.5", lines.get(4), text);
+        assertEquals("总计,68,3.5", lines.get(5), text);
+    }
+
+    private static AnalyticsViews.CrossTab labeledTab() {
+        return new AnalyticsViews.CrossTab(
+                List.of("紧急", "高", "中"),
+                List.of("需求数", "平均交付周期"),
+                List.of(new AnalyticsViews.CrossRow("P0", List.of(40.0, 3.0), List.of(40L, 40L)),
+                        new AnalyticsViews.CrossRow("P1", List.of(20.0, 4.0), List.of(20L, 20L)),
+                        new AnalyticsViews.CrossRow("P2", List.of(8.0, 4.0), List.of(8L, 8L))),
+                new AnalyticsViews.CrossRow("小计", List.of(68.0, 3.5), List.of(68L, 68L)),
+                new AnalyticsViews.CrossRow("总计", List.of(68.0, 3.5), List.of(68L, 68L)),
+                3, false, "2026-11-10 10:00", "MISS");
     }
 
     private static AnalyticsViews.CrossTab tab() {

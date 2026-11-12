@@ -32,6 +32,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import EmptyState from '@/components/EmptyState.vue'
 import { formatNumber } from '@/utils/format'
 import type { ChartModel } from './chartModel'
+import { CHART_MODE_LABEL } from './chartModel'
 import '@/views/analytics/shared.css'
 
 use([
@@ -100,7 +101,9 @@ const ariaLabel = computed(() => {
   if (model.mode === 'HEATMAP') {
     return `热力图：${model.heat.y.length} 行 × ${model.heat.x.length} 列${unit}`
   }
-  return `${model.mode} 图：${model.categories.length} 个分类，${model.series.length} 个系列${unit}`
+  // 读屏文案必须是中文：`model.mode` 是 BAR/LINE/PIE/HEATMAP，经 CHART_MODE_LABEL 转成
+  // 「柱状图/折线图/饼图/热力」（与选择器同一份文案，不另写一套）。
+  return `${CHART_MODE_LABEL[model.mode]}：${model.categories.length} 个分类，${model.series.length} 个系列${unit}`
 })
 
 function formatValue(value: number): string {

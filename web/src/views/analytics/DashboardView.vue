@@ -8,7 +8,7 @@ import FilterBar from '@/components/analytics/FilterBar.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import type { ChartModel, ChartSeries } from '@/components/analytics/chartModel'
 import { fetchDashboard } from '@/api/analytics'
-import type { CrossTab, Dashboard, QualityLevel } from '@/api/analytics'
+import type { Breakdown, CrossTab, Dashboard, QualityLevel } from '@/api/analytics'
 import { useAnalyticsFeed } from '@/composables/useAnalyticsFeed'
 import { filterToQuery, useAnalyticsStore } from '@/stores/analytics'
 import { formatNumber, formatPercent } from '@/utils/format'
@@ -51,6 +51,13 @@ const breakdown = computed(() => dashboard.value?.breakdowns?.[0] ?? null)
 const breakdownLabel = computed(() => breakdown.value?.label || '需求量 · 域 × 状态')
 
 /**
+ * 服务端 `Breakdown` 还没声明 `rowHeaders`（r14 收口遗留，见交付说明的 OUT-OF-SCOPE）：
+ * 这里按「若已下发则透传」读取，后端补字段后本视图零改动生效；未下发时退回 `[]`，
+ * 交叉表随即退回 `rows[].key`（当前行维是 domain，中文名，没有可见差异）。
+ */
+type BreakdownWithRowHeaders = Breakdown & { rowHeaders?: string[] }
+
+/**
  * `Breakdown` → `CrossTable` 需要的 `CrossTab` 形状（纯派生，不发请求）。
  *
  * `total` 故意置空：后端 `total.values` 是**每个度量一个总计值**（长度 = 度量数，本页为 1），
@@ -58,10 +65,10 @@ const breakdownLabel = computed(() => breakdown.value?.label || '需求量 · �
  * “DELIVERED · 需求总量”下面。总计因此单独用 chip 展示（`totalText`），语义不串。
  */
 const matrix = computed<CrossTab | null>(() => {
-  const source = breakdown.value
+  const source = breakdown.value as BreakdownWithRowHeaders | null
   if (!source) return null
   return {
-    rowHeaders: [],
+    rowHeaders: source.rowHeaders ?? [],
     colHeaders: source.colHeaders,
     rows: source.rows,
     subtotal: source.subtotal,
@@ -284,7 +291,7 @@ function openInReports(): void {
       <!-- 4 厂商交付排名 -->
       <section class="an-card" data-block="vendor">
         <h2 class="an-card__title">厂商交付排名</h2>
-        <p class="an-hint">按完成数排名；本厂商（mine）行高亮，名次不变</p>
+        <p class="an-hint">按完成数排名；本厂商所在行高亮，名次不变</p>
         <div class="an-table__scroll">
           <table class="an-table">
             <thead>
@@ -324,7 +331,7 @@ function openInReports(): void {
       <!-- 5 交付质量 -->
       <section class="an-card" data-block="quality">
         <h2 class="an-card__title">交付质量</h2>
-        <p class="an-hint">等级由服务端按样本判定；level=NONE 表示该指标无样本</p>
+        <p class="an-hint">等级由服务端按样本判定；无样本的指标标「无样本」，不参与达标判断</p>
         <div class="an-grid an-grid--kpi">
           <div v-for="card in qualityCards" :key="card.key" class="dash__tile">
             <div class="dash__tile-head">

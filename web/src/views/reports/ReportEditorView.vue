@@ -5,6 +5,8 @@ import { ElMessage } from 'element-plus'
 import CrossTable from '@/components/analytics/CrossTable.vue'
 import ChartView from '@/components/analytics/ChartView.vue'
 import DataStamp from '@/components/analytics/DataStamp.vue'
+// 范围 chips 里的筛选值只译回显（提交值仍是 code），词典本体在 stores/dict.ts
+import { valueLabel } from '@/components/analytics/labels'
 import PinLimitDialog from '@/components/analytics/PinLimitDialog.vue'
 import ShareDialog from '@/components/analytics/ShareDialog.vue'
 import SlotBoard from '@/components/reports/SlotBoard.vue'
@@ -135,7 +137,7 @@ const scopeChips = computed(() => {
   const filter = store.filter
   if (filter.domainId !== null) chips.push({ key: 'domainId', label: `业务域 #${filter.domainId}` })
   if (filter.vendorId !== null) chips.push({ key: 'vendorId', label: `厂商 #${filter.vendorId}` })
-  if (filter.reqType) chips.push({ key: 'reqType', label: `需求类型 ${filter.reqType}` })
+  if (filter.reqType) chips.push({ key: 'reqType', label: `需求类型 ${valueLabel('type', filter.reqType)}` })
   chips.push({ key: 'range', label: `${PRESET_LABEL[filter.preset]} ${filter.from} ~ ${filter.to}` })
   return chips
 })

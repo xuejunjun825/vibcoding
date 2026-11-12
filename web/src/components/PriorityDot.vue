@@ -4,7 +4,9 @@ import { useDictStore } from '@/stores/dict'
 
 /**
  * 优先级彩点（UI-STYLE §2）：P0 红 / P1 橙 / P2 蓝 / P3 灰。
- * 颜色之外始终带字母，避免“只靠颜色传达信息”。
+ * 颜色之外始终带文字——`dict.priority()` 自 r14 起出「紧急/高/中/低」而不是裸 code，
+ * 所以这里的判据是“有文字”，不是“有字母”。色块取 `meta.color`（P0 红…）；
+ * 需要语义色时用 `meta.tone`（danger/warning/primary/neutral），两者别混用。
  */
 const props = withDefaults(
   defineProps<{
