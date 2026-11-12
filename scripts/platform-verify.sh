@@ -341,7 +341,7 @@ section "AC-5 权限矩阵：接口生成探测矩阵，逐格断言 2xx/403"
 api_call GET /api/req/admin/permissions
 expect "GET /admin/permissions 200" 200
 FN_COUNT="$(jlen "$HTTP_BODY" '.functions')"
-expect_num "权限矩阵暴露 56 个函数码" "${FN_COUNT:-0}" eq 56 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码 + 1 M7 integration:manage + 14 M8 协作/代码/测试码）"
+expect_num "权限矩阵暴露 60 个函数码" "${FN_COUNT:-0}" eq 60 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码 + 1 M7 integration:manage + 14 M8 协作/代码/测试码 + 4 M9 分析域码 portal:view/portal:config/report:view/report:share；PermissionMatrixGridTest 同为 10×60）"
 ROLE_COUNT="$(jlen "$HTTP_BODY" '.roles')"
 expect_num "权限矩阵暴露 10 个角色" "${ROLE_COUNT:-0}" eq 10 "建租户预置的 10 角色"
 ROLE_CODES="$(db_q "SELECT GROUP_CONCAT(DISTINCT code ORDER BY code) FROM sys_role WHERE tenant_id=$(tenant_id)")"
@@ -611,7 +611,19 @@ expect_num "退役入口未落强制标记" "$(db_count deploy_order "id=${DEP_I
 # + 已会签报告」；夹具在 AC-16 的 D-09 段完整走一遍。
 
 # =====================================================================
+# D6（20261112-r14）：门禁自建数据自清理。「验证缺陷-<HHMMSS>」每跑一次新增一行，
+# 且异常中断会留下孤儿行，使 d/r 逐次漂移（17→18→…）。创建前清历史、断言后清本轮，
+# 保证同一 DB 上重复运行看到同一基线；只删本脚本自己种的 title 前缀，不碰业务数据。
+cleanup_verify_defects() {
+    local tid
+    tid="$(tenant_id)"
+    [[ -n "$tid" ]] || return 0
+    db_q "DELETE FROM defect_history WHERE tenant_id=${tid} AND defect_id IN (SELECT id FROM defect WHERE tenant_id=${tid} AND title LIKE '验证缺陷-%')" >/dev/null 2>&1
+    db_q "DELETE FROM defect WHERE tenant_id=${tid} AND title LIKE '验证缺陷-%'" >/dev/null 2>&1
+}
+
 section "AC-13 缺陷：派生归属、状态机、看板与明细复算"
+cleanup_verify_defects
 api_call POST /api/deliver/defects "$(jq -cn --arg t "验证缺陷-${RUN_TAG}" --argjson q "$RD_A" '{
   title:$t, description:"验证派生字段", reproSteps:"1. 打开\n2. 报错", severity:"P1", priority:"P1",
   requirementId:$q, domainId:999, vendorId:999, expectedFixDate:"2026-12-01"}')"
@@ -652,6 +664,7 @@ else
     warn "po1 登录失败，跳过业务方摘要断言（make platform-seed 必须建 po1）"
 fi
 API_TOKEN="$ADMIN_TOKEN"
+cleanup_verify_defects
 
 # =====================================================================
 section "AC-14 任务与迭代：完成率回写、关闭有未完成任务 409"
@@ -914,9 +927,18 @@ DENSITY="$(jget "$HTTP_BODY" '.metrics.density')"
 D_TOTAL="$(db_count defect "tenant_id=$(tenant_id) AND domain_id=1")"
 R_TOTAL="$(db_count requirement "tenant_id=$(tenant_id) AND domain_id=1")"
 if [[ -n "$DENSITY" && -n "$D_TOTAL" && -n "$R_TOTAL" && "$R_TOTAL" -gt 0 ]]; then
+    # D6（20261112-r14）：服务端 MetricFormulas.ratio 用 BigDecimal HALF_UP 取 2 位，awk printf "%.2f"
+    # 是 C 的 ties-to-even —— 恰为 x.xx5 时 0.125 被算成 0.12、服务端给 0.13，串相等必假红。
+    # 改为容差比较原始密度：两位小数的相邻粒度是 0.01，0.0055 既容纳两侧舍入又不会放行算错的公式
+    # （0.13-0.125 在 IEEE double 下是 0.0050000000000000044，所以容差不能取 0.005）。
     CALC="$(awk -v d="$D_TOTAL" -v r="$R_TOTAL" 'BEGIN{printf "%.2f", d/r}')"
     GOT="$(awk -v x="$DENSITY" 'BEGIN{printf "%.2f", x}')"
-    [[ "$CALC" == "$GOT" ]] && pass "缺陷密度可复算 (${GOT})" || fail "缺陷密度 ${GOT} != ${CALC}" "公式只在 MetricFormulas，SQL 只取计数"
+    if awk -v d="$D_TOTAL" -v r="$R_TOTAL" -v x="$DENSITY" \
+        'BEGIN { diff = d / r - x; if (diff < 0) diff = -diff; exit (diff <= 0.0055) ? 0 : 1 }'; then
+        pass "缺陷密度可复算 (${GOT}，${D_TOTAL}/${R_TOTAL}，容差内)"
+    else
+        fail "缺陷密度 ${GOT} != ${CALC}（${D_TOTAL}/${R_TOTAL}）" "公式只在 MetricFormulas，SQL 只取计数"
+    fi
 else
     warn "域 1 没有需求，跳过密度复算"
 fi

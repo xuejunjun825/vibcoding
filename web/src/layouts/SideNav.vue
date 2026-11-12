@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { portalRoleLabel } from '@/components/analytics/portalRoles'
 import { NAV_GROUPS, NAV_ICONS, type NavItem } from './nav'
 import { navVisible, type NavContext } from './navAccess'
 
@@ -98,7 +99,13 @@ async function switchDomain(command: string | number | object): Promise<void> {
   await router.replace({ path: route.path, query })
 }
 
-const roleLabel = computed(() => auth.user?.roles?.join(' / ') ?? '')
+/**
+ * 身份区直出中文角色名：JWT 只带 code（PLATFORM_ADMIN…），中文名由 `portalRoles.ts`
+ * 唯一映射（= 后端 RoleCatalog/PortalTemplates 的镜像）。未知码原样回显，不吞信息。
+ */
+const roleLabel = computed(() =>
+  (auth.user?.roles ?? []).map((code) => portalRoleLabel(code)).join(' / '),
+)
 
 async function onUserCommand(command: string | number | object): Promise<void> {
   if (command === 'logout') {

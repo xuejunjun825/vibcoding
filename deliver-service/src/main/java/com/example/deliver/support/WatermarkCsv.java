@@ -2,6 +2,7 @@ package com.example.deliver.support;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import com.example.deliver.analytics.AnalyticsViews;
 
@@ -47,11 +48,12 @@ public final class WatermarkCsv {
         }
         out.append(EOL);
 
-        for (AnalyticsViews.CrossRow row : tab.rows()) {
-            appendRow(out, row, tab.colHeaders().size());
+        List<AnalyticsViews.CrossRow> rows = tab.rows();
+        for (int i = 0; i < rows.size(); i++) {
+            appendRow(out, rows.get(i), tab.rowLabel(i, rows.get(i)), tab.colHeaders().size());
         }
-        appendRow(out, tab.subtotal(), tab.colHeaders().size());
-        appendRow(out, tab.total(), tab.colHeaders().size());
+        appendRow(out, tab.subtotal(), tab.rowLabel(rows.size(), tab.subtotal()), tab.colHeaders().size());
+        appendRow(out, tab.total(), tab.rowLabel(rows.size() + 1, tab.total()), tab.colHeaders().size());
 
         out.append("# ").append(head.footer()).append(EOL);
 
@@ -62,8 +64,9 @@ public final class WatermarkCsv {
         return bytes;
     }
 
-    private static void appendRow(StringBuilder out, AnalyticsViews.CrossRow row, int columnCount) {
-        out.append(quote(row == null ? "" : row.key()));
+    private static void appendRow(StringBuilder out, AnalyticsViews.CrossRow row, String label,
+                                  int columnCount) {
+        out.append(quote(label));
         for (int i = 0; i < columnCount; i++) {
             Double value = row == null || i >= row.values().size() ? null : row.values().get(i);
             out.append(',').append(value == null ? "" : number(value));

@@ -46,6 +46,10 @@ export type StatusKind =
   | 'caseReviewConclusion'
   | 'wikiVisibility'
   | 'mrReviewState'
+  // M9 分析域回显（TECHNICAL §5）：与服务端标签注册表 AnalyticsLabels 逐字符串一致
+  | 'reqType'
+  | 'severity'
+  | 'priority'
 
 const REQUIREMENT: Record<string, StatusMeta> = {
   // BUS
@@ -76,6 +80,24 @@ const DEFECT: Record<string, StatusMeta> = {
   PENDING_VERIFY: { label: '待验证', tone: 'warning' },
   CLOSED: { label: '关闭', tone: 'success' },
   REOPENED: { label: '重新打开', tone: 'danger' },
+}
+
+/** 需求类型（与 sys_dict.req_type、服务端注册表 R3 逐字符串一致） */
+const REQ_TYPE: Record<string, StatusMeta> = {
+  BUS: { label: '业务需求', tone: 'primary' },
+  PDR: { label: '产品需求', tone: 'info' },
+  RD: { label: '研发需求', tone: 'neutral' },
+}
+
+/**
+ * 缺陷等级（与 sys_dict.severity、服务端注册表 R5 逐字符串一致）。
+ * r14 起统一到 defect.severity 的 P0..P3 —— 旧写法 S1..S4 只在 RoleCatalog 声明过，业务侧零引用。
+ */
+const SEVERITY: Record<string, StatusMeta> = {
+  P0: { label: '致命', tone: 'danger' },
+  P1: { label: '严重', tone: 'warning' },
+  P2: { label: '一般', tone: 'info' },
+  P3: { label: '轻微', tone: 'neutral' },
 }
 
 const APPROVAL: Record<string, StatusMeta> = {
@@ -306,6 +328,23 @@ const MR_REVIEW_STATE: Record<string, StatusMeta> = {
   CHANGES_REQUESTED: { label: '已要求修改', tone: 'danger' },
 }
 
+/**
+ * 优先级词条（UI-STYLE §2：P0 红 / P1 橙 / P2 蓝 / P3 灰）。
+ * r14 起 `label` 用中文：分析域与该组件回显都不许再露出 P0..P3 裸码；
+ * 提交值仍是 code，`tone` 让回显层取色也走同一份词典。
+ */
+const PRIORITY: Record<string, { label: string; color: string; hint: string; tone: Tone }> = {
+  P0: { label: '紧急', color: '#D9363E', hint: '阻塞', tone: 'danger' },
+  P1: { label: '高', color: '#C77700', hint: '紧急', tone: 'warning' },
+  P2: { label: '中', color: '#2B6FE5', hint: '普通', tone: 'primary' },
+  P3: { label: '低', color: '#A9AEB8', hint: '低', tone: 'neutral' },
+}
+
+/** priority 也是分析域可作行/列维度的取值族：由 PRIORITY 派生，不复制第二份文案 */
+const PRIORITY_DICT: Record<string, StatusMeta> = Object.fromEntries(
+  Object.entries(PRIORITY).map(([code, item]) => [code, { label: item.label, tone: item.tone }]),
+)
+
 const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   requirement: REQUIREMENT,
   defect: DEFECT,
@@ -336,6 +375,10 @@ const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   caseReviewConclusion: CASE_REVIEW_CONCLUSION,
   wikiVisibility: WIKI_VISIBILITY,
   mrReviewState: MR_REVIEW_STATE,
+  // 分析域取值回显（TECHNICAL §5）：三族都必须与服务端注册表逐字符串相等
+  reqType: REQ_TYPE,
+  severity: SEVERITY,
+  priority: PRIORITY_DICT,
 }
 
 /** 流转动作中文标签（与 TECHNICAL §3.3 的状态表一一对应） */
@@ -429,13 +472,6 @@ export const DANGER_ACTIONS = new Set([
   'archive',
 ])
 
-const PRIORITY: Record<string, { label: string; color: string; hint: string }> = {
-  P0: { label: 'P0', color: '#D9363E', hint: '阻塞' },
-  P1: { label: 'P1', color: '#C77700', hint: '紧急' },
-  P2: { label: 'P2', color: '#2B6FE5', hint: '普通' },
-  P3: { label: 'P3', color: '#A9AEB8', hint: '低' },
-}
-
 export const useDictStore = defineStore('dict', () => {
   /** 服务端可下发补充词典（/admin/dicts），这里保留合并入口 */
   const overrides = ref<Partial<Record<StatusKind, Record<string, StatusMeta>>>>({})
@@ -452,6 +488,15 @@ export const useDictStore = defineStore('dict', () => {
 
   function label(kind: StatusKind, value: string | null | undefined): string {
     return meta(kind, value).label
+  }
+
+  /**
+   * 取值是否已登记。回显层必须用 has() 区分「未登记」与「空」：
+   * meta() 的未知兜底会把未登记码去下划线后照常显示，拿它判断登记状态会漏判。
+   */
+  function has(kind: StatusKind, value: string | null | undefined): boolean {
+    const key = (value ?? '').toUpperCase()
+    return Boolean(overrides.value[kind]?.[key] ?? DICTS[kind]?.[key])
   }
 
   function tone(kind: StatusKind, value: string | null | undefined): Tone {
@@ -491,5 +536,5 @@ export const useDictStore = defineStore('dict', () => {
     version.value += 1
   }
 
-  return { meta, label, tone, statusText, statusTone, actionLabel, priority, merge, overrides, version }
+  return { meta, label, has, tone, statusText, statusTone, actionLabel, priority, merge, overrides, version }
 })

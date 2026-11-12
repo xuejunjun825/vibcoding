@@ -70,6 +70,33 @@ class WatermarkSheetTest {
         }
     }
 
+    @Test
+    @DisplayName("首列写中文 rowHeaders，而不是原始 code（导出与页面同源）")
+    void firstColumnUsesChineseRowHeaders() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(labeledBytes()))) {
+            Sheet sheet = workbook.getSheetAt(0);
+            assertEquals("紧急", sheet.getRow(2).getCell(0).getStringCellValue());
+            assertEquals("高", sheet.getRow(3).getCell(0).getStringCellValue());
+            assertEquals("中", sheet.getRow(4).getCell(0).getStringCellValue());
+            assertEquals("小计", sheet.getRow(5).getCell(0).getStringCellValue());
+            assertEquals("总计", sheet.getRow(6).getCell(0).getStringCellValue());
+        }
+    }
+
+    private static byte[] labeledBytes() {
+        AnalyticsViews.CrossTab tab = new AnalyticsViews.CrossTab(
+                List.of("紧急", "高", "中"),
+                List.of("需求数", "平均交付周期"),
+                List.of(new AnalyticsViews.CrossRow("P0", List.of(40.0, 3.0), List.of(40L, 40L)),
+                        new AnalyticsViews.CrossRow("P1", List.of(20.0, 4.0), List.of(20L, 20L)),
+                        new AnalyticsViews.CrossRow("P2", List.of(8.0, 4.0), List.of(8L, 8L))),
+                new AnalyticsViews.CrossRow("小计", List.of(68.0, 3.5), List.of(68L, 68L)),
+                new AnalyticsViews.CrossRow("总计", List.of(68.0, 3.5), List.of(68L, 68L)),
+                3, false, "2026-11-10 10:00", "MISS");
+        return WatermarkSheet.xlsx(tab, new WatermarkSheet.Meta("需求周报", "需求",
+                "2026-11-10T10:00:00", "2026-11-10 10:00"));
+    }
+
     private static byte[] bytes() {
         return WatermarkSheet.xlsx(tab(), new WatermarkSheet.Meta("需求周报", "需求",
                 "2026-11-10T10:00:00", "2026-11-10 10:00"));

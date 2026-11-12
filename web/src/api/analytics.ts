@@ -111,6 +111,13 @@ export interface CrossTab {
   truncated: boolean
   dataAsOf: string
   cache: CacheState | string
+  /**
+   * 机器可读的列取值（r14 AC-3）：与 `colHeaders` 同长同序，「合计」列对应 `null`。
+   * **无列维时为空数组**——前端必须先看长度再用，禁止按下标索引。
+   */
+  colCodes?: (string | null)[]
+  /** 机器可读的行取值：与 `rowHeaders` 同长同序。 */
+  rowCodes?: string[]
 }
 
 /* ------------------------------------------------------------------ 看板 */
