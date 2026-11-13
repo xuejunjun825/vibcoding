@@ -9,6 +9,8 @@
 #   4. r15：漏删的四张表（report_definition / portal_card_config / api_client / test_executor）
 #      统一由 DemoFixture.DELETE_ORDER(+keepFilter) 决定去留，本脚本只做「搬运 counts + 独立复核
 #      库/API 现实」——它不拥有表清单，也不维护第二套保留判断（PRE_CLIENTS 前后快照已整体删除）。
+#   5. r16：report_definition 从「清空后为 0」改为「清空后回填 2 张演示报表」，因此三处断言从
+#      0 改成 2 + 名称集合，并在末尾用真实登录 run/export 自证两张表开箱可用（AC-1/AC-3/AC-5）。
 #
 # 不进 make test / platform-up / platform-seed（AC-14）：重置会删掉业务实例数据，
 # 只能由人（或演示前的一次手工动作）触发。
@@ -37,6 +39,13 @@ if [[ -z "$TENANT_ID" ]]; then
     err "修复: 先执行 make platform-seed（重置只清业务实例数据，不造账号/域/厂商）"
     exit 1
 fi
+
+# r16 演示报表（AC-1/AC-2）：脚本侧的规范名集合。服务端 DemoFixture.REPORT_NAMES 是另一份
+# （跨进程只能各写一份），两侧各自内部一致即可：中文名称排序不可依赖 MySQL collation，所以
+# 库内用 name IN 命中数、接口用 `jq sort` 规范化，绝不比较任何一方的原始顺序。
+DEMO_REPORTS=('需求状态分布' '厂商交付概览')
+DEMO_REPORT_NAMES_SQL="'${DEMO_REPORTS[0]}','${DEMO_REPORTS[1]}'"
+DEMO_REPORT_NAMES_EXPECTED="$(jq -rn --args '$ARGS.positional | sort | join(",")' --args "${DEMO_REPORTS[@]}")"
 
 # ---------------------------------------------------------------- 调用
 
@@ -104,12 +113,13 @@ check_count actualDaysOver30 0 "人天 > 30 的残留 = 0"
 check_count overdueGanttRows 0 "甘特逾期行 = 0"
 
 # 定义数据残留（r15）：这四张表以前不在 DELETE_ORDER 里，重置后仍带着上一轮的报表/门户/客户端痕迹
-check_count reports        0 "报表定义（report_definition）= 0"
+# r16：report_definition 不再收到 0——清表后立刻回填 2 张演示报表（AC-1），其余三张仍应为 0。
+check_count reports        2 "报表定义（report_definition）= 2 张演示报表"
 check_count portalCards    0 "门户卡片配置（portal_card_config）= 0"
 check_count portalPins     0 "门户个人 pin（user_id <> 0）= 0"
 check_count executors      2 "执行器保留 2 条（STUB-LOCAL / LEGACY-OFF）"
 check_count apiClients     0 "开放客户端（api_client）= 0"
-# probeReports 是 reports=0 的子集：只作「251 条探针确实清空」的诊断，不得据它推导别的期望
+# probeReports 是 reports=2 上的探针过滤：只作「251 条探针确实清空」的诊断，不得据它推导别的期望
 check_count probeReports   0 "报表探针残留 = 0（诊断信号）"
 
 # 运行时残留（r15-fix / QA D-01+D-02）：这三张表都不是「整表不进序列」能挡住的污染——
@@ -154,13 +164,17 @@ KEPT_POLICIES="$(db_count branch_policy "tenant_id = ${TENANT_ID}")"
     || fail "分支策略被重置清空（${KEPT_POLICIES:-0} 条）" "branch_policy 是定义数据：从 DELETE_ORDER 移除，不能删了又不重放"
 
 # r15 漏删的 4 张表：库内现实复核（counts 是服务端自报，这里直接问数据库）
+# r16：report_definition 是「清空后回填」，所以行数从 0 变 2；数量与名称集合都要对——只对数量
+# 会放过「回填成别的表」，只对名称会放过「多回填一张」。名称走 IN 命中数，避开中文 collation。
 DB_REPORTS="$(db_count report_definition "tenant_id = ${TENANT_ID}")"
+DB_REPORT_NAMED="$(db_count report_definition "tenant_id = ${TENANT_ID} AND name IN (${DEMO_REPORT_NAMES_SQL})")"
 DB_PORTAL_CARDS="$(db_count portal_card_config "tenant_id = ${TENANT_ID}")"
 DB_CLIENTS="$(db_count api_client "tenant_id = ${TENANT_ID}")"
 DB_EXECUTORS="$(db_count test_executor "tenant_id = ${TENANT_ID}")"
-[[ "${DB_REPORTS}" == "0" ]] \
-    && pass "库内 report_definition = 0 行" \
-    || fail "库内 report_definition ${DB_REPORTS} 行，期望 0" "报表定义属实例数据：DELETE_ORDER 必须整表清空，否则 /reports 留着上一轮的探针"
+[[ "${DB_REPORTS}" == "2" && "${DB_REPORT_NAMED}" == "2" ]] \
+    && pass "库内 report_definition = 2 行，且恰为两张演示报表（名称命中 2/2）" \
+    || fail "库内 report_definition ${DB_REPORTS} 行 / 名称命中 ${DB_REPORT_NAMED} 行，期望 2 行且命中 2" \
+            "报表定义仍属实例数据（DELETE_ORDER 整表清空），但清完必须回填 DemoFixture.REPORTS 的两张表"
 [[ "${DB_PORTAL_CARDS}" == "0" ]] \
     && pass "库内 portal_card_config = 0 行" \
     || fail "库内 portal_card_config ${DB_PORTAL_CARDS} 行，期望 0" "门户卡片配置属实例数据：角色模板由代码提供，个人 pin 必须清掉"
@@ -225,12 +239,85 @@ EXEC_ROWS="$(jget "${HTTP_BODY}" '.total' 2>/dev/null || echo 0)"
     || fail "执行器页接口 (HTTP ${HTTP_CODE}，${EXEC_ROWS:-0} 条)" "重置后 /test-executors 必须恰为保留的两条执行器"
 
 # r15：报表列表与门户配置直读 DB（不吃 deliver 的 AnalyticsCache），所以适合做 API 级复核
-api_call GET "/api/deliver/reports?page=1&size=1"
+# r16：列表不再是空态——重置回填 2 张演示报表，计数与名称集合都要对（AC-1/AC-2）；名称集合
+# 用同一 `jq sort | join` 规范化，与脚本侧期望集比较，不依赖任何一方返回的原始顺序。
+api_call GET "/api/deliver/reports?page=1&size=20"
 REPORT_TOTAL="$(jget "${HTTP_BODY}" '.total' 2>/dev/null || echo '')"
-[[ "${HTTP_CODE}" == "200" && "${REPORT_TOTAL:-x}" == "0" ]] \
-    && pass "报表列表 total = 0（${REPORT_TOTAL}）" \
-    || fail "报表列表 total = ${REPORT_TOTAL:-<缺失>}，期望 0（HTTP ${HTTP_CODE}）" \
-            "report_definition 属实例数据：DELETE_ORDER 整表清空后 /reports 必须是空态"
+REPORT_NAMES="$(printf '%s' "${HTTP_BODY}" | jq -r '[.items[].name] | sort | join(",")' 2>/dev/null || echo '')"
+[[ "${HTTP_CODE}" == "200" && "${REPORT_TOTAL:-x}" == "2" && "${REPORT_NAMES}" == "${DEMO_REPORT_NAMES_EXPECTED}" ]] \
+    && pass "报表列表 total = 2，名称集合 = 两张演示报表（${REPORT_NAMES}）" \
+    || fail "报表列表 total = ${REPORT_TOTAL:-<缺失>}，名称集合 '${REPORT_NAMES:-<空>}'，期望 2 / '${DEMO_REPORT_NAMES_EXPECTED}'（HTTP ${HTTP_CODE}）" \
+            "回填的名称必须与 DemoFixture.REPORT_NAMES 逐字相同，且不得多回填第三张"
+
+# AC-3/AC-4：两张表开箱就能出数——run 走 codec.read(definition_json) + 缓存 + 聚合，形状写错
+# 会 400/500；这里只判「非空 + 首度量正值」，中文表头与 colCodes/rowCodes 同长同序由 QA 探针补。
+report_id_by_name() {
+    printf '%s' "${HTTP_BODY}" | jq -r --arg n "$1" '[.items[] | select(.name == $n) | .id][0] // empty' 2>/dev/null || true
+}
+run_report() { # run_report <id>：body 省略 → 用库内 definition（ReportService.run:322-324）
+    api_call POST "/api/deliver/reports/$1/run?preset=30d&reqType=RD"
+}
+REPORT_A_ID="$(report_id_by_name "${DEMO_REPORTS[0]}")"
+REPORT_B_ID="$(report_id_by_name "${DEMO_REPORTS[1]}")"
+
+if [[ -n "${REPORT_A_ID}" ]]; then
+    run_report "${REPORT_A_ID}"
+    A_ROWS="$(jget "${HTTP_BODY}" '.rowCodes | length')"
+    A_COLS="$(jget "${HTTP_BODY}" '.colHeaders | length')"
+    A_FIRST="$(jget "${HTTP_BODY}" '.total.values[0]')"
+    A_OK="$(printf '%s' "${HTTP_BODY}" | jq -r '((.rowCodes | length) >= 1) and ((.colHeaders | length) >= 2) and ((.total.values[0] // 0) > 0)' 2>/dev/null || echo false)"
+    [[ "${HTTP_CODE}" == "200" && "${A_OK}" == "true" ]] \
+        && pass "报表 A（${DEMO_REPORTS[0]}）run 出数：rowCodes ${A_ROWS} 行 / colHeaders ${A_COLS} 列 / 首度量合计 ${A_FIRST}" \
+        || fail "报表 A（${DEMO_REPORTS[0]}）run 异常（HTTP ${HTTP_CODE}）：rowCodes ${A_ROWS:-?} / colHeaders ${A_COLS:-?} / total.values[0] ${A_FIRST:-?}" \
+                "definition_json 必须能被 ReportDefinitionCodec.read 反序列化；rows=[domain]/columns=[status] 在演示需求集上应各有值"
+else
+    fail "报表 A（${DEMO_REPORTS[0]}）不在列表里，无法 run" "先修回填：名称与 DemoFixture.REPORT_NAMES 必须逐字相同"
+fi
+
+if [[ -n "${REPORT_B_ID}" ]]; then
+    run_report "${REPORT_B_ID}"
+    B_ROWS="$(jget "${HTTP_BODY}" '.rowCodes | length')"
+    B_EST="$(jget "${HTTP_BODY}" '.total.values[1]')"
+    # 厂商维按 requirement.assignee_vendor_id 分组、标签取 sys_vendor.name（甲方科技/丙方信息），
+    # 所以断言「≥2 行且第二度量有数」而不是拿 code 当行键（AnalyticsSql.java:172、RequirementService.java:392-393）。
+    B_NAMES="$(printf '%s' "${HTTP_BODY}" | jq -r '[(.rowHeaders // []) | .[]] | join("/")' 2>/dev/null || echo '')"
+    B_OK="$(printf '%s' "${HTTP_BODY}" | jq -r '((.rowCodes | length) >= 2) and ((.total.values[1] // 0) > 0)' 2>/dev/null || echo false)"
+    [[ "${HTTP_CODE}" == "200" && "${B_OK}" == "true" ]] \
+        && pass "报表 B（${DEMO_REPORTS[1]}）run 出数：厂商 ${B_ROWS} 行（${B_NAMES}），预估人天合计 ${B_EST}" \
+        || fail "报表 B（${DEMO_REPORTS[1]}）run 异常（HTTP ${HTTP_CODE}）：厂商行 ${B_ROWS:-?}（${B_NAMES:-?}）/ total.values[1] ${B_EST:-?}" \
+                "厂商行只有 1 行且名为「未设置」= 演示需求没写 assignee_vendor_id（vendor 维读该列，见 AnalyticsSql.java:172）；度量只用 requirement 已注册的人天口径"
+else
+    fail "报表 B（${DEMO_REPORTS[1]}）不在列表里，无法 run" "先修回填：名称与 DemoFixture.REPORT_NAMES 必须逐字相同"
+fi
+
+# AC-5：导出的 xlsx 是「自带出处的交付物」——必须 200、PK 头合法、表内带水印（WatermarkSheet:44）。
+# pipefail 下 `grep -q` 会因 SIGPIPE 把 141 当失败，所以用 `grep -F -c` 读完整个流再比数。
+TMPD="$(mktemp -d -t demo-report-export.XXXXXX)"
+trap 'rm -rf "${TMPD:-}"' EXIT
+EXPORT_OK=0
+EXPORT_BAD=""
+EXPORT_DETAIL=""
+for spec in "A:${REPORT_A_ID}" "B:${REPORT_B_ID}"; do
+    tag="${spec%%:*}" rid="${spec#*:}"
+    [[ -n "${rid}" ]] || { EXPORT_BAD+="${tag}=无 id; "; continue; }
+    xfile="${TMPD}/report-${rid}.xlsx"
+    xcode="$(curl -sS -o "${xfile}" -w '%{http_code}' --max-time 30 \
+        "${GATEWAY_URL}/api/deliver/reports/${rid}/export?format=xlsx&preset=30d&reqType=RD" \
+        -H "Authorization: Bearer ${API_TOKEN}" -H "X-Tenant-Id: ${API_TENANT}" || true)"
+    xmagic="$(head -c 2 "${xfile}" 2>/dev/null || true)"
+    xmarks="$(unzip -p "${xfile}" xl/sharedStrings.xml 2>/dev/null | grep -F -c '内部资料（水印）' || true)"
+    xsize="$(wc -c <"${xfile}" 2>/dev/null | tr -d ' ' || true)"
+    EXPORT_DETAIL+="${tag} ${xsize:-?} 字节/水印 ${xmarks:-0}; "
+    if [[ "${xcode}" == "200" && "${xmagic}" == "PK" && "${xmarks:-0}" -ge 1 ]]; then
+        EXPORT_OK=$((EXPORT_OK + 1))
+    else
+        EXPORT_BAD+="${tag}(HTTP ${xcode:-?} / 头 ${xmagic:-?} / 水印 ${xmarks:-0}); "
+    fi
+done
+[[ "${EXPORT_OK}" == "2" ]] \
+    && pass "两张演示报表 export xlsx 均 200 + PK 头 + 水印（${EXPORT_DETAIL% }）" \
+    || fail "导出未全通过（${EXPORT_OK}/2）：${EXPORT_BAD}实际 ${EXPORT_DETAIL% }" \
+            "导出走 WatermarkSheet.xlsx：水印写在首末行的共享字符串里，缺了说明导出绕过了统一写出器"
 
 api_call GET "/api/deliver/portal/config"
 PORTAL_CARDS="$(jget "${HTTP_BODY}" '.cards | length' 2>/dev/null || echo '')"

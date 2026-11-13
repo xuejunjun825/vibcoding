@@ -206,6 +206,102 @@ public final class DemoFixture {
             TableReset.purgeRunTagResidue("wf_definition"),
             TableReset.purgeRunTagResidue("test_module"));
 
+    // ---------------------------------------------------------------- 报表（r16）
+
+    /**
+     * 一张演示报表的定义：{@code report_definition} 的一行去掉租户与属主后的部分。
+     *
+     * <p>定义放代码常量而不是 JSON 文件/配置：AC-8 不允许第二套目录，「删什么、留什么、回填什么」
+     * 继续单点收敛在本文件——服务端与脚本都不复制这张表清单。</p>
+     *
+     * <p>{@link #definitionJson()} 用固定键序字符串拼接、不引 ObjectMapper：字段顺序与缩进不能成为
+     * 「两次重置是否逐字节相等」的隐变量（AC-6 按字段规范化比较，字节稳定最省事）。形状必须能被
+     * deliver 的 {@code ReportDefinitionCodec.read} 反序列化；字段名写错不会静默，会在 run 上以
+     * 400（{@code REPORT_UNKNOWN_FIELD}）立刻暴露，脚本的 run 断言就是它的探针。</p>
+     */
+    public record ReportFixture(String name, String dataset, List<String> rows,
+                                List<String> columns, List<String> measures, String chartType) {
+
+        /** 固定键序 {@code datasetId, rows, columns, measures, filters}；{@code filters} 恒为 {@code []}。 */
+        public String definitionJson() {
+            return "{\"datasetId\":" + jsonString(dataset)
+                    + ",\"rows\":" + jsonArray(rows)
+                    + ",\"columns\":" + jsonArray(columns)
+                    + ",\"measures\":" + jsonArray(measures)
+                    + ",\"filters\":[]}";
+        }
+    }
+
+    /**
+     * 两张演示报表，顺序即 {@link #REPORT_NAMES} 与 {@link #reportRows} 的顺序。
+     *
+     * <p>A 二维交叉表（域 × 状态，需求数 + 平均交付周期）；B 单维三度量（厂商，需求数 + 预估人天 +
+     * 人天偏差）。B 必须用 {@code requirement}——人天类度量只在 deliver 的 {@code AnalyticsDatasets}
+     * 注册（{@code :177-187}），本侧不复刻那份白名单，漂移由 run 的 400 与脚本断言暴露。</p>
+     *
+     * <p>演示数据现成够出数：域 ≥ 1 行、需求合计 12 &gt; 0；厂商列有 {@code VEN-A}×3 与 {@code VEN-C}×1，
+     * 预估人天合计 62 &gt; 0。</p>
+     */
+    public static final List<ReportFixture> REPORTS = List.of(
+            new ReportFixture("需求状态分布", "requirement", List.of("domain"), List.of("status"),
+                    List.of("req.total", "cycle.avg"), "TABLE"),
+            new ReportFixture("厂商交付概览", "requirement", List.of("vendor"), List.of(),
+                    List.of("req.total", "effort.estimate", "effort.deviation"), "TABLE"));
+
+    /** 名称集合的唯一定义源：不变量按「已排序集合」比较（中文排序不可依赖 MySQL collation）。 */
+    public static final List<String> REPORT_NAMES =
+            REPORTS.stream().map(ReportFixture::name).toList();
+
+    /** 重置后 {@code report_definition} 应有的行数：与 {@link #REPORTS} 同源，不写第二份数字。 */
+    public static final int REPORT_COUNT = REPORTS.size();
+
+    /**
+     * {@code report_definition} 的插入行，列顺序：
+     * {@code tenant_id, name, dataset, definition_json, chart_type, owner_id, owner_role, scope,
+     * scope_ref, status, created_by, updated_by, version}。
+     *
+     * <p>两张表都固定 {@code PRIVATE} + 属主 admin、{@code scope_ref} 留空（不 pin 门户）：演示账号
+     * 自己建的表就是这个形态，vendor 账号看不到也改不了。缺 {@code user:admin} 时由 {@link #ref}
+     * 抛错，而不是插出一行空属主（{@code owner_id NOT NULL} 会炸成 500）。</p>
+     */
+    public static List<Object[]> reportRows(long tenantId, Map<String, Long> refs) {
+        Long ownerId = ref(refs, "user:admin");
+        List<Object[]> rows = new ArrayList<>(REPORTS.size());
+        for (ReportFixture report : REPORTS) {
+            rows.add(new Object[]{
+                    tenantId,
+                    report.name(),
+                    report.dataset(),
+                    report.definitionJson(),
+                    report.chartType(),
+                    ownerId,
+                    "admin",
+                    "PRIVATE",
+                    null,
+                    "ACTIVE",
+                    ownerId,
+                    ownerId,
+                    1});
+        }
+        return rows;
+    }
+
+    private static String jsonArray(List<String> values) {
+        StringBuilder out = new StringBuilder("[");
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                out.append(',');
+            }
+            out.append(jsonString(values.get(i)));
+        }
+        return out.append(']').toString();
+    }
+
+    /** 值只来自本文件的字面量（列/度量 code），既无引号也无反斜杠，故不做转义。 */
+    private static String jsonString(String value) {
+        return '"' + value + '"';
+    }
+
     // ---------------------------------------------------------------- 需求
 
     /**
