@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# platform-test-negative.sh — TECHNICAL §8.3 的 15 条负向用例。
+# platform-test-negative.sh — TECHNICAL §8.3 的 16 段负向用例（r17 起含动作级授权）。
 # 每条都断言两件事：被拒绝（4xx + 错误码），且**没有落库**（表计数不变）。
 # 绿色 = 非法路径确实走不通；不是"接口返回 200 但界面拦住了"。
 set -uo pipefail
@@ -234,6 +234,120 @@ if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "201" ]]; then
     deny "锁定后移除需求 → 409" 409 "RELEASE_LOCKED" "锁定后删除同样拒绝"
 else
     warn "版本审批未启动（HTTP ${HTTP_CODE}），跳过锁定负向"
+fi
+
+# ---------------------------------------------------------------- 16
+section "16) 需求流转动作级授权（r17）：越权动作 403 且不落库"
+
+# 复合断言：一次 403 必须同时满足三条 —— 被拒绝、状态没动、没有生成审批实例。
+# 只断言 403 不够：先写状态再报错、或先起 REQ_SUBMIT 审批再鉴权，都还是会造出脏数据。
+deny_action() { # desc req_id expect_status [needle] [inst_type] [inst_expect]
+    local desc="$1" rid="$2" keep="$3" needle="${4:-}" errs="" status inst
+    local inst_type="${5:-REQ_SUBMIT}" inst_expect="${6:-0}"
+    status="$(db_q "SELECT status FROM requirement WHERE id=${rid}")"
+    inst="$(db_count wf_instance "tenant_id=${TID} AND biz_type='${inst_type}' AND biz_id=${rid}")"
+    [[ "$HTTP_CODE" == "403" ]] || errs="${errs}HTTP ${HTTP_CODE}（期望 403）；"
+    if [[ -n "$needle" ]] && ! grep -qF -- "$needle" <<<"$HTTP_BODY"; then
+        errs="${errs}响应未含 ${needle}；"
+    fi
+    [[ "$status" == "$keep" ]] || errs="${errs}状态 ${status}（应仍为 ${keep}）；"
+    [[ "${inst:-0}" == "$inst_expect" ]] || errs="${errs}${inst_type} 实例 ${inst} 条（应 ${inst_expect}）；"
+    if [[ -z "$errs" ]]; then
+        pass "${desc}（403 + 状态仍 ${keep} + ${inst_type} 实例 ${inst_expect}）"
+    else
+        fail "${desc}（${errs}）" \
+            "越权必须在写状态/建审批实例之前被拒：$(printf '%s' "$HTTP_BODY" | head -c 160)"
+    fi
+}
+
+B_ID=""
+P_ID=""
+# 夹具 B：业务角色自己的 BUS 需求（提交状态）；夹具 P：产品经理报的 BUS 需求（用来验证「不能代他人提交」）
+if login_as "biz1" "Passw0rd!"; then
+    api_call POST /api/req/requirements "{\"type\":\"BUS\",\"title\":\"neg-r17-biz-${RUN_TAG}\",\"domainIds\":[${DOMAIN1}],\"priority\":\"P2\",\"expectedDeliveryDate\":\"2026-12-31\"}"
+    B_ID="$(jget_ "$HTTP_BODY" '.id')"
+    [[ -n "$B_ID" && "$B_ID" != "null" ]] || warn "biz1 建 BUS 夹具失败: $(printf '%s' "$HTTP_BODY" | head -c 160)"
+else
+    warn "biz1 登录失败，跳过 r17 动作级授权负向"
+fi
+API_TOKEN="$ADMIN_TOKEN"
+if login_as "pm" "Passw0rd!"; then
+    api_call POST /api/req/requirements "{\"type\":\"BUS\",\"title\":\"neg-r17-pm-${RUN_TAG}\",\"domainIds\":[${DOMAIN1}],\"priority\":\"P2\",\"expectedDeliveryDate\":\"2026-12-31\"}"
+    P_ID="$(jget_ "$HTTP_BODY" '.id')"
+    [[ -n "$P_ID" && "$P_ID" != "null" ]] || warn "pm 建 BUS 夹具失败: $(printf '%s' "$HTTP_BODY" | head -c 160)"
+else
+    warn "pm 登录失败，跳过「代他人提交」负向"
+fi
+API_TOKEN="$ADMIN_TOKEN"
+
+if [[ -n "$B_ID" && "$B_ID" != "null" && -n "$P_ID" && "$P_ID" != "null" ]]; then
+    # a) 厂商账号（vendor1 的角色码就是 PMO，持 req:review）不能提交他人（业务方）的需求
+    if login_as "vendor1" "Passw0rd!"; then
+        api_call POST "/api/req/requirements/${B_ID}/actions" '{"action":"submit"}'
+        deny_action "厂商角色提交他人业务需求 → 403（不得代提交）" "$B_ID" "SUBMITTED" '"action":"submit"'
+    else
+        warn "vendor1 登录失败，跳过 a) 越权提交"
+    fi
+    API_TOKEN="$ADMIN_TOKEN"
+
+    # b) 业务角色不能提交别人（产品经理）报的需求
+    if login_as "biz1" "Passw0rd!"; then
+        api_call POST "/api/req/requirements/${P_ID}/actions" '{"action":"submit"}'
+        deny_action "业务角色提交他人需求 → 403（只能提报自己的）" "$P_ID" "SUBMITTED" '"action":"submit"'
+    else
+        warn "biz1 登录失败，跳过 b) 越权提交"
+    fi
+    API_TOKEN="$ADMIN_TOKEN"
+
+    # c) withdraw 在 SUBMITTED 上本来是 409（非法流转）：这里拿到 403，证明「先鉴权后状态」，
+    #    且 403 不泄露 from/allowedTargets。
+    if login_as "vendor1" "Passw0rd!"; then
+        api_call POST "/api/req/requirements/${B_ID}/actions" '{"action":"withdraw"}'
+        deny_action "厂商撤回他人需求 → 403（先鉴权后状态，不是 409）" "$B_ID" "SUBMITTED" '"action":"withdraw"'
+    else
+        warn "vendor1 登录失败，跳过 c) 越权撤回"
+    fi
+    API_TOKEN="$ADMIN_TOKEN"
+
+    # d) BUG-1（r17 QA）：厂商账号即使持 req:review（vendor1 的角色码就是 PMO）也不得评审内部需求。
+    #    先把 B 推到 PENDING_REVIEW —— biz1 自提交，pm 在审批中心通过（source=APPROVAL 回调）。
+    if login_as "biz1" "Passw0rd!"; then
+        api_call POST "/api/req/requirements/${B_ID}/actions" '{"action":"submit"}'
+        if [[ "$HTTP_CODE" == "200" ]]; then
+            API_TOKEN="$ADMIN_TOKEN"
+            if login_as "pm" "Passw0rd!"; then
+                api_call GET "/api/req/approvals/todo?page=1&size=200"
+                TASK_ID="$(printf '%s' "$HTTP_BODY" | jq -r --argjson rid "$B_ID" '(.items // []) | map(select(.bizId == $rid and .bizType == "REQ_SUBMIT")) | .[0].taskId // empty')"
+                [[ -n "$TASK_ID" ]] && api_call POST "/api/req/approvals/tasks/${TASK_ID}/actions" \
+                    '{"action":"APPROVE","comment":"r17 negative review fixture"}'
+            fi
+        fi
+    fi
+    API_TOKEN="$ADMIN_TOKEN"
+    B_STATUS="$(db_q "SELECT status FROM requirement WHERE id=${B_ID}")"
+    if [[ "$B_STATUS" == "PENDING_REVIEW" ]]; then
+        if login_as "vendor1" "Passw0rd!"; then
+            api_call POST "/api/req/requirements/${B_ID}/actions" '{"action":"review_start"}'
+            deny_action "厂商（角色码 PMO）评审内部需求 → 403（不得入池）" \
+                "$B_ID" "PENDING_REVIEW" '"action":"review_start"' "REQ_REVIEW" 0
+            # 按钮列表与执行共用同一谓词：厂商看到空动作集，不会出现必然 403 的按钮（AC-6）。
+            api_call GET "/api/req/requirements/${B_ID}"
+            B_ALLOWED="$(jget_ "$HTTP_BODY" '.allowedActions | length')"
+            if [[ "$B_ALLOWED" == "0" ]]; then
+                pass "厂商 allowedActions 对评审中的内部需求为空（按钮不会错误出现）"
+            else
+                fail "厂商 allowedActions 仍有 ${B_ALLOWED} 个动作（应与执行同口径）" \
+                    "allowedActions 必须复用 RequirementActionMatrix.filter"
+            fi
+        else
+            warn "vendor1 登录失败，跳过 d) 厂商评审越权"
+        fi
+    else
+        warn "夹具 B 未到 PENDING_REVIEW（status=${B_STATUS:-空}），跳过 d) 厂商评审越权"
+    fi
+    API_TOKEN="$ADMIN_TOKEN"
+else
+    warn "r17 夹具不完整（B=${B_ID:-空} P=${P_ID:-空}），跳过第 16 段"
 fi
 
 printf '\n'

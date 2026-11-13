@@ -91,16 +91,17 @@
 
 ## 4. 已知卡点（演示前须知，属实现缺口，不是数据问题）
 
-### 卡点 1（P1，会打断演示）：业务方点「提交审批」直接 403
+### 卡点 1（P1，r17 已修复）：业务方点「提交审批」直接 403
 
 - 现象：`biz1` 在「已提报」的业务需求上能看到 `提交审批` 按钮，点下去弹「无权执行该操作」，整页被 403 页顶掉。
 - 原因（两处叠加）：
   1. `platform-common/.../security/PermissionRouteTable.java:136` 把 `POST /requirements/{id}/actions` 统一要求 `req:review`；而 `BUSINESS` 角色只有 `req:report:bus`（`PermissionMatrix.java:237`），没有 `req:review`。
   2. `allowedActions` 没有按调用者权限过滤，所以按钮照常显示；`web/src/api/client.ts` 对 403 默认跳全局 403 页（未标 `silentForbidden`）。
-- 影响：**业务方无法自己提交审批**——演示时必须由 `pm` 代为点「提交审批」，与「业务方提报」的直觉冲突。
+- 影响（修复前）：**业务方无法自己提交审批**——演示时必须由 `pm` 代为点「提交审批」，与「业务方提报」的直觉冲突。
 - 截图：`demo-shots/flow-7-biz-submit-403.png`
 - 建议修法（三选一）：① 给 `BUSINESS` 补一个「提交自己的需求」权限码，动作端点按动作细分权限；② `allowedActions` 按权限过滤，前端不显示无权动作；③ 该动作前端标 `silentForbidden` + 提示「请联系产品经理提交评审」。
 - 临时绕法（今天演示可用）：`biz1` 提报后，切 `pm` 账号点「提交审批」。
+- **已修复（r17）**：动作端点不再由端点级 `req:review` 守护，改为 `platform-contract/.../RequirementActionMatrix` 逐动作授权（先鉴权后状态，`allowedActions` 与执行共用同一谓词，403 就地提示不跳页）；`biz1` 现在可直接提交自己的业务需求，厂商账号（含角色码为 `PMO` 的 `vendor1`）不得代提交、评审、入池或验收。方案与回归证据：`docs/teamflow/20261113-r17-biz-submit-action-authz/`（QA 复跑脚本见其 QA-REPORT §6）。
 
 ### 卡点 2（P3，讲清楚即可）：工时只有叶子需求能填
 
@@ -112,7 +113,7 @@
 
 1. （`biz1`）需求池 → 提报需求 → 业务需求「演示-供应商门户单点登录」→ 提报
 2. （`biz1`）详情页展示：状态「已提报」、域、期望交付、审批进度占位
-3. （`pm`）同一需求 → 提交审批 → 审批中心待办 → 通过 → 开始评审 → 通过 → 状态「已入池」
+3. （`biz1`）同一需求 → 提交审批（r17 起业务方自己就能提交）→（`pm`）审批中心待办 → 通过 → 开始评审 → 通过 → 状态「已入池」
 4. （`pm`）拆解 → 产品需求「SSO 接入方案」→ 再拆解 → 研发需求「登录改造为 OIDC」
 5. （`dev1`）研发需求 → 预估人天 5.5 → 保存；回到业务需求详情看「预估 5.5 人天（汇总）」
 6. （`pm`）产品需求 → 排期 → 选 `演示版本 2026-11`；打开版本计划看工作项与预估人天
@@ -136,7 +137,7 @@ curl -s -X POST $GW/api/req/requirements -H "Authorization: Bearer $B" -H "X-Ten
   -H 'Content-Type: application/json' \
   -d '{"type":"BUS","title":"演示-供应商门户单点登录","description":"接入集团 SSO","domainIds":[1],"priority":"P2"}'
 
-# 2 提交评审 → 审批 → 评审入池（产品经理；注意卡点 1，业务方无 req:review）
+# 2 提交评审 → 审批 → 评审入池（r17 起业务方自提交；审批/评审仍需产品经理 req:review）
 #   POST /requirements/{id}/actions            {"action":"submit"}
 #   POST /approvals/tasks/{taskId}/actions     {"action":"approve","comment":"同意"}
 #   POST /requirements/{id}/actions            {"action":"review_start"}
@@ -172,4 +173,4 @@ make platform-up           # 若服务未起
 | `demo-shots/flow-4-traceability.png` | 追溯矩阵：需求 → 任务/MR/构建/执行/缺陷/Sonar/发布单/版本 |
 | `demo-shots/flow-5-defects.png` | 缺陷列表（含本次 `DEFECT-0149`） |
 | `demo-shots/flow-6-release.png` | 版本计划详情：8 条工作项、预估 50 人天、完成度 13% |
-| `demo-shots/flow-7-biz-submit-403.png` | 卡点 1 证据：业务方点「提交审批」→ 403 页 |
+| `demo-shots/flow-7-biz-submit-403.png` | 卡点 1 证据（r17 已修复，历史截图）：业务方点「提交审批」→ 403 页 |

@@ -1,0 +1,7 @@
+{
+  "reqId": "req-17",
+  "runId": "tf-mweizygd-pd8fbm",
+  "title": "业务角色（BUSINESS）无法提交自己的业务需求：biz1 打开「已提报」的业务需求，页面显示「提交审批」按钮，点击后提示「无权执行该操作」并整页跳到 403",
+  "mode": "medium",
+  "createdAt": 1794547082144
+}

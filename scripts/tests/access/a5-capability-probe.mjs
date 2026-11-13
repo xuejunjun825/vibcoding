@@ -7,11 +7,13 @@
  * 两者之间：主端点 200、探测端点 403，而 client.ts 在 throw **之前**就 navigate('/403')，
  * 页面里的 try/catch 结构再对也永远收不到那个错误。只断言主端点 200 的门禁看不见它。
  *
- * 22 条断言：
+ * 25 条断言：
  *   a5-a 运行时 14 条：7 账号 × 2 端点精确状态码（与 a4 同一登录口径，Node 原生 fetch）
  *   a5-b 静态 5 条：调用点标记 / 非管理页逐点审计（scanned≥1 防空扫）/ client.ts 403 分支 /
  *                   页面里 /integration/configs 字面量归零 / 豁免台账每条带理由
  *   a5-c 自检 3 条：内存夹具证明「缺标记必红」「带标记必绿」「同文件别处出现关键字仍红」
+ *   a5-d 单点真相 3 条（r17）：actOnRequirement 的 403 降级标记 / 详情页 403 就地处理且无本地
+ *                   二次过滤 / 路由表已让出动作端点且动作矩阵存在（授权只认服务端一张矩阵）
  *
  * 计数经环境变量 ACCESS_COUNTS 交给 scripts/access-verify.sh（格式 `a5 <pass> <total>`）。
  * 栈未起时 exit 1 且**不写计数行**——「0 条断言也算过」正是本段要防的假绿。
@@ -137,6 +139,21 @@ function snippetOf(src, index) {
   return src.slice(index, index + 160).replace(/\s+/g, ' ').trim()
 }
 
+/** 取具名函数的函数体文本（`function name(` 后第一个 `{` 起配平花括号）；找不到返回 '' */
+function bodyOf(src, name) {
+  const text = blankComments(src)
+  const m = new RegExp(`function\\s+${name}\\s*\\(`).exec(text)
+  if (!m) return ''
+  const open = text.indexOf('{', m.index + m[0].length)
+  if (open < 0) return ''
+  let depth = 0
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth++
+    else if (text[i] === '}' && --depth === 0) return text.slice(open, i + 1)
+  }
+  return text.slice(open)
+}
+
 /**
  * 判定「集成配置读调用点是否显式声明了 silentForbidden」。
  * @param {{ file: string, src: string }[]} sources file 为相对仓库根路径（报错用）
@@ -170,6 +187,14 @@ const EXEMPT_CALL_SITES = []
 
 const CODE_POLICY_VIEW = 'web/src/views/code/CodePolicyView.vue'
 const CLIENT_TS = 'web/src/api/client.ts'
+
+/* r17 单点真相（a5-d）：动作请求的降级标记 / 详情页 403 处理 / 授权矩阵所在位置 */
+const REQ_API_TS = 'web/src/api/req.ts'
+const DETAIL_VIEW = 'web/src/views/req/RequirementDetailView.vue'
+const ROUTE_TABLE_TS =
+  'platform-common/src/main/java/com/example/platform/common/security/PermissionRouteTable.java'
+const MATRIX_TS =
+  'platform-contract/src/main/java/com/example/platform/contract/RequirementActionMatrix.java'
 
 /* ================================================================ 运行时矩阵（TECHNICAL §8.1） */
 
@@ -414,6 +439,71 @@ async function main() {
     bad(
       `C3 关键字假绿：offenders=${JSON.stringify(c3.offenders)} scanned=${c3.scanned}`,
       '必须按调用点判定：文件里出现关键字就过，等于删了实参门禁还绿（PRD §12 反目标）',
+    )
+  }
+
+  /* ---------- a5-d 单点真相 3 条（r17）：动作授权只认服务端一张矩阵 ---------- */
+  console.log('\n---- a5-d 单点真相（r17）：动作授权与前端按钮共用服务端判定 ----')
+
+  // D1：actOnRequirement 体内恰好一处动作 POST，且实参声明 silentForbidden。
+  // 判的是「该函数里的那一次请求」而不是「全仓调用点个数」：池视图也调 actOnRequirement
+  // （RequirementPoolView.vue:237），那处走的是同一 api 函数、同一份降级标记。
+  const reqApiSrc = readFileSync(path.join(ROOT, REQ_API_TS), 'utf8')
+  const actBody = bodyOf(reqApiSrc, 'actOnRequirement')
+  const actPosts = [...actBody.matchAll(/http\.post<[^>]*>\(/g)].map((m) => {
+    const open = m.index + m[0].length - 1
+    const end = matchParen(actBody, open)
+    return end < 0 ? actBody.slice(open + 1) : actBody.slice(open + 1, end)
+  })
+  const actSingle = actPosts.length === 1 && /\/actions/.test(actPosts[0])
+  if (actBody && actSingle && declaresSilent(actPosts[0])) {
+    ok('D1 actOnRequirement 内恰好一处 /actions 请求且实参含 silentForbidden（403 交回页面）')
+  } else {
+    bad(
+      `D1 actOnRequirement：函数体${actBody ? `已找到（${actPosts.length} 处 http.post）` : '未找到'}，` +
+        `/actions 端点${actSingle ? '命中' : '未命中'}，` +
+        `标记${actPosts.length && declaresSilent(actPosts[0]) ? '已' : '未'}声明`,
+      '写成 actOnRequirement 内唯一一处 http.post(`${REQ}/requirements/${id}/actions`, payload, { silentForbidden: true })；' +
+        '否则 403 会在 client.ts 里先 navigate(\'/403\') 再抛错，详情页收不到',
+    )
+  }
+
+  // D2：详情页 403 就地提示（toast + refreshAll 同步按钮），不再整页跳转、不再本地二次过滤
+  const detailSrc = readFileSync(path.join(ROOT, DETAIL_VIEW), 'utf8')
+  const detailBlank = blankComments(detailSrc)
+  const pos403 = detailBlank.indexOf('status === 403')
+  const forbidBranch = pos403 < 0 ? '' : detailBlank.slice(pos403, pos403 + 400)
+  const jumpsTo403 = /navigate\(\s*['"]\/403/.test(detailBlank)
+  const localPermCount =
+    (detailBlank.match(/disabledReason/g) || []).length +
+    (detailBlank.match(/meta\.permissions/g) || []).length
+  if (pos403 >= 0 && /refreshAll\s*\(/.test(forbidBranch) && !jumpsTo403 && localPermCount === 0) {
+    ok('D2 详情页 403 就地提示 + refreshAll() 同步按钮（无 navigate(\'/403\')、无本地权限二次过滤）')
+  } else {
+    bad(
+      `D2 详情页：403 分支${pos403 < 0 ? '缺失' : '存在'}、分支内 refreshAll ` +
+        `${/refreshAll\s*\(/.test(forbidBranch) ? '有' : '无'}、整页跳转${jumpsTo403 ? '仍有' : '无'}、` +
+        `本地权限判据 ${localPermCount} 处`,
+      '403 = 按钮过期：toast + refreshAll() 让服务端 allowedActions 重新决定可用性；' +
+        '本地 permissions/disabledReason 与矩阵必然漂移（AC-6/AC-7）',
+    )
+  }
+
+  // D3：路由表已让出这个端点（减法），且动作矩阵确实存在并登记了 submit 与 req:review
+  const routeSrc = readFileSync(path.join(ROOT, ROUTE_TABLE_TS), 'utf8')
+  const routeBlank = blankComments(routeSrc)
+  // 匹配「^/requirements/…/actions」形态的规则本体（不是缺陷域的 ^/defects/…/actions），
+  // 也不匹配删规则后留在注释里的说明文字（注释已被 blankComments 抹平）。
+  const staleRule = /\^\/requirements\/[^\s"]*\/actions/.test(routeBlank)
+  const matrixSrc = fileExists(MATRIX_TS) ? readFileSync(path.join(ROOT, MATRIX_TS), 'utf8') : ''
+  const matrixRows = /\bsubmit\b/.test(matrixSrc) && matrixSrc.includes('req:review')
+  if (!staleRule && matrixSrc && matrixRows) {
+    ok(`D3 ${ROUTE_TABLE_TS} 已无动作端点规则，${MATRIX_TS} 存在且同时登记 submit 与 req:review`)
+  } else {
+    bad(
+      `D3 路由表残留动作规则${staleRule ? '（/actions$）' : '无'}、矩阵文件${matrixSrc ? '存在' : '缺失'}、` +
+        `submit+req:review ${matrixRows ? '齐备' : '缺失'}`,
+      '端点级码只能表达「一个端点一个码」，会重现 r17 的 403；授权的唯一真相是 RequirementActionMatrix',
     )
   }
 

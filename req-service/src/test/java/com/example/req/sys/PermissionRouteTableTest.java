@@ -46,6 +46,23 @@ class PermissionRouteTableTest {
                 PermissionRouteTable.requirementFor("POST", "/requirements/12/quick-test").codes());
     }
 
+    /**
+     * The action endpoint carries the whole requirement state machine, so it is authorised per
+     * action inside the service (RequirementActionMatrix), not by one function code here. A rule
+     * reappearing for this path silently restores the 403 that made a BUSINESS reporter unable to
+     * submit its own requirement — the assertions pin the removal, not the absence of a typo.
+     */
+    @Test
+    void requirementActionsAreNotRouteGuarded() {
+        assertNull(PermissionRouteTable.requirementFor("POST", "/requirements/12/actions"),
+                "POST /requirements/{id}/actions must not be route-guarded — per-action authorisation "
+                        + "lives in RequirementActionMatrix");
+        assertNull(PermissionRouteTable.requirementFor("GET", "/requirements/12/actions"));
+        assertNull(PermissionRouteTable.requirementFor("POST", "/requirements/7/actions"));
+        assertFalse(PermissionRouteTable.guardedPatterns().contains("^/requirements/\\d+/actions$"),
+                "the pattern itself must be gone, not merely shadowed by an earlier row");
+    }
+
     @Test
     void deliverySurface() {
         assertEquals(List.of("deploy:force"),

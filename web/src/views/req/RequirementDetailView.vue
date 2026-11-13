@@ -34,19 +34,18 @@ import {
   normalizeTimeline,
   typeLabel,
 } from '@/views/req/platform'
-import { usePermission } from '@/composables/usePermission'
 import { useAuthStore } from '@/stores/auth'
 import { useDictStore } from '@/stores/dict'
 
 /**
- * P2 需求详情（7 tab）。动作区只渲染状态机给出的 allowedActions（AC-3），
- * 权限不足原地 disabled + 原因；409 用常驻条展示，不弹 toast、不假装成功。
+ * P2 需求详情（7 tab）。动作区只认服务端 allowedActions（唯一真相，AC-3）：
+ * 按钮不做本地权限二次过滤；403 就地 toast 并刷新详情同步按钮，不跳 /403；
+ * 409 用常驻条展示，不弹 toast、不假装成功。
  */
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const dict = useDictStore()
-const { can } = usePermission()
 
 const id = computed(() => Number(route.params.id))
 const detail = ref<RequirementDetail | null>(null)
@@ -79,15 +78,10 @@ const tabs = computed(() => [
 ])
 
 const allowedActions = computed(() => detail.value?.allowedActions ?? [])
-// 「提交审批」固定在概览页底部的动作条，头部不再重复渲染同一个主按钮
-const headerActions = computed(() => allowedActions.value.filter((action) => action !== 'submit'))
+// 「提交审批」「撤回」固定在概览页底部的动作条，头部不再重复渲染同一个动作入口
+const footerActionKeys = new Set(['submit', 'withdraw'])
+const headerActions = computed(() => allowedActions.value.filter((action) => !footerActionKeys.has(action)))
 const approvalTimeline = computed(() => normalizeTimeline(approval.value?.timeline))
-
-function disabledReason(action: string): string {
-  const meta = metaOf(action)
-  const missing = (meta.permissions ?? []).find((code) => !can(code))
-  return missing ? `需要权限：${missing}` : ''
-}
 
 function actionLabel(action: string): string {
   return metaOf(action).label
@@ -152,6 +146,12 @@ function handleActionError(error: unknown): void {
   const code = (error as { code?: string }).code
   if (status === 409) {
     actionBanner.value = { text: messageOf(error), code }
+    void refreshAll()
+    return
+  }
+  // 403：按钮已过期（动作矩阵拒绝 / 域越界）——就地提示并重拉详情，按钮随 allowedActions 收敛
+  if (status === 403) {
+    ElMessage.warning('无权执行该操作，请联系产品经理')
     void refreshAll()
     return
   }
@@ -316,6 +316,19 @@ function onDecomposed(): void {
 
 const statusLabel = computed(() => (detail.value ? dict.label('requirement', detail.value.status) : ''))
 const canSubmit = computed(() => allowedActions.value.includes('submit'))
+// 底部提示随状态更新，避免「已提交审批」后还提示「提交审批前请确认…」
+const footerHint = computed(() => {
+  switch (detail.value?.status) {
+    case 'SUBMITTED':
+      return '下一步动作由状态机决定；提交审批前请确认域、厂商与预估人天已填写。'
+    case 'APPROVING':
+      return '已提交审批，等待产品经理在审批中心通过；通过前可在本页撤回。'
+    case 'PENDING_REVIEW':
+      return '审批已通过，等待产品经理评审入池；评审结果会写入流转记录。'
+    default:
+      return '下一步动作由状态机决定。'
+  }
+})
 
 watch(
   () => route.params.id,
@@ -370,8 +383,7 @@ onMounted(async () => {
               :key="action"
               size="small"
               :type="action === 'submit' ? 'primary' : 'default'"
-              :disabled="!!disabledReason(action) || busy"
-              :title="disabledReason(action) || ''"
+              :disabled="busy"
               @click="requestAction(action)"
             >
               {{ actionLabel(action) }}
@@ -446,7 +458,7 @@ onMounted(async () => {
 
       <footer v-if="activeTab === 'overview'" class="detail__footer">
         <span class="detail__footer-hint">
-          下一步动作由状态机决定；提交审批前请确认域、厂商与预估人天已填写。
+          {{ footerHint }}
         </span>
         <el-button v-if="canSubmit" type="primary" size="small" :disabled="busy" @click="runSimpleAction('submit')">
           提交审批

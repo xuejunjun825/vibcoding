@@ -9,6 +9,7 @@ import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
 import com.example.platform.contract.GateDecision;
 import com.example.platform.contract.GatePort;
+import com.example.platform.contract.RequirementActionMatrix;
 import com.example.req.integration.sonar.SonarProjectKeys;
 import com.example.req.requirement.RequirementDtos.AssignVendorRequest;
 import com.example.req.requirement.RequirementDtos.CreateCommand;
@@ -33,7 +34,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -128,7 +128,7 @@ public class RequirementService {
                 "type", type, "code", saved.getCode(), "status", saved.getStatus(),
                 "parentId", Objects.requireNonNullElse(saved.getParentId(), 0L)));
         return new Created(saved.getId(), saved.getCode(), saved.getType(), saved.getStatus(),
-                allowedActions(saved.getType(), saved.getStatus()));
+                allowedActions(saved.getType(), saved.getStatus(), saved.getReporterId()));
     }
 
     // ---------------------------------------------------------------- update
@@ -263,12 +263,12 @@ public class RequirementService {
                 child.getType(), child.getStatus(), child.getTitle(), child.getOwnerUserId(),
                 child.getEstimateDays(), child.getActualDays())).toList();
         return new Detail(toView(entity, rollup), childViews,
-                allowedActions(entity.getType(), entity.getStatus()), Map.of());
+                allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId()), Map.of());
     }
 
     public List<String> allowedActions(long id) {
         RequirementEntity entity = requireVisible(id);
-        return allowedActions(entity.getType(), entity.getStatus());
+        return allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId());
     }
 
     // -------------------------------------------------------------- transition
@@ -288,6 +288,12 @@ public class RequirementService {
                                        Long definitionId) {
         DataScope scope = TenantContext.require();
         RequirementEntity entity = requireWritable(id);
+        // r17 顺序即契约：先鉴权（403，不泄露 from/allowedTargets）后状态（409）。
+        // 只有 UI 来源进矩阵：APPROVAL 审批回调与 GITLAB（MrAdvanceService）不带用户上下文，
+        // 若也走矩阵会把需求永久卡在 APPROVING（AC-9）。
+        if ("UI".equals(source)) {
+            authorize(entity, action, scope);
+        }
         String from = entity.getStatus();
         String target = stateMachine.target(entity.getType(), from, action);
 
@@ -304,7 +310,7 @@ public class RequirementService {
                     "definitionId", Objects.requireNonNullElse(definitionId, 0L),
                     "comment", Objects.requireNonNullElse(comment, ""), "operator", scope.userId()));
             return new TransitionResult(entity.getId(), from,
-                    allowedActions(entity.getType(), from));
+                    allowedActions(entity.getType(), from, entity.getReporterId()));
         }
 
         // AC-10 反向守卫：没有 APPROVED 的 REQ_REVIEW 实例时，review_pass 一律 409，
@@ -349,7 +355,7 @@ public class RequirementService {
                 "comment", Objects.requireNonNullElse(comment, ""), "operator", scope.userId()));
         notifyTransition(entity, from, target, comment);
         return new TransitionResult(entity.getId(), target,
-                allowedActions(entity.getType(), target));
+                allowedActions(entity.getType(), target, entity.getReporterId()));
     }
 
     // -------------------------------------------------------------- decompose
@@ -592,8 +598,47 @@ public class RequirementService {
                 BIZ_TYPE, entity.getId());
     }
 
-    List<String> allowedActions(String type, String status) {
-        return new ArrayList<>(stateMachine.allowedActions(type, status));
+    /**
+     * 调用者快照：矩阵在 platform-contract（零依赖）里，只认 JDK 类型，因此由服务层从
+     * TenantContext 组装。没有 Principal 时（内部调用线程）退回 DataScope 身份 + 空角色集。
+     */
+    private RequirementActionMatrix.Caller callerOf(DataScope scope) {
+        TenantContext.Principal p = TenantContext.principal();
+        return p != null
+                ? new RequirementActionMatrix.Caller(p.userId(), p.roles(), p.vendorId())
+                : new RequirementActionMatrix.Caller(scope.userId(), TenantContext.roles(), null);
+    }
+
+    /**
+     * 动作级授权（r17）：矩阵未登记的动作<b>不</b>报 403 —— 那是状态机自己的 409，
+     * 「鉴权不认识的动作」不等于「无权执行」。
+     */
+    private void authorize(RequirementEntity entity, String action, DataScope scope) {
+        if (!RequirementActionMatrix.known(action)) {
+            return;
+        }
+        RequirementActionMatrix.Caller caller = callerOf(scope);
+        if (RequirementActionMatrix.can(action, entity.getReporterId(), caller)) {
+            return;
+        }
+        List<String> allowed = allowedActions(entity.getType(), entity.getStatus(),
+                entity.getReporterId());
+        // 不用 Map.of：vendorId 可为 null，Map.of 会 NPE 把 403 变成 500。
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("action", action);
+        detail.put("userId", caller.userId());
+        detail.put("roles", caller.roles());
+        detail.put("vendorId", caller.vendorId());
+        detail.put("allowedActions", allowed);
+        // 必须新事务：外层 @Transactional 随后因 403 回滚，同事务的审计会一起消失。
+        auditService.recordInNewTx("PERMISSION_DENIED", BIZ_TYPE, entity.getId(), detail);
+        throw RequirementErrors.actionForbidden(action, allowed);
+    }
+
+    /** allowedActions 的唯一来源：状态机的合法集合 ∩ 调用者被授权的动作（与执行共用同一谓词）。 */
+    List<String> allowedActions(String type, String status, Long reporterId) {
+        return RequirementActionMatrix.filter(type, status, reporterId,
+                callerOf(TenantContext.require()));
     }
 
     View toView(RequirementEntity entity, Rollup rollup) {
@@ -610,7 +655,7 @@ public class RequirementService {
                 entity.getEstimateDays(), entity.getActualDays(), entity.getMrUrl(),
                 entity.getExpectedDeliveryDate(), entity.getPlanStartDate(), entity.getPlanEndDate(),
                 entity.getClosedAt(), entity.getUpdatedAt(), rollup,
-                allowedActions(entity.getType(), entity.getStatus()), Map.of());
+                allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId()), Map.of());
     }
 
     private void rejectStatusInBody(Map<String, Object> extra) {

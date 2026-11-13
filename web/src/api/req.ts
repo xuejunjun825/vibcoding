@@ -122,8 +122,9 @@ export function actOnRequirement(
   id: number | string,
   payload: ActionPayload,
 ): Promise<ActionResponse> {
-  // 非法流转会拿到 409 ILLEGAL_TRANSITION，页面用常驻条渲染，不 catch 成 toast
-  return http.post<ActionResponse>(`${REQ}/requirements/${id}/actions`, payload)
+  // 403 交回详情页就地提示（r17）：按钮过期/越权只该是一次刷新，整页跳 /403 会丢上下文
+  // 非法流转仍是 409 ILLEGAL_TRANSITION，页面用常驻条渲染，不 catch 成 toast
+  return http.post<ActionResponse>(`${REQ}/requirements/${id}/actions`, payload, { silentForbidden: true })
 }
 
 export function decomposeRequirement(
