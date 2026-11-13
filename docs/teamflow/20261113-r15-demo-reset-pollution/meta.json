@@ -1,0 +1,7 @@
+{
+  "reqId": "req-15",
+  "runId": "tf-mwe8jigl-47q6tw",
+  "title": "修复演示数据污染：执行 make platform-demo-reset 之后，报表中心、岗位工作台、需求池、看板里只应剩下演示数据，测试与探针产生的数据（12",
+  "mode": "tech",
+  "createdAt": 1794529518755
+}

@@ -38,7 +38,10 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li><b>单事务</b>：{@link #reset()} 上 {@code @Transactional}，任何一步失败（含不变量违反）都整体
  *       回滚——半重置的演示数据比没重置更难排查。</li>
  *   <li><b>只删行</b>：绝不 {@code TRUNCATE}/{@code DROP}，逐表 {@code DELETE ... WHERE tenant_id = ?}；
- *       账号/角色/域/厂商/组织/流程定义/指标定义/字典/测试策略/环境台账/集成配置一律保留。</li>
+ *       账号/角色/域/厂商/组织/指标定义/字典/集成配置一律保留；{@code test_module}/{@code wf_definition}/
+ *       {@code test_env} 的<b>种子行</b>也保留，只清门禁按 RUN_TAG 命名的探针行
+ *       （{@link DemoFixture#GATE_RUN_TAG_RESIDUE}）；{@code test_strategy} 是 release 的派生数据，
+ *       无种子可按，随 release 一并清空。</li>
  *   <li><b>不变量自检用真实的数据范围引擎</b>：{@code po1=8 / vendor1=3 / vendor2=0} 不是写死的结论，
  *       而是用 {@link UserIdentity#scope()}（唯一的分档来源）+ {@link ScopeSql#forTable} 现算出来的——
  *       数据集改坏了，重置自己会红。</li>
@@ -53,8 +56,15 @@ public class DemoResetService {
     /** 夹具痕迹前缀：历次验收脚本造的临时数据（s1/s5/s7 协作段、neg-sm 负向段）。 */
     private static final List<String> FIXTURE_PREFIXES = List.of("s1-", "s5-", "s7-", "neg-sm-");
 
-    /** AC-13：通知不超过 5 条（修复前是 99+）。 */
-    private static final long NOTIFICATION_LIMIT = 5;
+    /**
+     * 报表探针名片段：历次验收脚本在报表中心建的临时报表（T8 编辑器探针、r11 证据、r13 交叉表）。
+     *
+     * <p>为什么报表名要单独一组而不是复用 {@link #FIXTURE_PREFIXES}：报表名是人写的中文短句
+     * （「T8 编辑器探针」），不像需求 code 有统一前缀；按 {@code s1-}/{@code s7-} 探报表名永远是 0，
+     * 断言会变成恒真的假安全网。这组只在 {@code reports=0} 之后做诊断（证明 251 行探针确实清空）。</p>
+     */
+    private static final List<String> PROBE_REPORT_PATTERNS =
+            List.of("%T8 编辑器探针%", "r11-ev%", "r13-%");
 
     /** AC-13：人天超过 30 的残留（s1-gantt 会把需求改成 45）等于没清干净。 */
     private static final double ACTUAL_DAYS_LIMIT = 30;
@@ -106,6 +116,11 @@ public class DemoResetService {
         long deleted = deleteBusinessData(tenantId);
         log.info("demo-reset: tenant={} 清理 {} 行业务实例数据", tenantCode, deleted);
 
+        // keepFilter 保住的两行执行器只保住了「行」：last_report_at/report_count 被 s7 与手工上报
+        // 改过之后会跨重置存活，NEVER/DISABLED 这两条种子事实就没了。重置要回到可演示夹具，
+        // 字段也得回到种子基线（与 DELETE_ORDER 同属 DemoFixture 一处拥有）。
+        db.update(DemoFixture.RESTORE_KEPT_EXECUTOR_BASELINE, tenantId);
+
         insertFixture(tenantId, refs);
 
         Map<String, Long> counts = counts();
@@ -120,7 +135,14 @@ public class DemoResetService {
         return counts;
     }
 
-    /** 当前计数（不重置）：脚本渲染计数表、后续阶段核对演示态都用它。 */
+    /**
+     * 当前计数（不重置）：脚本渲染计数表、后续阶段核对演示态都用它。
+     *
+     * <p>r15 的 6 个新键（{@code reports/portalCards/portalPins/executors/apiClients/probeReports}）
+     * 都是<b>纯行数</b>，不掺派生指标——{@link #reset()} 末尾会把 {@link #invariants} 混进同一个 map，
+     * 那是历史形状，不要在这里再加派生量。{@code probeReports} 是 {@code reports} 的子集，只作为
+     * 「探针确实清空」的诊断信号，不得据此推导别的期望。</p>
+     */
     public Map<String, Long> counts() {
         long tenantId = tenantId();
         Map<String, Long> counts = new LinkedHashMap<>();
@@ -140,7 +162,50 @@ public class DemoResetService {
         counts.put("defects", db.count("SELECT COUNT(*) FROM defect WHERE tenant_id = ?", tenantId));
         counts.put("notifications", db.count(
                 "SELECT COUNT(*) FROM notification WHERE tenant_id = ?", tenantId));
+        // r15：漏删的四张表纳入计数（定义数据残留曾让 /reports、/portal、/admin 带着上次门禁的痕迹）。
+        counts.put("reports", db.count(
+                "SELECT COUNT(*) FROM report_definition WHERE tenant_id = ?", tenantId));
+        counts.put("portalCards", db.count(
+                "SELECT COUNT(*) FROM portal_card_config WHERE tenant_id = ?", tenantId));
+        counts.put("portalPins", db.count(
+                "SELECT COUNT(*) FROM portal_card_config WHERE tenant_id = ? AND user_id <> 0", tenantId));
+        counts.put("executors", db.count(
+                "SELECT COUNT(*) FROM test_executor WHERE tenant_id = ?", tenantId));
+        counts.put("apiClients", db.count(
+                "SELECT COUNT(*) FROM api_client WHERE tenant_id = ?", tenantId));
+        counts.put("probeReports", probeReports(tenantId));
+        // r15-fix（QA D-01/D-02）：上一轮门禁的「运行时行」残留。前两个是纯行数，
+        // gateResidue 是跨表合计（按 DemoFixture.GATE_RUN_TAG_RESIDUE 一处谓词统计）。
+        counts.put("testStrategies", db.count(
+                "SELECT COUNT(*) FROM test_strategy WHERE tenant_id = ?", tenantId));
+        counts.put("testEnvs", db.count(
+                "SELECT COUNT(*) FROM test_env WHERE tenant_id = ?", tenantId));
+        counts.put("gateResidue", gateResidue(tenantId));
         return counts;
+    }
+
+    /**
+     * 门禁 RUN_TAG 残留行数（三张种子表合计）：谓词来自 {@link DemoFixture#GATE_RUN_TAG_RESIDUE}，
+     * 与 {@link DemoFixture#DELETE_ORDER} 里 {@code purgeRunTagResidue} 用的是同一份，删除范围与
+     * 断言口径因此不可能各说一套。纯计数，0 是唯一合法值。
+     */
+    private long gateResidue(long tenantId) {
+        long residue = 0;
+        for (String table : DemoFixture.RUN_TAG_RESIDUE_TABLES) {
+            residue += db.count("SELECT COUNT(*) FROM " + table + " WHERE tenant_id = ? AND ("
+                    + DemoFixture.GATE_RUN_TAG_RESIDUE + ")", tenantId);
+        }
+        return residue;
+    }
+
+    /** 报表探针残留：按 {@link #PROBE_REPORT_PATTERNS} 逐片段探测，只做「确实清空」的诊断。 */
+    private long probeReports(long tenantId) {
+        long probe = 0;
+        for (String pattern : PROBE_REPORT_PATTERNS) {
+            probe += db.count("SELECT COUNT(*) FROM report_definition"
+                    + " WHERE tenant_id = ? AND name LIKE ?", tenantId, pattern);
+        }
+        return probe;
     }
 
     // ------------------------------------------------------------------ 租户与引用
@@ -196,14 +261,20 @@ public class DemoResetService {
     /**
      * 按 {@link DemoFixture#DELETE_ORDER} 逐表删除本租户的业务实例数据。
      *
-     * <p>表名来自代码常量（不是请求参数），参数只有 {@code tenant_id}，所以拼接表名安全。
+     * <p>表名与保留谓词都来自代码常量（不是请求参数），参数只有 {@code tenant_id}，所以拼接安全。
+     * {@code keepFilter} 存在时按 {@code AND NOT (<keepFilter>)} 保留命中行（例如 V9 迁移种下的
+     * 两个执行器）——「删什么/留什么」仍只有 {@code DemoFixture} 一处拥有，脚本不再做第二套判断。
      * 这些表在迁移里没有 FOREIGN KEY 约束，删除顺序必须自身完备——顺序写错的后果不是报错，
      * 而是静默留下孤儿行，因此顺序收敛在 {@code DemoFixture} 一处。</p>
      */
     private long deleteBusinessData(long tenantId) {
         long deleted = 0;
-        for (String table : DemoFixture.DELETE_ORDER) {
-            deleted += db.update("DELETE FROM " + table + " WHERE tenant_id = ?", tenantId);
+        for (DemoFixture.TableReset reset : DemoFixture.DELETE_ORDER) {
+            String sql = "DELETE FROM " + reset.table() + " WHERE tenant_id = ?";
+            if (reset.keepFilter() != null && !reset.keepFilter().isBlank()) {
+                sql += " AND NOT (" + reset.keepFilter() + ")";
+            }
+            deleted += db.update(sql, tenantId);
         }
         return deleted;
     }
@@ -333,7 +404,7 @@ public class DemoResetService {
                     pm, pm);
         }
 
-        // 8) 通知（≤5 条；修复前是 99+）
+        // 8) 通知（恰好 4 条 = DemoFixture.NOTIFICATION_COUNT；修复前是 99+）
         for (Object[] row : DemoFixture.notificationRows(refs)) {
             db.insert("INSERT INTO notification (tenant_id, user_id, type, title, content, biz_type)"
                     + " VALUES (?,?,?,?,?,?)",
@@ -375,10 +446,21 @@ public class DemoResetService {
         expect(violations, "夹具痕迹（s1-/s5-/s7-/neg-sm-）", counts.get("fixtureTraces"), 0);
         expect(violations, "人天 > 30 的残留", counts.get("actualDaysOver30"), 0);
         expect(violations, "甘特逾期行", counts.get("overdueGanttRows"), 0);
-        long notifications = counts.get("notifications");
-        if (notifications > NOTIFICATION_LIMIT) {
-            violations.add("通知 " + notifications + " 条，超过上限 " + NOTIFICATION_LIMIT);
-        }
+        expect(violations, "通知", counts.get("notifications"), DemoFixture.NOTIFICATION_COUNT);
+        // r15：四张原先漏删的表必须真的清空（执行器保留 V9 种子的 2 行）。
+        expect(violations, "报表定义", counts.get("reports"), 0);
+        expect(violations, "门户卡片配置", counts.get("portalCards"), 0);
+        expect(violations, "门户个人 pin", counts.get("portalPins"), 0);
+        expect(violations, "测试执行器", counts.get("executors"), 2);
+        expect(violations, "开放客户端", counts.get("apiClients"), 0);
+        expect(violations, "报表探针残留", counts.get("probeReports"), 0);
+        // r15-fix（QA D-01/D-02）：派生实例与门禁残留都必须归零，否则演示页会带着上一轮的痕迹。
+        // testEnvs 不进断言：种子环境行是唯一合法基线，但人工建的环境不该让整次重置 409，
+        // 它作为纯计数交给脚本按「残留 0 + 种子行在」核对。
+        expect(violations, "测试策略（派生自 release）", counts.get("testStrategies"),
+                DemoFixture.TEST_STRATEGY_COUNT);
+        expect(violations, "门禁 RUN_TAG 残留（wf_definition/test_module/test_env）",
+                counts.get("gateResidue"), DemoFixture.GATE_RESIDUE_COUNT);
         return violations;
     }
 

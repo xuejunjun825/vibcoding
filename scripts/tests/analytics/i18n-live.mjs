@@ -330,8 +330,39 @@ async function main() {
     notes.push(`预置报表 ${REPORT_IDS.join('/')} 命中 ${reportIds.length} 个，补入 ${fallback.join('/') || '（无）'}`)
     reportIds = [...reportIds, ...fallback]
   }
+  // r15：platform-demo-reset 把 report_definition 清成 0（演示态就该是空报表中心），
+  // 所以门禁不能依赖「上一轮探针残留的报表」——那正是 r15 要治理的污染。少于 3 张时
+  // 自带夹具（requirement/status 表，与 r14 预置报表同形），跑完在 finally 里删掉，
+  // 重置后的门禁因此可独立复跑，且不给下一次重置留垃圾。
+  const fixtureReports = []
+  if (reportIds.length < 3) {
+    for (let i = reportIds.length; i < 3; i += 1) {
+      try {
+        const created = await apiSend(auth.token, auth.tenantId, 'POST', '/api/deliver/reports', {
+          name: `门禁临时-需求状态-${process.pid}-${i}`,
+          datasetId: 'requirement',
+          chartType: 'TABLE',
+          definition: {
+            datasetId: 'requirement',
+            rows: ['status'],
+            columns: [],
+            measures: ['req.total'],
+            filters: [],
+          },
+        })
+        const id = Number(created?.id)
+        if (Number.isFinite(id)) {
+          fixtureReports.push(id)
+          reportIds.push(id)
+        }
+      } catch (err) {
+        console.error(`[live] 夹具报表创建失败：${err.message}`)
+      }
+    }
+    notes.push(`报表中心缺 3 张：门禁自建夹具 ${fixtureReports.join('/') || '（失败）'}，跑完即删（DELETE 为软删 status=DELETED，列表不再可见）`)
+  }
   if (reportIds.length === 0) {
-    console.error('[live] 一条报表都取不到：先 make platform-seed（或 platform-demo-reset）。')
+    console.error('[live] 一条报表都取不到，夹具也没建成：make platform-up 后看 deliver-service 日志。')
     console.log('COUNT live 0 1')
     return 1
   }
@@ -558,6 +589,11 @@ async function main() {
   } catch (err) {
     check('A0', '现场流程跑完（无异常中断）', false, `${err.message}`)
   } finally {
+    // 夹具是门禁自己造的，跑完必须删干净：否则下一次 platform-demo-reset 的「报表 0 行」
+    // 断言会被门禁自己的垃圾顶掉，等于把 r15 治理掉的污染又种回来。
+    for (const id of fixtureReports) {
+      await apiSend(auth.token, auth.tenantId, 'DELETE', `/api/deliver/reports/${id}`).catch(() => {})
+    }
     await context.close().catch(() => {})
     await browser.close().catch(() => {})
   }
