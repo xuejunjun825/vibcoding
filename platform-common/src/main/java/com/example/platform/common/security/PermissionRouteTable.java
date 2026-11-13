@@ -133,7 +133,13 @@ public final class PermissionRouteTable {
             rule(null, "^/requirements/\\d+/assign-vendor$", false, "req:assign-vendor"),
             rule(null, "^/requirements/\\d+/deliver$", false, "req:deliver"),
             rule(null, "^/requirements/\\d+/quick-test$", false, "test:quick"),
-            rule("POST", "^/requirements/\\d+/actions$", false, "req:review"),
+            // 动作端点（POST /requirements/{id}/actions）**故意**不在此登记：这一个端点承载需求
+            // 状态机的十余个流转动作，每个动作的判据不同（业务方提交自己的、产品经理评审、开发
+            // 开工、测试通过……），而本表只能表达「一个端点一个码」。保留任何码都必然把另一侧
+            // 挡在门外——历史上这里是 req:review，于是只有 req:report:bus 的业务角色提交自己
+            // 的需求也 403（r17 修复）。故此处降为「已认证可达」，逐动作授权下移到服务层，
+            // 由 platform-contract 的 RequirementActionMatrix 统一判定（allowedActions 过滤与
+            // transition 执行共用同一个谓词）。不要为这个路径再加回端点级规则。
 
             // ---- M6 quality domain ----
             // MUST stay above the release / test-plan fallbacks below: first match wins, so an

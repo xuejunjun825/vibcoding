@@ -96,4 +96,14 @@ public final class RequirementErrors {
     public static ApiException forbidden(String message) {
         return new ApiException(403, FORBIDDEN, message, Map.of());
     }
+
+    /**
+     * 动作级拒绝（r17）：detail 带 action 与「此刻仍可执行的动作」，前端据此就地刷新按钮，
+     * 负向脚本据此断言 403 确实来自动作矩阵而不是别的分支。
+     */
+    public static ApiException actionForbidden(String action, List<String> allowedActions) {
+        return new ApiException(403, FORBIDDEN, "无权执行该操作",
+                Map.of("action", action == null ? "" : action,
+                        "allowedActions", allowedActions == null ? List.of() : allowedActions));
+    }
 }

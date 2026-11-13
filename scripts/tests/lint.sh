@@ -328,6 +328,57 @@ verify_gate_repeatable() {
         || { echo "cleanup_verify_defects 调用点 ${n} 处：创建前清历史 + 断言后清本轮，共需 2 处"; return 1; }
 }
 
+# ---- L17 需求流转动作的前端单点真相（r17） ----
+# 缺陷现场：按钮可用性由前端 ACTION_META.permissions 二次过滤，服务端又用端点级 req:review
+# 兜一次，两套判据必然漂移——业务角色看得到「提交审批」按钮，点下去 403 且整页跳 /403（r17）。
+# 修复后按钮只认服务端 allowedActions，403 就地提示 + refreshAll() 同步。
+requirement_action_frontend_single_source() {
+    local api="$ROOT/web/src/api/req.ts"
+    local view="$ROOT/web/src/views/req/RequirementDetailView.vue"
+    [[ -f "$api" ]] || { echo "缺少 web/src/api/req.ts"; return 1; }
+    [[ -f "$view" ]] || { echo "缺少 web/src/views/req/RequirementDetailView.vue"; return 1; }
+    grep -q '^export function actOnRequirement' "$api" \
+        || { echo "api/req.ts 找不到 actOnRequirement 导出（动作请求的降级标记必须落在这一处）"; return 1; }
+    grep -qE '/actions.*silentForbidden' "$api" \
+        || { echo "actOnRequirement 的 /actions 请求未声明 silentForbidden：403 会在 client.ts 里先 navigate('/403') 再抛错"; return 1; }
+    grep -q 'status === 403' "$view" \
+        || { echo "详情页没有 403 就地处理分支（按钮过期应 toast，不是整页跳 /403）"; return 1; }
+    grep -q 'refreshAll()' "$view" \
+        || { echo "详情页 403 分支未 refreshAll()：按钮不会按服务端 allowedActions 重新同步"; return 1; }
+    if grep -qF "navigate('/403'" "$view"; then
+        echo "详情页仍整页跳 /403：403 只是「按钮过期」，跳转会丢上下文"
+        return 1
+    fi
+    if grep -q 'meta\.permissions\|disabledReason' "$view"; then
+        echo "详情页仍有本地权限二次过滤（meta.permissions / disabledReason）：与服务端动作矩阵必然漂移"
+        return 1
+    fi
+}
+
+# ---- L18 路由表把动作端点让给动作矩阵（r17 的「减法」） ----
+# 加回任何端点级码都会重现 r17：这个端点承载状态机的十余个动作，一个码挡不住也放不全。
+route_table_defers_requirement_actions() {
+    local f="$ROOT/platform-common/src/main/java/com/example/platform/common/security/PermissionRouteTable.java"
+    local m="$ROOT/platform-contract/src/main/java/com/example/platform/contract/RequirementActionMatrix.java"
+    [[ -f "$f" ]] || { echo "缺少 PermissionRouteTable.java"; return 1; }
+    # 自检：判据必须命中删除前的真实写法，否则这条门禁形同虚设
+    if ! printf '%s\n' 'rule("POST", "^/requirements/\\d+/actions$", false, "req:review"),' \
+        | grep -qE '\^/requirements/[^"]*/actions'; then
+        echo "L18 自检失效：判据不再命中删除前的规则写法（提取器坏了）"
+        return 1
+    fi
+    if grep -qE '\^/requirements/[^"]*/actions' "$f"; then
+        echo "PermissionRouteTable 又登记了需求动作端点：端点级码会让另一侧角色 403（r17 根因）"
+        return 1
+    fi
+    grep -q 'RequirementActionMatrix' "$f" \
+        || { echo "路由表删除位没有留痕（注释应指向 RequirementActionMatrix，防下一个人加回来）"; return 1; }
+    [[ -f "$m" ]] \
+        || { echo "缺少 platform-contract/.../RequirementActionMatrix.java（授权的唯一真相）"; return 1; }
+    grep -q 'req:review' "$m" \
+        || { echo "RequirementActionMatrix 未登记 req:review（评审类动作的权限码）"; return 1; }
+}
+
 log "静态门禁：脚本语法 / 变量插值 / 单点实现 / 错误提示 / 文档一致性"
 run_check "L1 所有脚本 bash -n 语法通过" syntax_ok
 run_check "L2 无 \$VAR 紧跟全角标点（防 set -u 吞变量名）" no_bare_var_before_wide_char
@@ -347,6 +398,8 @@ run_check "L13 .gitignore 覆盖前端产物与运行态" gitignore_covers_artif
 run_check "L14 报告取数只经 QualityAggregator（禁止 SUM(pc.result=...)）" report_aggregation_single_source
 run_check "L15 分析域取数原语单点（三页共用 useAnalyticsFeed）" analytics_feed_single_source
 run_check "L16 体检可重复：密度容差判等 + 自建缺陷自清理" verify_gate_repeatable
+run_check "L17 需求动作前端单点真相：403 就地处理 + 无本地二次过滤" requirement_action_frontend_single_source
+run_check "L18 路由表把需求动作端点让给 RequirementActionMatrix" route_table_defers_requirement_actions
 
 if (( FAILED > 0 )); then
     err "lint 失败 ${FAILED}/${TOTAL} 项：按上面的行号修正后重跑 make lint"
