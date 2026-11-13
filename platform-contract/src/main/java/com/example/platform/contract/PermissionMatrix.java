@@ -164,6 +164,35 @@ public final class PermissionMatrix {
     }
 
     /**
+     * Access of one role across a set of function codes: the <b>any-of</b> union.
+     *
+     * <p>r18 derives the seed from this: a page or action lists the legacy codes it used to be
+     * gated by, and the pre-upgrade rule allowed it when <em>any</em> of them was not DENY (the
+     * route table's {@code anyOf}, and the frontend's {@code canAny}). Reducing with
+     * {@link Access#max} keeps that exact meaning, which is what makes AC-3 ("升级后可用能力逐格
+     * 等价") checkable. An empty list means the page/action has no legacy code and is not narrowed
+     * by the function layer at all, so it yields ALLOW — the page/action grant itself still
+     * decides.</p>
+     *
+     * <p>This is <em>not</em> the multi-role merge rule: across roles an explicit DENY wins
+     * ({@code PermissionService.merge}), because a tenant can now narrow a built-in role and the
+     * union must not silently widen it again.</p>
+     */
+    public static Access accessForAny(String role, Collection<String> functions) {
+        if (functions == null || functions.isEmpty()) {
+            return Access.ALLOW;
+        }
+        Access result = Access.DENY;
+        for (String function : functions) {
+            result = Access.max(result, accessFor(role, function));
+            if (result == Access.ALLOW) {
+                return Access.ALLOW;
+            }
+        }
+        return result;
+    }
+
+    /**
      * Effective access of a caller: the union (highest) of every role it holds.
      *
      * <p>An empty role set is DENY, never ALLOW — a token without roles must not pass.</p>

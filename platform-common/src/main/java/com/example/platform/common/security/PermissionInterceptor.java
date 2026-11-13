@@ -8,28 +8,50 @@ import java.util.Set;
 import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.tenant.TenantContext;
+import com.example.platform.contract.ActionRegistry;
 import com.example.platform.contract.PermissionMatrix;
+import com.example.platform.contract.PermissionMatrix.Access;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
- * Enforces {@link PermissionMatrix} before the controller runs.
+ * One entry gate: page admission, then the action, then the (untouched) data scope.
  *
- * <p>DENY → 403 with an audit row written in its own transaction (the request has no business
- * transaction to roll back). RESTRICTED passes: the matrix says "allowed within your data scope",
- * and the scope narrowing happens in SQL, not by refusing the call. An empty role set denies
- * everything (the contract's {@code accessOf} already fail-closes on empty roles).</p>
+ * <p>r18 keeps the single-interceptor design of r17 and replaces only the oracle: it asks
+ * {@link PermissionService} instead of re-deriving {@code PermissionMatrix} per call site. The 403
+ * contract is unchanged — {@code FORBIDDEN} / "无权执行该操作" — and so is the audit action
+ * {@code PERMISSION_DENIED}; the {@code detail} now names the page and the action, which is what the
+ * r18 UI shows ("你在「缺陷」页没有「指派」动作").</p>
+ *
+ * <p>Resolution order for what a request needs:</p>
+ * <ol>
+ *   <li>{@link RequiresAction} on the handler (an exact action code);</li>
+ *   <li>{@link RequiresActionFromBody} (the action code travels in the JSON body);</li>
+ *   <li>{@link PermissionRouteTable} (page list + optional action, body-prefixed actions);</li>
+ *   <li>{@link RequiresPermission} — kept for handlers that still name legacy function codes.</li>
+ * </ol>
+ *
+ * <p>Page admission is any-of: one URL serves several pages, and opening any of them is enough.
+ * The per-request memo is cleared in {@link #afterCompletion} so a long-lived thread never reuses
+ * another tenant's answer.</p>
  */
 @Component
 public class PermissionInterceptor implements HandlerInterceptor {
 
     private final AuditService auditService;
+    private final PermissionService permissions;
+    private final ObjectMapper objectMapper;
 
-    public PermissionInterceptor(AuditService auditService) {
+    public PermissionInterceptor(AuditService auditService, PermissionService permissions,
+                                 ObjectMapper objectMapper) {
         this.auditService = auditService;
+        this.permissions = permissions;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -39,64 +61,188 @@ public class PermissionInterceptor implements HandlerInterceptor {
         if (isOpen(path)) {
             return true;
         }
-        PermissionRouteTable.Requirement requirement = requirement(handler, request, path);
-        if (requirement == null || requirement.codes().isEmpty()) {
+        if (handler instanceof HandlerMethod method && pageOnly(method)) {
             return true;
         }
-        List<String> roles = TenantContext.roles();
-        boolean granted = requirement.anyOf()
-                ? requirement.codes().stream()
-                .anyMatch(code -> PermissionMatrix.accessOf(code, roles)
-                        != PermissionMatrix.Access.DENY)
-                : requirement.codes().stream()
-                .allMatch(code -> PermissionMatrix.accessOf(code, roles)
-                        != PermissionMatrix.Access.DENY);
-        if (granted) {
+        Declared declared = declared(methodOrNull(handler), request, path);
+        if (declared == null) {
             return true;
         }
-        deny(request, path, requirement, roles);
-        throw new ApiException(403, "FORBIDDEN", "无权执行该操作", Map.of(
-                "functions", requirement.codes(),
-                "path", path,
-                "method", request.getMethod()));
+        if (declared.granted()) {
+            return true;
+        }
+        deny(request, path, declared);
+        throw new ApiException(403, "FORBIDDEN", "无权执行该操作", declared.detail(
+                request.getMethod(), path, TenantContext.roles()));
     }
 
-    private PermissionRouteTable.Requirement requirement(Object handler, HttpServletRequest request,
-                                                          String path) {
-        if (handler instanceof HandlerMethod method) {
-            RequiresPermission annotation = method.getMethodAnnotation(RequiresPermission.class);
-            if (annotation == null) {
-                annotation = method.getBeanType().getAnnotation(RequiresPermission.class);
-            }
-            if (annotation != null && annotation.value().length > 0) {
-                return new PermissionRouteTable.Requirement(List.of(annotation.value()),
-                        annotation.anyOf());
-            }
-        }
-        return PermissionRouteTable.requirementFor(request.getMethod(), path);
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
+                                Object handler, Exception ex) {
+        permissions.clearRequestMemo();
     }
 
-    private void deny(HttpServletRequest request, String path,
-                      PermissionRouteTable.Requirement requirement, List<String> roles) {
-        Map<String, Object> detail = new LinkedHashMap<>();
-        detail.put("path", path);
-        detail.put("method", request.getMethod());
-        detail.put("functions", requirement.codes());
-        detail.put("roles", roles);
-        Map<String, String> access = new LinkedHashMap<>();
-        for (String code : requirement.codes()) {
-            access.put(code, PermissionMatrix.accessOf(code, roles).name());
+    // ---------------------------------------------------------------- resolution
+
+    /** One resolved requirement, already evaluated against the current caller. */
+    private record Declared(List<String> pages, String action, String bodyPrefix,
+                            List<String> legacyFunctions, boolean legacyAnyOf, boolean granted) {
+
+        Map<String, Object> detail(String method, String path, List<String> roles) {
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("path", path);
+            detail.put("method", method);
+            detail.put("page", pages.isEmpty() ? null : pages.get(0));
+            detail.put("pages", pages);
+            detail.put("action", action);
+            if (!legacyFunctions.isEmpty()) {
+                detail.put("functions", legacyFunctions);
+            }
+            detail.put("roles", roles);
+            detail.put("access", "DENY");
+            return detail;
         }
-        detail.put("access", access);
-        auditService.recordInNewTx("PERMISSION_DENIED", "function", null, detail);
+    }
+
+    private Declared declared(HandlerMethod handler, HttpServletRequest request, String path) {
+        PermissionService permissionService = permissions;
+        if (handler != null) {
+            RequiresAction exact = handler.getMethodAnnotation(RequiresAction.class);
+            if (exact == null) {
+                exact = handler.getBeanType().getAnnotation(RequiresAction.class);
+            }
+            if (exact != null) {
+                String page = pageOfAction(exact.value());
+                return evaluate(List.of(page), exact.value(), null, List.of(), false,
+                        permissionService, request);
+            }
+            RequiresActionFromBody fromBody = handler.getMethodAnnotation(
+                    RequiresActionFromBody.class);
+            if (fromBody != null) {
+                String prefix = fromBody.prefix().isBlank()
+                        ? modulePrefix(fromBody.module())
+                        : fromBody.prefix();
+                return evaluate(List.of(fromBody.module()), null, prefix, List.of(), false,
+                        permissionService, request);
+            }
+            RequiresPermission legacy = handler.getMethodAnnotation(RequiresPermission.class);
+            if (legacy == null) {
+                legacy = handler.getBeanType().getAnnotation(RequiresPermission.class);
+            }
+            if (legacy != null && legacy.value().length > 0) {
+                List<String> codes = List.of(legacy.value());
+                boolean granted = legacy.anyOf()
+                        ? codes.stream().anyMatch(permissionService::canFunction)
+                        : codes.stream().allMatch(permissionService::canFunction);
+                return new Declared(List.of(), null, null, codes, legacy.anyOf(), granted);
+            }
+        }
+        PermissionRouteTable.Requirement requirement =
+                PermissionRouteTable.requirementFor(request.getMethod(), path);
+        if (requirement == null) {
+            return null;
+        }
+        return evaluate(requirement.pages(), requirement.action(), requirement.bodyPrefix(),
+                List.of(), false, permissionService, request);
+    }
+
+    /**
+     * Evaluate a requirement. When the action comes from the body the caller must be able to read
+     * it; an unreadable or unknown action fails closed instead of falling back to page admission.
+     */
+    private Declared evaluate(List<String> pages, String action, String bodyPrefix,
+                              List<String> legacyFunctions, boolean legacyAnyOf,
+                              PermissionService permissionService, HttpServletRequest request) {
+        String resolvedAction = action;
+        if (bodyPrefix != null && !bodyPrefix.isBlank()) {
+            String verb = bodyField(request, "action");
+            resolvedAction = verb == null || verb.isBlank() ? null : bodyPrefix + verb;
+            if (resolvedAction != null && !ActionRegistry.isRegistered(resolvedAction)) {
+                // Unregistered verb: not grantable by construction, so deny rather than guess.
+                return new Declared(pages, resolvedAction, bodyPrefix, legacyFunctions, legacyAnyOf,
+                        false);
+            }
+        }
+        boolean granted = false;
+        if (!pages.isEmpty()) {
+            for (String page : pages) {
+                Access access = permissionService.decide(page, resolvedAction);
+                if (access != Access.DENY) {
+                    granted = true;
+                    break;
+                }
+            }
+        } else if (resolvedAction != null) {
+            granted = permissionService.canAction(resolvedAction);
+        }
+        return new Declared(pages, resolvedAction, bodyPrefix, legacyFunctions, legacyAnyOf,
+                granted);
+    }
+
+    private String bodyField(HttpServletRequest request, String field) {
+        if (request == null) {
+            return null;
+        }
+        if (request instanceof RequestBodyCacheFilter.CachedBodyRequest cached) {
+            return read(cached.bodyText(), field);
+        }
+        return null;
+    }
+
+    /** Parse the cached JSON body; a malformed body yields {@code null} (fail closed). */
+    private String read(String json, String field) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            JsonNode value = node.get(field);
+            return value == null || value.isNull() ? null : value.asString();
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private static String pageOfAction(String actionCode) {
+        return ActionRegistry.action(actionCode).map(ActionRegistry.ActionDef::menuCode).orElse(null);
+    }
+
+    /** {@code req.action.} for module {@code req.pool}. */
+    private static String modulePrefix(String moduleCode) {
+        if (moduleCode == null || moduleCode.isBlank()) {
+            return "";
+        }
+        int dot = moduleCode.indexOf('.');
+        String module = dot < 0 ? moduleCode : moduleCode.substring(0, dot);
+        return module + ".action.";
+    }
+
+    private static boolean pageOnly(HandlerMethod method) {
+        PageOnly annotation = method.getMethodAnnotation(PageOnly.class);
+        return annotation != null;
+    }
+
+    private static HandlerMethod methodOrNull(Object handler) {
+        return handler instanceof HandlerMethod method ? method : null;
+    }
+
+    private void deny(HttpServletRequest request, String path, Declared declared) {
+        Map<String, Object> detail = declared.detail(request.getMethod(), path,
+                TenantContext.roles());
+        auditService.recordInNewTx("PERMISSION_DENIED", "permission", null, detail);
     }
 
     private static boolean isOpen(String path) {
         if (path == null) {
             return true;
         }
-        if (path.equals("/auth/login") || path.equals("/health") || path.equals("/error")
-                || path.equals("/favicon.ico")) {
+        if (path.equals("/auth/login") || path.equals("/auth/me") || path.equals("/health")
+                || path.equals("/error") || path.equals("/favicon.ico")
+                || path.startsWith("/auth/me/")) {
+            return true;
+        }
+        if (path.startsWith("/dictionaries") || path.startsWith("/v1/test-executions")
+                || path.startsWith("/integration/webhooks")) {
             return true;
         }
         return path.startsWith("/internal/") || path.startsWith("/actuator/")
@@ -106,8 +252,7 @@ public class PermissionInterceptor implements HandlerInterceptor {
     /** Roles that hold at least one of the codes; used by tests to prove the table is complete. */
     public static Set<String> rolesWith(String function) {
         return Set.copyOf(PermissionMatrix.roles().stream()
-                .filter(role -> PermissionMatrix.accessFor(role, function)
-                        != PermissionMatrix.Access.DENY)
+                .filter(role -> PermissionMatrix.accessFor(role, function) != Access.DENY)
                 .toList());
     }
 }

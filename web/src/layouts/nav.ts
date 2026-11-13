@@ -10,6 +10,13 @@ export interface NavItem extends NavGuard {
   icon: string
   /** 角标来源：待办数 / 未读数 */
   badge?: 'todo' | 'unread'
+  /**
+   * 页面码（MENU 层，r18 起必填）：`''` 表示不受页面保护（通知中心）。
+   *
+   * 与 `MenuRegistry`（后端契约）和 `sys_menu`（库表）三处同值，`s1` 脚本做三向
+   * 比对；改这里必须同步改那两处，否则 rbac-verify s1 立即红。
+   */
+  pageCode: string
 }
 
 export interface NavGroup {
@@ -42,6 +49,9 @@ export interface NavGroup {
  * M9 新增（分析域末尾三项）：portal（岗位工作台）、analytics-dashboard（数据看板）、
  * report-list（自助报表）—— 路由见 web/src/router/routes/analytics.routes.ts。
  * /workbench 是本轮**不动**的既有个人工作台，两项靠 label 区分。
+ *
+ * r18 新增：admin-roles（角色与权限，页面码 admin.roles）、角色授权页 role-permissions
+ * （不在导航里，从角色列表进入）。
  */
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -53,6 +63,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'inbox',
         routeName: 'approvals',
         functionCode: AUTHENTICATED,
+        pageCode: 'me.todo',
         badge: 'todo',
       },
       {
@@ -61,6 +72,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'list',
         routeName: 'requirements',
         functionCode: AUTHENTICATED,
+        pageCode: 'me.tasks',
       },
       {
         label: '工作台',
@@ -68,6 +80,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'workbench',
         routeName: 'workbench',
         functionCode: ['plan:execute', 'case:manage'],
+        pageCode: 'me.workbench',
       },
       {
         label: '通知',
@@ -75,6 +88,8 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'bell',
         routeName: 'notifications',
         functionCode: AUTHENTICATED,
+        // 通知中心不做页面级授权（人人可读自己的通知）：空页面码 = 只看登录态
+        pageCode: '',
         badge: 'unread',
       },
     ],
@@ -88,6 +103,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'inbox',
         routeName: 'requirements',
         functionCode: AUTHENTICATED,
+        pageCode: 'req.pool',
       },
       {
         label: '提报需求',
@@ -95,6 +111,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'plus',
         routeName: 'requirement-create',
         functionCode: ['req:report:bus', 'req:report:dev'],
+        pageCode: 'req.create',
       },
       {
         label: '版本计划',
@@ -102,6 +119,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'calendar',
         routeName: 'releases',
         functionCode: 'release:plan',
+        pageCode: 'req.release',
       },
       {
         label: '迭代',
@@ -109,6 +127,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'layout',
         routeName: 'iterations',
         functionCode: 'task:manage',
+        pageCode: 'req.iteration',
       },
     ],
   },
@@ -121,6 +140,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'bug',
         routeName: 'defects',
         functionCode: AUTHENTICATED,
+        pageCode: 'defect.list',
       },
       {
         // 厂商不作用例：内部账号才渲染；厂商深链由路由守卫 403（meta.internalOnly）
@@ -130,6 +150,7 @@ export const NAV_GROUPS: NavGroup[] = [
         routeName: 'testcases',
         functionCode: 'case:manage',
         internalOnly: true,
+        pageCode: 'test.cases',
       },
       {
         label: '测试计划',
@@ -137,6 +158,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'clipboard',
         routeName: 'test-plans',
         functionCode: 'plan:manage',
+        pageCode: 'test.plans',
       },
       {
         label: '测试策略',
@@ -144,6 +166,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'compass',
         routeName: 'test-strategies',
         functionCode: 'strategy:manage',
+        pageCode: 'test.strategies',
       },
       {
         label: '测试报告',
@@ -152,6 +175,7 @@ export const NAV_GROUPS: NavGroup[] = [
         routeName: 'test-reports',
         // 测试报告不在权限矩阵的读码里：读者面用「生成 / 签发」两码表达
         functionCode: ['report:generate', 'report:sign'],
+        pageCode: 'test.reports',
       },
       {
         label: '环境台账',
@@ -159,6 +183,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'server',
         routeName: 'test-envs',
         functionCode: 'env:manage',
+        pageCode: 'test.envs',
       },
       {
         label: '执行器',
@@ -166,6 +191,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'device',
         routeName: 'test-executors',
         functionCode: 'TEST_EXECUTOR_VIEW',
+        pageCode: 'test.executors',
       },
       {
         label: '发布单',
@@ -173,6 +199,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'rocket',
         routeName: 'deploy-orders',
         functionCode: 'deploy:create',
+        pageCode: 'deploy.orders',
       },
     ],
   },
@@ -185,6 +212,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'gantt',
         routeName: 'gantt',
         functionCode: 'GANTT_VIEW',
+        pageCode: 'collab.gantt',
       },
       {
         label: 'Wiki',
@@ -192,6 +220,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'book',
         routeName: 'wiki',
         functionCode: 'WIKI_VIEW',
+        pageCode: 'collab.wiki',
       },
       {
         label: '价值流',
@@ -199,6 +228,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'flow',
         routeName: 'value-stream',
         functionCode: 'FLOW_VIEW',
+        pageCode: 'collab.value-stream',
       },
     ],
   },
@@ -211,6 +241,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'matrix',
         routeName: 'traceability',
         functionCode: 'trace:view',
+        pageCode: 'qa.trace',
       },
       {
         label: '质量门总览',
@@ -218,6 +249,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'gate',
         routeName: 'quality-gates',
         functionCode: 'gate:view',
+        pageCode: 'qa.gates',
       },
       {
         label: '质量指标',
@@ -225,6 +257,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'gauge',
         routeName: 'quality-metrics',
         functionCode: 'qualitymetric:view',
+        pageCode: 'qa.metrics',
       },
       {
         label: '质量看板',
@@ -232,6 +265,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'chart',
         routeName: 'defect-board',
         functionCode: 'defect:board',
+        pageCode: 'defect.board',
       },
       {
         label: '分支策略',
@@ -239,6 +273,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'branch',
         routeName: 'code-policies',
         functionCode: 'CCODE_POLICY_VIEW',
+        pageCode: 'code.policies',
       },
       {
         // 与既有 /workbench（M6 个人工作台）不是同一页：这里按岗位模板装配五区
@@ -247,6 +282,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'workbench',
         routeName: 'portal',
         functionCode: 'PORTAL_VIEW',
+        pageCode: 'ana.portal',
       },
       {
         label: '数据看板',
@@ -254,6 +290,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'chart',
         routeName: 'analytics-dashboard',
         functionCode: 'PORTAL_VIEW',
+        pageCode: 'ana.dashboard',
       },
       {
         label: '自助报表',
@@ -261,6 +298,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'document',
         routeName: 'report-list',
         functionCode: 'REPORT_VIEW',
+        pageCode: 'ana.reports',
       },
     ],
   },
@@ -274,6 +312,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'building',
         routeName: 'admin-orgs',
         functionCode: ['tenant:manage', 'org:manage'],
+        pageCode: 'admin.orgs',
       },
       {
         label: '用户与角色',
@@ -281,6 +320,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'users',
         routeName: 'admin-users',
         functionCode: 'org:manage',
+        pageCode: 'admin.users',
       },
       {
         label: '厂商与域',
@@ -288,15 +328,24 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'vendor',
         routeName: 'admin-vendors',
         functionCode: 'org:manage',
+        pageCode: 'admin.vendors',
       },
       {
-        label: '权限矩阵',
+        label: '权限总览',
         to: '/admin/permissions',
-        icon: 'shield',
+        icon: 'list',
         routeName: 'admin-permissions',
-        // 矩阵本身是管理面数据（角色 × 功能码），与后端 PermissionRouteTable 同一个码：
-        // 没权限就不渲染入口，而不是点进去被 403。
+        // 只读总览与运行时同源（FUNCTION 授权行），写入口在「角色与权限」
         functionCode: 'org:manage',
+        pageCode: 'admin.permissions',
+      },
+      {
+        label: '角色与权限',
+        to: '/admin/roles',
+        icon: 'shield',
+        routeName: 'admin-roles',
+        functionCode: 'org:manage',
+        pageCode: 'admin.roles',
       },
       {
         label: '流程定义',
@@ -304,6 +353,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'flow',
         routeName: 'admin-workflows',
         functionCode: 'workflow:manage',
+        pageCode: 'admin.workflows',
       },
       {
         label: 'API 客户端',
@@ -311,6 +361,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'key',
         routeName: 'admin-api-clients',
         functionCode: 'apiclient:manage',
+        pageCode: 'admin.api-clients',
       },
       {
         // M7：四个外部系统插槽（DESIGN §3.2，routeName 未注册时本条目自动隐藏）
@@ -319,6 +370,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'plug',
         routeName: 'admin-integrations',
         functionCode: 'integration:manage',
+        pageCode: 'admin.integrations',
       },
       {
         label: '指标字典',
@@ -326,6 +378,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'ruler',
         routeName: 'admin-metrics',
         functionCode: 'metric:manage',
+        pageCode: 'admin.metrics',
       },
       {
         label: '审计日志',
@@ -333,6 +386,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: 'audit',
         routeName: 'admin-audit',
         functionCode: 'audit:view',
+        pageCode: 'admin.audit',
       },
     ],
   },
@@ -350,6 +404,9 @@ export interface TopNavItem extends NavGuard {
  * 顶部 8 项（DESIGN §3.2：不再增加，工作台属 M6）。
  * 每项绑定**落地路由**的码，宁窄不宽，避免「点了才 403」；原 admin 内联六码特判
  * （含 workflow:manage 却落 /admin/orgs）已删除，改由 navVisible 统一判定。
+ *
+ * 顶栏不配页面码：同一批路由由路守卫按 `pageRegistry` 的 any-of 页面码准入，
+ * 顶栏只做"哪个域有活干"的快捷入口（例如 /requirements 同时承载 me.tasks 与 req.pool）。
  */
 export const TOP_NAV: TopNavItem[] = [
   {

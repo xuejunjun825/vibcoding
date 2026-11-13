@@ -126,7 +126,38 @@ const deliverRoutes: RouteRecordRaw[] = [
         path: 'permissions',
         name: 'admin-permissions',
         component: () => import('@/views/admin/AdminPermissionsView.vue'),
-        meta: { title: '权限矩阵', navKey: 'admin-permissions' },
+        // r18：只读总览与运行时同源（FUNCTION 授权行），写入口在「角色与权限」
+        meta: {
+          title: '权限总览',
+          navKey: 'admin-permissions',
+          functionCode: 'org:manage',
+          pageCode: 'admin.permissions',
+        },
+      },
+      {
+        // r18 新增：角色列表（页面码 admin.roles，与 nav.ts 同值 → s1 三向比对）
+        path: 'roles',
+        name: 'admin-roles',
+        component: lazyView('admin/AdminRolesView.vue'),
+        meta: {
+          title: '角色与权限',
+          navKey: 'admin-roles',
+          functionCode: 'org:manage',
+          pageCode: 'admin.roles',
+        },
+      },
+      {
+        // 三级授权页：从角色列表进入，不在导航里；页面码与列表页同属 admin.roles
+        path: 'roles/:id(\\d+)/permissions',
+        name: 'role-permissions',
+        component: lazyView('admin/RolePermissionsView.vue'),
+        meta: {
+          title: '角色授权',
+          navKey: 'admin-roles',
+          parentPath: '/admin/roles',
+          functionCode: 'org:manage',
+          pageCode: 'admin.roles',
+        },
       },
       {
         path: 'workflows',

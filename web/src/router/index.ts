@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import AppShell from '@/layouts/AppShell.vue'
 import { useAuthStore } from '@/stores/auth'
+import { pageAdmission } from '@/layouts/pageRegistry'
 import { landingRoute } from './landing'
 import { publicRoutes, shellRoutes } from './routes/base.routes'
 import './types'
@@ -13,6 +14,11 @@ declare module 'vue-router' {
   interface RouteMeta {
     /** 仅内部账号可进：厂商账号深链 → 403（code=INTERNAL_ONLY） */
     internalOnly?: boolean
+    /**
+     * 页面码（MENU 层，r18）：路由显式声明的准入主体，与 nav 的 pageCode
+     * 一起进 `pageRegistry` 做 any-of。空/缺省 = 该路由不按页面码拦。
+     */
+    pageCode?: string | string[]
   }
 }
 
@@ -64,7 +70,31 @@ function requiredCodes(meta: unknown): string[] {
   return Array.isArray(raw) ? raw : [raw]
 }
 
-router.beforeEach((to) => {
+/**
+ * 路由页面码准入：判定实现放在 `pageRegistry.pageAdmission`（纯函数、可单测），
+ * 守卫只负责「先取集合 → 不通过就跳 403」。
+ */
+async function admitByPage(
+  auth: ReturnType<typeof useAuthStore>,
+  to: { name?: unknown; meta: unknown },
+  fullPath: string,
+): Promise<true | { path: string; query: Record<string, string> }> {
+  const routeName = typeof to.name === 'string' ? to.name : null
+  const declared = (to.meta as { pageCode?: string | string[] } | undefined)?.pageCode
+  const probe = pageAdmission(routeName, declared, { loaded: true, canAnyMenu: () => true })
+  if (probe.codes.length === 0) return true
+
+  // 刷新直开深链时本地没有集合，先取一次
+  await auth.ensurePermissions()
+  const gate = pageAdmission(routeName, declared, {
+    loaded: auth.permissionsLoaded,
+    canAnyMenu: (codes) => auth.canAnyMenu(codes),
+  })
+  if (gate.allowed) return true
+  return { path: '/403', query: { from: fullPath, code: gate.codes.join(',') } }
+}
+
+router.beforeEach(async (to) => {
   const auth = useAuthStore()
   const requiresAuth = to.meta.requiresAuth !== false
 
@@ -86,6 +116,10 @@ router.beforeEach((to) => {
   if (to.meta.internalOnly && auth.user?.vendorId != null) {
     return { path: '/403', query: { from: to.fullPath, code: 'INTERNAL_ONLY' } }
   }
+
+  // 页面码准入（MENU 层，AC-16）
+  const pageGate = await admitByPage(auth, to, to.fullPath)
+  if (pageGate !== true) return pageGate
 
   const codes = requiredCodes(to.meta)
   if (codes.length > 0 && !auth.canAny(codes)) {

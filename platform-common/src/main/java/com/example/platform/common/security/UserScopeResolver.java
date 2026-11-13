@@ -67,9 +67,12 @@ public class UserScopeResolver {
     }
 
     public List<String> roles(long tenantId, long userId) {
+        // r18: a disabled role must stop counting from the very next request, not when the JWT
+        // expires. Filtering here (not in the grant cache) means the identity itself is narrower.
         return jdbc.queryForList("SELECT r.code FROM sys_user_role ur"
                         + " JOIN sys_role r ON r.id = ur.role_id AND r.tenant_id = ur.tenant_id"
-                        + " WHERE ur.tenant_id = ? AND ur.user_id = ? ORDER BY r.id",
+                        + " WHERE ur.tenant_id = ? AND ur.user_id = ?"
+                        + " AND r.status = 'ACTIVE' ORDER BY r.id",
                 String.class, tenantId, userId);
     }
 

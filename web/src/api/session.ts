@@ -1,4 +1,5 @@
-import type { SessionUser } from './types'
+import { http } from './client'
+import type { LayerSets, MyPermissions, SessionUser } from './types'
 
 /**
  * 会话状态：token 只放 sessionStorage（TECHNICAL §6.3，禁止 localStorage）。
@@ -43,6 +44,40 @@ export function writeSession(state: SessionState): void {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state))
   } catch {
     /* 隐私模式写不进去时降级为内存态：本次会话仍可用 */
+  }
+}
+
+/**
+ * 三层授权集合（TECHNICAL §8.2）：与 token 同一模块取，登录后 loadMe 一次拼装。
+ * 403 不跳 /403（silentForbidden）：取不到集合时按空集合渲染，服务端 403 才是权威。
+ */
+const PERMISSIONS_PATH = '/api/req/auth/me/permissions'
+
+function strings(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (typeof item === 'string' && item.length > 0) seen.add(item)
+  }
+  return [...seen]
+}
+
+export async function fetchMyPermissions(): Promise<MyPermissions> {
+  const body = await http.get<Partial<MyPermissions> | null>(PERMISSIONS_PATH, undefined, {
+    silentForbidden: true,
+  })
+  const epoch = Number(body?.epoch ?? 0)
+  const limited = (body?.restricted ?? null) as Partial<LayerSets> | null
+  return {
+    epoch: Number.isFinite(epoch) ? epoch : 0,
+    functionCodes: strings(body?.functionCodes),
+    menus: strings(body?.menus),
+    actions: strings(body?.actions),
+    restricted: {
+      functionCodes: strings(limited?.functionCodes),
+      menus: strings(limited?.menus),
+      actions: strings(limited?.actions),
+    },
   }
 }
 

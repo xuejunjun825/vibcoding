@@ -703,6 +703,110 @@ export interface PermissionMatrixResponse {
   roles: Array<string | { code: string; name: string }>
 }
 
+/* ---------------- M8 RBAC：三层授权（FUNCTION / MENU / ACTION） ---------------- */
+
+/**
+ * 三档语义（与后端 `PermissionMatrix.Access` 同名字同顺序，前端不得再定义第二套）：
+ * ALLOW 完整可用；RESTRICTED 入口保留、数据范围收窄；DENY 不可用。
+ */
+export type AccessLevel = 'ALLOW' | 'RESTRICTED' | 'DENY'
+
+export type SubjectType = 'FUNCTION' | 'MENU' | 'ACTION'
+
+/** 一个角色在某一层上的授权集合（`/auth/me/permissions` 的 restricted 部分） */
+export interface LayerSets {
+  functionCodes: string[]
+  menus: string[]
+  actions: string[]
+}
+
+/** GET `/auth/me/permissions`：三层集合 + epoch，与后端 PermissionService 同源 */
+export interface MyPermissions {
+  epoch: number
+  functionCodes: string[]
+  menus: string[]
+  actions: string[]
+  restricted: LayerSets
+}
+
+/** 角色行（`/admin/roles`） */
+export interface RoleRow {
+  id: number
+  code: string
+  name: string
+  description?: string | null
+  builtin: boolean
+  status: string
+  userCount: number
+  updatedAt?: string | null
+}
+
+export interface FunctionGrant {
+  code: string
+  access: AccessLevel
+}
+
+export interface ActionGrant {
+  code: string
+  name: string
+  access: AccessLevel
+  highRisk: boolean
+  /** 该动作所需功能码（决定动作档位上限的推导输入） */
+  functionCodes: string[]
+}
+
+export interface PageGrant {
+  code: string
+  name: string
+  routeName?: string | null
+  access: AccessLevel
+  functionCodes: FunctionGrant[]
+  actions: ActionGrant[]
+}
+
+export interface ModuleGrant {
+  code: string
+  name: string
+  pages: PageGrant[]
+}
+
+/** 保存前的警示（如"动作已授权但页面未授权，配置保留不生效"） */
+export interface GrantWarning {
+  code: string
+  page?: string | null
+  actions?: string[]
+  message?: string | null
+}
+
+export interface RoleGrantView {
+  role: RoleRow
+  epoch: number
+  modules: ModuleGrant[]
+  warnings: GrantWarning[]
+}
+
+export interface GrantInput {
+  subjectType: SubjectType
+  subjectCode: string
+  access: AccessLevel
+}
+
+export interface GrantSaveResult {
+  epoch: number
+  added: number
+  removed: number
+  changed: number
+  highRiskGranted: string[]
+  warnings: GrantWarning[]
+  effective: { menus?: string[]; actions?: string[] }
+}
+
+/** 角色/授权错误码（前端只做映射，不新造码） */
+export type RbacErrorCode =
+  | 'ADMIN_LOCKOUT_RISK'
+  | 'HIGH_RISK_REQUIRES_CONFIRM'
+  | 'UNKNOWN_SUBJECT'
+
 export interface AuditRow {
   id: number
   action: string
