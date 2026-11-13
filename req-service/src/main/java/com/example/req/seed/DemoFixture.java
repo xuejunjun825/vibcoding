@@ -46,68 +46,165 @@ public final class DemoFixture {
     public static final long PLAN_CASE_COUNT = 10;
     public static final long DEFECT_COUNT = 3;
     public static final long NOTIFICATION_COUNT = 4;
+    /** r15-fix：派生实例数据没有种子，重置后必须为 0（否则是 release 已删的孤儿）。 */
+    public static final long TEST_STRATEGY_COUNT = 0;
+    /** r15-fix：种子环境行（SeedService 种下、重置不重放）——门禁残留清掉后应恰好剩这一行。 */
+    public static final long TEST_ENV_SEED_COUNT = 1;
+    /** r15-fix：门禁 RUN_TAG 残留，三张种子表合计的唯一合法值。 */
+    public static final long GATE_RESIDUE_COUNT = 0;
     public static final long PO1_VISIBLE = 8;
     public static final long VENDOR_A_VISIBLE = 3;
     public static final long VENDOR_B_VISIBLE = 0;
 
     /**
+     * 保留行的基线状态：{@code keepFilter} 只保证「行还在」，不保证「值还是种子值」。
+     *
+     * <p>V9 ⑤ 种下的两行执行器表达的是两条事实：{@code STUB-LOCAL} 启用但从未上报（→ NEVER）、
+     * {@code LEGACY-OFF} 停用（→ DISABLED）。但 {@code last_report_at} / {@code report_count}
+     * 是可写字段：s7 门禁会用 {@code UPDATE ... last_report_at = NOW() - INTERVAL 1/30/100 HOUR}
+     * 验三档边界，最后再通过开放 API 上报一次（→ NOW）。行被 keepFilter 保住之后，这些改动
+     * 会跨重置存活，演示台账就再也回不到 NEVER——下一次 {@code make test} 的 s7 会因为
+     * 「种子里同时有 NEVER 与 DISABLED」而红。所以重置必须把保留行也还原到种子基线：
+     * 删表和还原字段是同一个「回到可演示的固定夹具」判断，仍由本文件一处拥有。</p>
+     */
+    public static final String RESTORE_KEPT_EXECUTOR_BASELINE =
+            "UPDATE test_executor SET last_report_at = NULL, report_count = 0,"
+                    + " enabled = CASE code WHEN 'STUB-LOCAL' THEN 1 ELSE 0 END"
+                    + " WHERE tenant_id = ? AND code IN ('STUB-LOCAL','LEGACY-OFF')";
+
+    /**
+     * 门禁按 RUN_TAG 命名的探针行：{@code platform-verify.sh} / {@code platform-test-negative.sh} / q7
+     * 每跑一次，就用「前缀 + hhmmss」在种子表里留下一行（{@code verify-wf-090925}、{@code neg-L1-190647}、
+     * {@code 验证模块L1-190239}、{@code QA环境-1109190528}）。
+     *
+     * <p>它们是<b>行</b>而不是表——所以「整表不进序列」挡不住它们：重置后流程定义页、用例模块树、
+     * 环境台账仍然挂着上一轮门禁的痕迹（r15 实测 253 / 204 / 19 行）。这三张表的种子由 req-service
+     * 的 {@code SeedService} 种下（V1/V5 迁移只有 CREATE、没有 INSERT），删了没人重放，因此只能删
+     * 命中本谓词的行，不能整表清空。</p>
+     *
+     * <p>这四个前缀是门禁命名约定的唯一一份拷贝（门禁脚本是跨进程的另一份，无法共享常量）；门禁若
+     * 换了命名，必须同步这里——{@code qa-r15-table-coverage.sh} 会直接对库断言残留为 0。</p>
+     */
+    public static final String GATE_RUN_TAG_RESIDUE =
+            "name LIKE 'verify-%' OR name LIKE 'neg-%' OR name LIKE '验证模块%' OR name LIKE 'QA环境-%'";
+
+    /** 需要清理 {@link #GATE_RUN_TAG_RESIDUE} 的种子表：删除序列与 {@code counts()} 共用这一份。 */
+    public static final List<String> RUN_TAG_RESIDUE_TABLES =
+            List.of("test_env", "wf_definition", "test_module");
+
+    /**
+     * 一条删除指令：{@code table} 必填，{@code keepFilter} 为可选的保留谓词（{@code null} = 整表清空）。
+     *
+     * <p>为什么把「保留」做成数据而不是第二份白名单：删哪些表、留哪些行是同一个领域判断，
+     * 分散到两处（序列一份 + bash 快照一份）必然给出互相矛盾的结论。谓词里不要再写
+     * {@code tenant_id}——外层 {@code WHERE tenant_id = ?} 已经收口，重复写只会让人以为可以跨租户。</p>
+     *
+     * <p>表名与谓词都只来自本文件的字面量，没有任何请求参数参与拼接，因此
+     * {@code DELETE FROM <table> WHERE tenant_id = ? AND NOT (<keepFilter>)} 不存在注入面。</p>
+     */
+    public record TableReset(String table, String keepFilter) {
+
+        /** 整表清空：本租户该表没有需要跨重置存活的行。 */
+        public static TableReset purge(String table) {
+            return new TableReset(table, null);
+        }
+
+        /** 清空但保留谓词命中的行（迁移种子等「删了没人重放」的数据）。 */
+        public static TableReset purgeExcept(String table, String keepFilter) {
+            return new TableReset(table, keepFilter);
+        }
+
+        /**
+         * 只清门禁 RUN_TAG 探针行，种子行与人工建的行都保留（谓词见 {@link #GATE_RUN_TAG_RESIDUE}）。
+         *
+         * <p>{@code keepFilter} 的语义是「要保住的<b>保留</b>谓词」，所以传下去的是残留模式的
+         * <b>取反</b>：{@code DELETE ... WHERE tenant_id = ? AND NOT (NOT (<残留模式>))}，
+         * 即只删命中残留的行。删除范围因此仍由本文件一处决定，不在 bash 里再维护第二份前缀清单。</p>
+         */
+        public static TableReset purgeRunTagResidue(String table) {
+            return new TableReset(table, "NOT (" + GATE_RUN_TAG_RESIDUE + ")");
+        }
+    }
+
+    /**
      * 删除顺序：子表 → 父表，一次一条 {@code DELETE ... WHERE tenant_id = ?}。
      *
-     * <p>只删业务实例数据；账号/角色/域/厂商/组织/流程定义/指标定义/字典/测试策略/环境台账/
-     * 集成配置等定义数据保留（AC-13「保留」清单）。{@code audit_log} 也不删：它是只追加的审计轨迹，
-     * 删掉既毁证据链，也会和「按时间窗对比审计增量」的既有断言拧着来。列表按 V1–V9 的引用拓扑排：
+     * <p>删业务实例数据；账号/角色/域/厂商/组织/指标定义/字典/集成配置等定义数据，以及
+     * {@code test_module}/{@code wf_definition}/{@code test_env} 的<b>种子行</b>保留（AC-13「保留」清单）。
+     * {@code audit_log} 也不删：它是只追加的审计轨迹，
+     * 删掉既毁证据链，也会和「按时间窗对比审计增量」的既有断言拧着来。列表按 V1–V10 的引用拓扑排：
      * 先清评审、报告、门禁、计划轮次，再清用例/缺陷/审批，最后才动需求与版本。</p>
      *
-     * <p>租户级定义/配置表不进这张表——{@code branch_policy}（V9 ⑤ 种子 1 行）、
-     * {@code test_executor}（V9 ⑤ 种子 2 行：STUB-LOCAL / LEGACY-OFF）、{@code api_client}
-     * （集成配置）只被 {@code SeedService} / 迁移种下，本夹具不会重建它们：一旦删掉又没人重放，
-     * 演示页（/code-policies、/test-executors）就是空白，而重置脚本还在说「可直接演示」（D-02）。
-     * 它们只引用租户/域，不引用本夹具删掉的版本或需求，保留不会留下悬空引用。
-     * {@code branch_policy_check} 是核验记录（实例），照常清。</p>
+     * <p>末尾四张是 r15 补入的漏删表（V10 的报表/卡配置、V9 的执行器、V1 的开放客户端）。迁移里
+     * 一张 FOREIGN KEY 都没有，所以顺序写错不会报错、只会静默留下孤儿行——顺序因此仍由这张清单
+     * 单点拥有：{@code portal_card_config} 的卡片 key 以 {@code report:<id>} 引用报表，先于
+     * {@code report_definition}；{@code test_executor.api_client_id} 引用 {@code api_client}，
+     * 先于 {@code api_client}。</p>
+     *
+     * <p>保留改由 {@code keepFilter} 表达，不再靠「不进序列」：{@code test_executor} 的两行
+     * （STUB-LOCAL / LEGACY-OFF）来自 V9 ⑤ 迁移种子，而重置不重放迁移，故带
+     * {@code code IN (...)} 过滤保留，只清门禁留下的 {@code S7-*} 探针行；{@code api_client}
+     * 恰恰相反——V1 建表但没有任何种子，现存行全来自 CI/手工，故无过滤全清。
+     * {@code branch_policy}（V9 ⑤ 种子 1 行）仍不进序列：同样是迁移种子，删了没人重放，
+     * 而 /code-policies 要靠它渲染。</p>
+     *
+     * <p>r15-fix（QA D-01/D-02）补入两类运行时残留：{@code test_strategy} 是<b>派生</b>实例数据——
+     * V5 只按「当时已有的 release」回填一版，重置删光 release 后不会重跑，留一行就是一行孤儿
+     * （实测 209 行 release_id 全指向已删版本），故整表清空且排在 {@code release} <b>之前</b>；
+     * 末尾三张则用 {@link TableReset#purgeRunTagResidue} 只清门禁 RUN_TAG 探针行。它们必须留在
+     * 序列里，否则 {@code counts()} 的残留计数与这里的删除范围会各说一套。</p>
      */
-    public static final List<String> DELETE_ORDER = List.of(
-            "test_case_review",
-            "report_signoff",
-            "test_report_version",
-            "test_report",
-            "quality_gate_waiver",
-            "quality_gate_snapshot",
-            "quality_gate_rule",
-            "quality_gate",
-            "release_review",
-            "plan_change_log",
-            "plan_assignment",
-            "test_plan_round",
-            "test_execution",
-            "test_plan_case",
-            "test_plan",
-            "mr_comment",
-            "mr_sync",
-            "build_record",
-            "artifact_record",
-            "integration_sync_log",
-            "api_call_log",
-            "branch_policy_check",
-            "test_case_step",
-            "test_case_version",
-            "test_case",
-            "defect_history",
-            "defect",
-            "wf_cc",
-            "wf_history",
-            "wf_task",
-            "wf_instance",
-            "deploy_order_requirement",
-            "deploy_order",
-            "release_requirement",
-            "milestone",
-            "task",
-            "sprint",
-            "attachment",
-            "requirement_domain_rel",
-            "requirement",
-            "`release`",
-            "notification");
+    public static final List<TableReset> DELETE_ORDER = List.of(
+            TableReset.purge("test_case_review"),
+            TableReset.purge("report_signoff"),
+            TableReset.purge("test_report_version"),
+            TableReset.purge("test_report"),
+            TableReset.purge("quality_gate_waiver"),
+            TableReset.purge("quality_gate_snapshot"),
+            TableReset.purge("quality_gate_rule"),
+            TableReset.purge("quality_gate"),
+            TableReset.purge("release_review"),
+            TableReset.purge("plan_change_log"),
+            TableReset.purge("plan_assignment"),
+            TableReset.purge("test_plan_round"),
+            TableReset.purge("test_execution"),
+            TableReset.purge("test_plan_case"),
+            TableReset.purge("test_plan"),
+            TableReset.purge("mr_comment"),
+            TableReset.purge("mr_sync"),
+            TableReset.purge("build_record"),
+            TableReset.purge("artifact_record"),
+            TableReset.purge("integration_sync_log"),
+            TableReset.purge("api_call_log"),
+            TableReset.purge("branch_policy_check"),
+            TableReset.purge("test_case_step"),
+            TableReset.purge("test_case_version"),
+            TableReset.purge("test_case"),
+            TableReset.purge("defect_history"),
+            TableReset.purge("defect"),
+            TableReset.purge("wf_cc"),
+            TableReset.purge("wf_history"),
+            TableReset.purge("wf_task"),
+            TableReset.purge("wf_instance"),
+            TableReset.purge("deploy_order_requirement"),
+            TableReset.purge("deploy_order"),
+            TableReset.purge("release_requirement"),
+            TableReset.purge("milestone"),
+            TableReset.purge("task"),
+            TableReset.purge("sprint"),
+            TableReset.purge("attachment"),
+            TableReset.purge("requirement_domain_rel"),
+            TableReset.purge("requirement"),
+            TableReset.purge("test_strategy"),
+            TableReset.purge("`release`"),
+            TableReset.purge("notification"),
+            TableReset.purge("portal_card_config"),
+            TableReset.purge("report_definition"),
+            TableReset.purgeExcept("test_executor", "code IN ('STUB-LOCAL','LEGACY-OFF')"),
+            TableReset.purge("api_client"),
+            TableReset.purgeRunTagResidue("test_env"),
+            TableReset.purgeRunTagResidue("wf_definition"),
+            TableReset.purgeRunTagResidue("test_module"));
 
     // ---------------------------------------------------------------- 需求
 
