@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>业务需求全流程演示脚本</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 0 60px;background:#fff;color:var(--body);
+  font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:960px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;
+  font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.meta-note{font-size:12px;color:var(--muted)}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+@media print{body{padding:0}.toc{break-inside:avoid}}
+
+h1.title{display:none}
+td:first-child,th:first-child{white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="toc"><div class="toc-title">目录</div>
+<ul>
+<li><a
+href="#业务需求全流程演示脚本提报--评审--工时版本--拆解--执行--关闭"
+id="toc-业务需求全流程演示脚本提报--评审--工时版本--拆解--执行--关闭">业务需求全流程演示脚本（提报
+→ 评审 → 工时/版本 → 拆解 → 执行 → 关闭）</a>
+<ul>
+<li><a href="#1-角色速查" id="toc-1-角色速查">1. 角色速查</a></li>
+<li><a href="#2-六步流程ui-点击路径--状态变化"
+id="toc-2-六步流程ui-点击路径--状态变化">2. 六步流程（UI 点击路径 +
+状态变化）</a></li>
+<li><a href="#3-实测结果本次演示跑出来的真实数据"
+id="toc-3-实测结果本次演示跑出来的真实数据">3.
+实测结果（本次演示跑出来的真实数据）</a></li>
+<li><a href="#4-已知卡点演示前须知属实现缺口不是数据问题"
+id="toc-4-已知卡点演示前须知属实现缺口不是数据问题">4.
+已知卡点（演示前须知，属实现缺口，不是数据问题）</a></li>
+<li><a href="#5-演示脚本10-分钟版" id="toc-5-演示脚本10-分钟版">5.
+演示脚本（10 分钟版）</a></li>
+<li><a href="#6-复现命令api-版便于录屏或脚本化"
+id="toc-6-复现命令api-版便于录屏或脚本化">6. 复现命令（API
+版，便于录屏或脚本化）</a></li>
+<li><a href="#7-重置与清理" id="toc-7-重置与清理">7. 重置与清理</a></li>
+<li><a href="#8-截图索引" id="toc-8-截图索引">8. 截图索引</a></li>
+</ul></li>
+</ul>
+</div>
+<h1
+id="业务需求全流程演示脚本提报--评审--工时版本--拆解--执行--关闭">业务需求全流程演示脚本（提报
+→ 评审 → 工时/版本 → 拆解 → 执行 → 关闭）</h1>
+<blockquote>
+<p>生成时间：2026-11-13 · 基线 <code>main</code> =
+<code>c3e4a79</code>（r16 合并后）· 环境
+<code>make platform-up</code>（网关 8080 / 需求 8082 / 交付 8083 / 前端
+5173 / MySQL <code>devops_platform</code>）
+本文所有状态、数字、截图都是在本机真实跑出来的：<code>BUS-0206</code>、<code>BUS-0207</code>
+两条链路已完整走完并留痕。</p>
+</blockquote>
+<hr />
+<h2 id="1-角色速查">1. 角色速查</h2>
+<table>
+<thead>
+<tr>
+<th>账号</th>
+<th>姓名 / 角色</th>
+<th>在这条流程里做什么</th>
+<th>密码</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>biz1</code></td>
+<td>陈业务 / 业务部门</td>
+<td>提报业务需求、看自己需求的进度</td>
+<td><code>Passw0rd!</code></td>
+</tr>
+<tr>
+<td><code>pm</code></td>
+<td>产品经理-张 / PRODUCT</td>
+<td>提交评审、评审入池、拆解产品需求、推进状态</td>
+<td><code>Passw0rd!</code></td>
+</tr>
+<tr>
+<td><code>tl1</code></td>
+<td>项目域负责人-李 / PMO</td>
+<td>分配承接厂商、排期、交付推进</td>
+<td><code>Passw0rd!</code></td>
+</tr>
+<tr>
+<td><code>dev1</code></td>
+<td>研发-赵 / DEV</td>
+<td>反馈预估工时、建任务、开发</td>
+<td><code>Passw0rd!</code></td>
+</tr>
+<tr>
+<td><code>qa1</code></td>
+<td>测试-孙 / QA</td>
+<td>快速测试记录、提缺陷、验证关闭</td>
+<td><code>Passw0rd!</code></td>
+</tr>
+<tr>
+<td><code>admin</code></td>
+<td>平台管理员</td>
+<td>全量视图、追溯矩阵、版本门禁</td>
+<td><code>Admin@12345</code></td>
+</tr>
+</tbody>
+</table>
+<p>租户统一 <code>t1</code>；接口直连需
+<code>Authorization: Bearer &lt;token&gt;</code> +
+<code>X-Tenant-Id: 1</code>。</p>
+<hr />
+<h2 id="2-六步流程ui-点击路径--状态变化">2. 六步流程（UI 点击路径 +
+状态变化）</h2>
+<p>状态机速记：<code>BUS</code> 提报 → 审批 → 待评审 → 入池 →（拆解）→
+关闭；<code>PDR</code> 待分析 → 已排期 → 开发中 → 已交付 →
+验收关闭；<code>RD</code> 待开发 → 开发中 → 待测试 → 测试通过 → 已合入 →
+完成。</p>
+<h3 id="第-1-步业务需求提报biz1">第 1
+步：业务需求提报（<code>biz1</code>）</h3>
+<ul>
+<li><strong>点哪里</strong>：<code>需求池</code> → 右上
+<code>提报需求</code> → 类型选「业务需求」，填标题/期望交付/所属域 →
+提交</li>
+<li><strong>结果</strong>：生成 <code>BUS-xxxx</code>，状态
+<strong>已提报（SUBMITTED）</strong></li>
+<li><strong>谁看得到</strong>：提报人、本企业负责人、产品经理；厂商角色看不到（域×厂商隔离）</li>
+<li>截图：<code>demo-shots/flow-2-bus-submitted.png</code></li>
+</ul>
+<h3 id="第-2-步需求评审入池pm-提交--审批--评审">第 2
+步：需求评审入池（<code>pm</code> 提交 + 审批 + 评审）</h3>
+<ol type="1">
+<li><code>pm</code> 打开该业务需求 → <code>提交审批</code> → 状态
+<strong>审批中（APPROVING）</strong>，生成 <code>REQ_SUBMIT</code>
+审批单（节点「产品评审」）</li>
+<li><code>pm</code> 在 <code>审批中心</code> → <code>我的待办</code>
+通过 → 状态 <strong>待评审（PENDING_REVIEW）</strong></li>
+<li><code>pm</code> 点 <code>开始评审</code> → 生成
+<code>REQ_REVIEW</code> 审批单 → 通过 → 状态
+<strong>已入池（POOLED）</strong>，进入需求池</li>
+</ol>
+<blockquote>
+<p>演示话术：提报和评审是两个动作，审批单在 <code>审批中心</code>
+留有完整流转记录（谁、什么时间、什么意见）。</p>
+</blockquote>
+<h3 id="第-3-步研发反馈预估工时--版本计划dev1--pm">第 3
+步：研发反馈预估工时 + 版本计划（<code>dev1</code> +
+<code>pm</code>）</h3>
+<ul>
+<li><strong>工时反馈</strong>：<code>dev1</code>
+打开发给自己的<strong>叶子研发需求</strong>（<code>RD</code>），在「预估人天」填
+5.5 → 保存。
+<ul>
+<li>父需求（<code>BUS</code>/<code>PDR</code>）的人天是<strong>只读汇总</strong>：<code>BUS-0207</code>
+立即变成 <code>预估 5.5 人天</code>（实测返回
+<code>PARENT_DAYS_READONLY</code> 保护，父需求不可手填）</li>
+</ul></li>
+<li><strong>版本计划</strong>：<code>pm</code> 对产品需求点
+<code>排期</code> → 选版本 <code>DEMO-REL-1</code> → 状态
+<strong>已排期（SCHEDULED）</strong></li>
+<li><strong>版本视图</strong>：<code>版本计划</code> →
+<code>演示版本 2026-11</code>：需求总数 8、预估人天 50、完成度
+13%、工作项列表 + 里程碑 + 风险项 + 集成设置</li>
+<li>截图：<code>demo-shots/flow-6-release.png</code></li>
+</ul>
+<h3 id="第-4-步拆解为产品需求--研发需求pm">第 4 步：拆解为产品需求 /
+研发需求（<code>pm</code>）</h3>
+<ul>
+<li>业务需求详情 → <code>拆解</code> → 生成产品需求
+<code>PDR-0096</code>（状态「待分析」）</li>
+<li>产品需求详情 → <code>拆解</code> → 生成研发需求
+<code>RD-0903</code>（状态「待开发」，此时可填预估人天 6.5）</li>
+<li>约束：子必须挂父；一件父需求可拆多个子；父详情页看子清单 +
+完成率；<code>BUS</code> 的预估/实际人天全部来自子级汇总</li>
+<li>截图：<code>demo-shots/flow-1-bus-detail.png</code>（业务方视角：子需求
+1、预估 6.5 人天、已关闭）</li>
+</ul>
+<h3 id="第-5-步研发执行dev1--pm">第 5 步：研发执行（<code>dev1</code> +
+<code>pm</code>）</h3>
+<ol type="1">
+<li><code>tl1</code>
+分配承接厂商（<code>assign-vendor</code>，必须填原因）：<code>RD-0903</code>
+→ 甲方科技（VEN-A）</li>
+<li><code>pm</code> 点 <code>开始开发</code> → <code>RD</code> 状态
+<strong>开发中（IN_DEV）</strong></li>
+<li><code>dev1</code> 在 <code>迭代/任务</code> 建任务「签署页接入签章
+SDK」（16 小时），拖到 <code>进行中</code> → <code>已完成</code>（完成率
+100% 回写）</li>
+<li><code>pm</code> 点 <code>提测</code> → 状态
+<strong>待测试（PENDING_TEST）</strong></li>
+<li><code>qa1</code> 在需求详情 <code>测试</code>
+页做「快速测试记录」<code>PASS</code>（也可走正式测试计划：用例库 →
+测试计划 → 执行 → 测试报告）</li>
+</ol>
+<h3 id="第-6-步测试缺陷上线关闭qa1--pm">第 6
+步：测试、缺陷、上线关闭（<code>qa1</code> + <code>pm</code>）</h3>
+<ul>
+<li><code>qa1</code> 提 <code>P1</code>
+缺陷「签章回调重放导致重复签署」（关联 <code>RD-0903</code>）→ 处理 →
+提交验证 → 验证通过 → <strong>已关闭（CLOSED）</strong></li>
+<li><code>pm</code> 点 <code>测试通过</code> → <code>RD</code>
+<strong>测试通过（TEST_PASSED）</strong> → <code>合入</code> →
+<strong>已合入（MERGED）</strong> → <code>完成</code> →
+<strong>DONE</strong></li>
+<li><code>tl1</code> 对产品需求点 <code>交付</code> →
+<strong>已交付（DELIVERED）</strong> → <code>pm</code> 验收 →
+<strong>验收关闭（ACCEPTED_CLOSED）</strong></li>
+<li><code>pm</code> 关闭业务需求 → <code>BUS-0206</code>
+<strong>已关闭（CLOSED）</strong>，父子进度 <strong>100%</strong></li>
+<li>追溯验证：<code>追溯</code> 页能看到
+<code>需求 → 任务 → MR → 执行 → 缺陷 → 发布单 → 版本</code>
+的缺口与齐备情况</li>
+<li>截图：<code>demo-shots/flow-4-traceability.png</code>、<code>demo-shots/flow-5-defects.png</code></li>
+</ul>
+<hr />
+<h2 id="3-实测结果本次演示跑出来的真实数据">3.
+实测结果（本次演示跑出来的真实数据）</h2>
+<table>
+<thead>
+<tr>
+<th>编号</th>
+<th>类型</th>
+<th>最终状态</th>
+<th>预估人天</th>
+<th>进度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BUS-0206</code> 演示-合同电子签章对接</td>
+<td>业务需求</td>
+<td><strong>CLOSED</strong></td>
+<td>6.5（子级汇总）</td>
+<td>100%</td>
+</tr>
+<tr>
+<td><code>PDR-0096</code> 电子签章能力接入采购合同流程</td>
+<td>产品需求</td>
+<td><strong>ACCEPTED_CLOSED</strong></td>
+<td>6.5</td>
+<td>100%</td>
+</tr>
+<tr>
+<td><code>RD-0903</code> 采购合同签署页接入电子签章 SDK</td>
+<td>研发需求</td>
+<td><strong>DONE</strong></td>
+<td>6.5</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>DEFECT-0149</code> 签章回调重放导致重复签署</td>
+<td>缺陷 P1</td>
+<td><strong>CLOSED</strong></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>BUS-0207</code> 演示-供应商门户单点登录</td>
+<td>业务需求</td>
+<td><strong>POOLED</strong>（演示用中间态）</td>
+<td>5.5</td>
+<td>0%</td>
+</tr>
+<tr>
+<td><code>PDR-0097</code> 供应商门户 SSO 接入方案</td>
+<td>产品需求</td>
+<td><strong>SCHEDULED</strong></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>RD-0904</code> 门户登录改造为 OIDC</td>
+<td>研发需求</td>
+<td><strong>TODO</strong></td>
+<td>5.5</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>审批留痕：<code>BUS-0206</code> 依次产生
+<code>REQ_SUBMIT</code>（实例 383，产品评审 → 通过）与
+<code>REQ_REVIEW</code>（实例 384，通过后入池）。</p>
+<hr />
+<h2 id="4-已知卡点演示前须知属实现缺口不是数据问题">4.
+已知卡点（演示前须知，属实现缺口，不是数据问题）</h2>
+<h3 id="卡点-1p1会打断演示业务方点提交审批直接-403">卡点
+1（P1，会打断演示）：业务方点「提交审批」直接 403</h3>
+<ul>
+<li>现象：<code>biz1</code> 在「已提报」的业务需求上能看到
+<code>提交审批</code> 按钮，点下去弹「无权执行该操作」，整页被 403
+页顶掉。</li>
+<li>原因（两处叠加）：
+<ol type="1">
+<li><code>platform-common/.../security/PermissionRouteTable.java:136</code>
+把 <code>POST /requirements/{id}/actions</code> 统一要求
+<code>req:review</code>；而 <code>BUSINESS</code> 角色只有
+<code>req:report:bus</code>（<code>PermissionMatrix.java:237</code>），没有
+<code>req:review</code>。</li>
+<li><code>allowedActions</code>
+没有按调用者权限过滤，所以按钮照常显示；<code>web/src/api/client.ts</code>
+对 403 默认跳全局 403 页（未标 <code>silentForbidden</code>）。</li>
+</ol></li>
+<li>影响：<strong>业务方无法自己提交审批</strong>——演示时必须由
+<code>pm</code> 代为点「提交审批」，与「业务方提报」的直觉冲突。</li>
+<li>截图：<code>demo-shots/flow-7-biz-submit-403.png</code></li>
+<li>建议修法（三选一）：① 给 <code>BUSINESS</code>
+补一个「提交自己的需求」权限码，动作端点按动作细分权限；②
+<code>allowedActions</code> 按权限过滤，前端不显示无权动作；③
+该动作前端标 <code>silentForbidden</code> +
+提示「请联系产品经理提交评审」。</li>
+<li>临时绕法（今天演示可用）：<code>biz1</code> 提报后，切
+<code>pm</code> 账号点「提交审批」。</li>
+</ul>
+<h3 id="卡点-2p3讲清楚即可工时只有叶子需求能填">卡点
+2（P3，讲清楚即可）：工时只有叶子需求能填</h3>
+<p>父需求（业务/产品需求）的人天是子级汇总的只读值，接口会回
+<code>PARENT_DAYS_READONLY</code>。这是设计如此，演示时说明「研发反馈工时填在研发需求上，父需求自动汇总」即可。</p>
+<hr />
+<h2 id="5-演示脚本10-分钟版">5. 演示脚本（10 分钟版）</h2>
+<ol type="1">
+<li>（<code>biz1</code>）需求池 → 提报需求 →
+业务需求「演示-供应商门户单点登录」→ 提报</li>
+<li>（<code>biz1</code>）详情页展示：状态「已提报」、域、期望交付、审批进度占位</li>
+<li>（<code>pm</code>）同一需求 → 提交审批 → 审批中心待办 → 通过 →
+开始评审 → 通过 → 状态「已入池」</li>
+<li>（<code>pm</code>）拆解 → 产品需求「SSO 接入方案」→ 再拆解 →
+研发需求「登录改造为 OIDC」</li>
+<li>（<code>dev1</code>）研发需求 → 预估人天 5.5 →
+保存；回到业务需求详情看「预估 5.5 人天（汇总）」</li>
+<li>（<code>pm</code>）产品需求 → 排期 → 选
+<code>演示版本 2026-11</code>；打开版本计划看工作项与预估人天</li>
+<li>（<code>dev1</code>）任务看板建任务、拖到进行中/完成；（<code>pm</code>）开始开发
+→ 提测</li>
+<li>（<code>qa1</code>）快速测试记录 PASS；提一个 P1 缺陷 → 处理 →
+验证关闭</li>
+<li>（<code>pm</code>）测试通过 → 合入 → 完成；产品需求交付 →
+验收；业务需求关闭（进度 100%）</li>
+<li>（<code>admin</code>）追溯矩阵 + 版本质量门 +
+价值流：看这条需求在各环节的留痕</li>
+</ol>
+<hr />
+<h2 id="6-复现命令api-版便于录屏或脚本化">6. 复现命令（API
+版，便于录屏或脚本化）</h2>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="va">GW</span><span class="op">=</span>http://127.0.0.1:8080</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">tok()</span><span class="kw">{</span> <span class="ex">curl</span> <span class="at">-s</span> <span class="at">-X</span> POST <span class="va">$GW</span>/api/req/auth/login <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="dt">\</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&quot;{</span><span class="dt">\&quot;</span><span class="st">tenantCode</span><span class="dt">\&quot;</span><span class="st">:</span><span class="dt">\&quot;</span><span class="st">t1</span><span class="dt">\&quot;</span><span class="st">,</span><span class="dt">\&quot;</span><span class="st">username</span><span class="dt">\&quot;</span><span class="st">:</span><span class="dt">\&quot;</span><span class="va">$1</span><span class="dt">\&quot;</span><span class="st">,</span><span class="dt">\&quot;</span><span class="st">password</span><span class="dt">\&quot;</span><span class="st">:</span><span class="dt">\&quot;</span><span class="va">$2</span><span class="dt">\&quot;</span><span class="st">}&quot;</span> <span class="kw">|</span> <span class="ex">python3</span> <span class="at">-c</span> <span class="st">&#39;import sys,json;print(json.load(sys.stdin)[&quot;token&quot;])&#39;</span><span class="kw">;</span> <span class="kw">}</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="va">B</span><span class="op">=</span><span class="va">$(</span><span class="ex">tok</span> biz1 <span class="st">&#39;Passw0rd!&#39;</span><span class="va">)</span><span class="kw">;</span> <span class="va">P</span><span class="op">=</span><span class="va">$(</span><span class="ex">tok</span> pm <span class="st">&#39;Passw0rd!&#39;</span><span class="va">)</span><span class="kw">;</span> <span class="va">D</span><span class="op">=</span><span class="va">$(</span><span class="ex">tok</span> dev1 <span class="st">&#39;Passw0rd!&#39;</span><span class="va">)</span><span class="kw">;</span> <span class="va">Q</span><span class="op">=</span><span class="va">$(</span><span class="ex">tok</span> qa1 <span class="st">&#39;Passw0rd!&#39;</span><span class="va">)</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 1 提报（业务方）</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-X</span> POST <span class="va">$GW</span>/api/req/requirements <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$B</span><span class="st">&quot;</span> <span class="at">-H</span> <span class="st">&quot;X-Tenant-Id: 1&quot;</span> <span class="dt">\</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="dt">\</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{&quot;type&quot;:&quot;BUS&quot;,&quot;title&quot;:&quot;演示-供应商门户单点登录&quot;,&quot;description&quot;:&quot;接入集团 SSO&quot;,&quot;domainIds&quot;:[1],&quot;priority&quot;:&quot;P2&quot;}&#39;</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="co"># 2 提交评审 → 审批 → 评审入池（产品经理；注意卡点 1，业务方无 req:review）</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="co">#   POST /requirements/{id}/actions            {&quot;action&quot;:&quot;submit&quot;}</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="co">#   POST /approvals/tasks/{taskId}/actions     {&quot;action&quot;:&quot;approve&quot;,&quot;comment&quot;:&quot;同意&quot;}</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="co">#   POST /requirements/{id}/actions            {&quot;action&quot;:&quot;review_start&quot;}</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a><span class="co">#   POST /approvals/tasks/{taskId}/actions     {&quot;action&quot;:&quot;approve&quot;}</span></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="co"># 3 拆解两级：POST /requirements/{id}/decompose  {&quot;type&quot;:&quot;PDR&quot;,...} → {&quot;type&quot;:&quot;RD&quot;,&quot;estimateDays&quot;:5.5}</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="co"># 4 排期：POST /requirements/{id}/actions {&quot;action&quot;:&quot;schedule&quot;,&quot;releaseId&quot;:784}</span></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a><span class="co"># 5 执行：POST /deliver/tasks → POST /deliver/tasks/{id}/move {&quot;status&quot;:&quot;DOING&quot;|&quot;DONE&quot;}</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a><span class="co">#   POST /requirements/{id}/actions {&quot;action&quot;:&quot;start_dev&quot;|&quot;submit_test&quot;|&quot;test_pass&quot;|&quot;merge&quot;|&quot;finish&quot;}</span></span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a><span class="co">#   POST /requirements/{id}/quick-test {&quot;result&quot;:&quot;PASS&quot;,&quot;note&quot;:&quot;...&quot;}</span></span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a><span class="co"># 6 缺陷：POST /deliver/defects → /defects/{id}/actions start → submit_verify → verify_pass</span></span></code></pre></div>
+<hr />
+<h2 id="7-重置与清理">7. 重置与清理</h2>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> platform-demo-reset   <span class="co"># 回到 12 条演示需求 / 2 张演示报表 / 通知 4 条，本次演示新增的需求会被清掉</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> platform-up           <span class="co"># 若服务未起</span></span></code></pre></div>
+<p>演示新增数据（<code>BUS-0206</code>/<code>BUS-0207</code>
+及其子需求、<code>DEFECT-0149</code>）都在当前演示库里，重置一次即消失；若想保留这轮链路做讲解，请先别跑
+<code>platform-demo-reset</code>。</p>
+<hr />
+<h2 id="8-截图索引">8. 截图索引</h2>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>demo-shots/flow-1-bus-detail.png</code></td>
+<td>业务方视角：业务需求详情（子需求 1、预估 6.5 人天、已关闭）</td>
+</tr>
+<tr>
+<td><code>demo-shots/flow-2-bus-submitted.png</code></td>
+<td>业务方视角：刚提报的 <code>BUS-0207</code>（已提报 +
+提交审批按钮）</td>
+</tr>
+<tr>
+<td><code>demo-shots/flow-3-pm-detail.png</code></td>
+<td>产品经理视角：同一条需求</td>
+</tr>
+<tr>
+<td><code>demo-shots/flow-4-traceability.png</code></td>
+<td>追溯矩阵：需求 → 任务/MR/构建/执行/缺陷/Sonar/发布单/版本</td>
+</tr>
+<tr>
+<td><code>demo-shots/flow-5-defects.png</code></td>
+<td>缺陷列表（含本次 <code>DEFECT-0149</code>）</td>
+</tr>
+<tr>
+<td><code>demo-shots/flow-6-release.png</code></td>
+<td>版本计划详情：8 条工作项、预估 50 人天、完成度 13%</td>
+</tr>
+<tr>
+<td><code>demo-shots/flow-7-biz-submit-403.png</code></td>
+<td>卡点 1 证据：业务方点「提交审批」→ 403 页</td>
+</tr>
+</tbody>
+</table>
+</div>
+</body>
+</html>
