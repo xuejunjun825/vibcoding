@@ -6,11 +6,13 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.scope.ScopeSql;
@@ -208,6 +210,22 @@ public class DemoResetService {
         return probe;
     }
 
+    /**
+     * 当前租户的报表名称（未排序）：名称集合断言的数据来源。
+     *
+     * <p>刻意<b>不</b>走 {@code ORDER BY name}——中文排序不可依赖 MySQL collation（utf8mb4 随版本/
+     * 字符集变化），排序在 Java 侧用 {@link TreeSet} 做；两侧都比较「已排序集合」，因此与脚本侧
+     * {@code jq sort} 的规范化顺序互不影响。</p>
+     */
+    private List<String> reportNames(long tenantId) {
+        List<String> names = new ArrayList<>();
+        for (Object[] row : db.rows(
+                "SELECT name FROM report_definition WHERE tenant_id = ?", tenantId)) {
+            names.add(SysDb.asString(row[0]));
+        }
+        return names;
+    }
+
     // ------------------------------------------------------------------ 租户与引用
 
     private long tenantId() {
@@ -245,7 +263,9 @@ public class DemoResetService {
         db.row("SELECT id FROM test_module WHERE tenant_id = ? ORDER BY id LIMIT 1", tenantId)
                 .map(row -> SysDb.asLong(row[0]))
                 .ifPresent(id -> refs.put("module", id));
-        for (String required : List.of("user:po1", "user:pm", "domain:ORD", "vendor:VEN-A",
+        // user:admin 是 r16 两张演示报表的属主（PRIVATE）：缺它时 {@link DemoFixture#reportRows}
+        // 会抛 IllegalStateException 变成 500，宁可在这里给同一个 409。
+        for (String required : List.of("user:po1", "user:pm", "user:admin", "domain:ORD", "vendor:VEN-A",
                 "supplyOrg", "itOrg", "module")) {
             if (!refs.containsKey(required)) {
                 throw new ApiException(409, "DEMO_RESET_TENANT",
@@ -320,14 +340,20 @@ public class DemoResetService {
             String status = (String) row[DemoFixture.R_STATUS];
             double estimate = ((Integer) row[DemoFixture.R_ESTIMATE]).doubleValue();
             boolean inRelease = Boolean.TRUE.equals(row[DemoFixture.R_IN_RELEASE]);
+            // 厂商写两列：owner_vendor_id（甲方视角的「所属厂商」，隔离谓词 ScopeSql:54 用它）
+            // 与 assignee_vendor_id（「承接厂商」，分析域 vendor 维读的是这一列，
+            // AnalyticsSql.java:172）。r16 之前只写了 owner，演示需求的承接厂商因此全是 NULL，
+            // 厂商交付概览会退化成一行「未设置」（AC-3 要求 VEN-A / VEN-C 两行）；两列取同一个
+            // 演示厂商即语义自洽，隔离口径不变（vendor1 仍是 owner∨assignee 命中同样的 3 行）。
             long id = db.insert("INSERT INTO requirement (tenant_id, code, type, parent_id, domain_id,"
-                            + " origin_org_id, reporter_id, owner_user_id, owner_vendor_id, title,"
-                            + " priority, status, estimate_days, actual_days, release_id,"
-                            + " plan_start_date, plan_end_date, created_by, updated_by)"
-                            + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            + " origin_org_id, reporter_id, owner_user_id, owner_vendor_id,"
+                            + " assignee_vendor_id, title, priority, status, estimate_days, actual_days,"
+                            + " release_id, plan_start_date, plan_end_date, created_by, updated_by)"
+                            + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     tenantId, code, row[DemoFixture.R_TYPE], parentId, domainId,
                     row[DemoFixture.R_ORG_ID], reporterId, row[DemoFixture.R_OWNER_ID],
-                    row[DemoFixture.R_VENDOR_ID], row[DemoFixture.R_TITLE], row[DemoFixture.R_PRIORITY],
+                    row[DemoFixture.R_VENDOR_ID], row[DemoFixture.R_VENDOR_ID],
+                    row[DemoFixture.R_TITLE], row[DemoFixture.R_PRIORITY],
                     status, estimate, "DONE".equals(status) ? estimate : null,
                     inRelease ? releaseId : null,
                     Date.valueOf((LocalDate) row[DemoFixture.R_PLAN_START]),
@@ -410,6 +436,18 @@ public class DemoResetService {
                     + " VALUES (?,?,?,?,?,?)",
                     tenantId, row[0], row[1], row[2], row[3], row[4]);
         }
+
+        // 9) 演示报表（r16）：紧跟 report_definition 的整表 purge 之后回填 2 行，PRIVATE + 属主 admin。
+        // 「先清后插」而不是 upsert：唯一键含 owner_id+name+active_flag，upsert 表达不了「上一轮多出来的
+        // 那张必须消失」。行形状（列顺序、scope、owner_role）由 DemoFixture.reportRows 一处拥有；
+        // 插入与删除同事务，插一半失败会连 12 条需求一起回滚，不会留下「有报表没数据」的演示态。
+        for (Object[] row : DemoFixture.reportRows(tenantId, refs)) {
+            db.insert("INSERT INTO report_definition (tenant_id, name, dataset, definition_json,"
+                    + " chart_type, owner_id, owner_role, scope, scope_ref, status,"
+                    + " created_by, updated_by, version)"
+                    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", row);
+        }
+        log.info("demo-reset: 插入演示报表 {} 张", DemoFixture.REPORT_COUNT);
     }
 
     // ------------------------------------------------------------------ 不变量
@@ -448,7 +486,15 @@ public class DemoResetService {
         expect(violations, "甘特逾期行", counts.get("overdueGanttRows"), 0);
         expect(violations, "通知", counts.get("notifications"), DemoFixture.NOTIFICATION_COUNT);
         // r15：四张原先漏删的表必须真的清空（执行器保留 V9 种子的 2 行）。
-        expect(violations, "报表定义", counts.get("reports"), 0);
+        // r16：报表定义不再是 0——重置要预置 2 张演示报表；名称集合另行断言（只比行数会让
+        // 「2 张但都是探针名」通过）。probeReports 仍是 0：它是 reports=2 子集上的过滤结果。
+        expect(violations, "报表定义", counts.get("reports"), DemoFixture.REPORT_COUNT);
+        List<String> names = reportNames(tenantId);
+        if (!new TreeSet<>(names).equals(new TreeSet<>(DemoFixture.REPORT_NAMES))) {
+            List<String> sorted = new ArrayList<>(names);
+            sorted.sort(Comparator.naturalOrder());
+            violations.add("报表名称集合应为 " + DemoFixture.REPORT_NAMES + "，实际 " + sorted);
+        }
         expect(violations, "门户卡片配置", counts.get("portalCards"), 0);
         expect(violations, "门户个人 pin", counts.get("portalPins"), 0);
         expect(violations, "测试执行器", counts.get("executors"), 2);

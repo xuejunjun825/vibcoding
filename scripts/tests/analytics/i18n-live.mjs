@@ -35,6 +35,13 @@ const REPORT_IDS = (process.env.I18N_REPORT_IDS || '250,261,228')
   .map((id) => Number(id.trim()))
   .filter((id) => Number.isFinite(id))
 const SESSION_KEY = 'devops.session'
+/**
+ * 打开报表/导出报表统一用的需求类型范围。
+ * 页面与导出必须是同一段 query（preset + reqType）：服务端的 crossTab 缓存键含 reqType，
+ * 两条不同的 query 会各算一份；库内数据变化（seed / reset）后其中一份可能是旧条目，
+ * A6 逐列比对就会随库内数据状态漂移，而不是报表本身出错。
+ */
+const REPORT_REQ_TYPE = process.env.I18N_REQ_TYPE || 'RD'
 /** AC-5 判据：三个字母以上、可带 _ 分段的英文枚举码 */
 const ENUM_TOKEN = /\b[A-Z]{3,}(?:_[A-Z]+)*\b/
 const ENUM_TOKEN_ALL = /\b[A-Z]{3,}(?:_[A-Z]+)*\b/g
@@ -221,7 +228,8 @@ function csvHeaderLines(buffer) {
 }
 
 async function exportBuffer(token, tenantId, id, format) {
-  const res = await fetch(`${GATEWAY}/api/deliver/reports/${id}/export?format=${format}&preset=30d`, {
+  const query = new URLSearchParams({ format, preset: '30d', reqType: REPORT_REQ_TYPE })
+  const res = await fetch(`${GATEWAY}/api/deliver/reports/${id}/export?${query}`, {
     headers: { Authorization: `Bearer ${token}`, 'X-Tenant-Id': String(tenantId) },
   })
   const buf = Buffer.from(await res.arrayBuffer())
@@ -458,7 +466,7 @@ async function main() {
     // A5–A8 编辑器 + 导出（三张报表各跑一遍）
     let compared = 0
     for (const id of reportIds) {
-      await open(`/reports/${id}?reqType=RD`)
+      await open(`/reports/${id}?reqType=${REPORT_REQ_TYPE}`)
       await page.waitForSelector('.ed__preview', { timeout: 30000 })
 
       // 报表可能存成图表视图：切到「表格」再读表头
@@ -477,7 +485,7 @@ async function main() {
         chips.length > 0 &&
           /需求类型\s*(研发需求|业务需求|产品需求)/.test(chipText) &&
           !/\bRD\b|\bPDR\b|\bBUS\b/.test(chipText),
-        chipText || '未渲染任何范围 chip（?reqType=RD 是否被路由吞掉了？）',
+        chipText || `未渲染任何范围 chip（?reqType=${REPORT_REQ_TYPE} 是否被路由吞掉了？）`,
       )
 
       const slotText = await regionTexts(page, ['.ed__slots', '.ed__preview-head', '.ed__scope'])
