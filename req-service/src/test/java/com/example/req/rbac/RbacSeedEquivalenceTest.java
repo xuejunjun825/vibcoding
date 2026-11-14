@@ -1,0 +1,140 @@
+package com.example.req.rbac;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+import com.example.platform.contract.ActionRegistry;
+import com.example.platform.contract.MenuRegistry;
+import com.example.platform.contract.PermissionMatrix;
+import com.example.platform.contract.PermissionMatrix.Access;
+import org.junit.jupiter.api.Test;
+
+/**
+ * AC-3 as executable evidence: the 1680 seeded rows per tenant are not hand-written, they are
+ * derived — {@code FUNCTION = the matrix cell}, {@code MENU = max(function codes the page binds)},
+ * {@code ACTION = max(function codes the action needs)}. If the derivation ever drifts from the
+ * matrix, upgrading quietly changes who can do what, so the equality is asserted per cell and
+ * summarised as one canonical hash the database-side check (s2) recomputes from real rows.
+ */
+class RbacSeedEquivalenceTest {
+
+    @Test
+    void derivesFromTheMatrixPerRoleAndPage() {
+        for (String role : PermissionMatrix.roles()) {
+            for (MenuRegistry.MenuPage page : MenuRegistry.pages()) {
+                Access expected = max(role, page.functionCodes());
+                Access actual = PermissionMatrix.accessForAny(role, page.functionCodes());
+                assertEquals(expected, actual, "page " + page.code() + " for role " + role);
+            }
+        }
+    }
+
+    @Test
+    void seedMatchesFunctionMaxForActions() {
+        for (String role : PermissionMatrix.roles()) {
+            for (ActionRegistry.ActionDef action : ActionRegistry.actions()) {
+                Access expected = max(role, action.functionCodes());
+                Access actual = PermissionMatrix.accessForAny(role, action.functionCodes());
+                assertEquals(expected, actual, "action " + action.code() + " for role " + role);
+            }
+        }
+    }
+
+    /** A page that binds no function code is not narrowed by the function layer. */
+    @Test
+    void pagesWithoutFunctionCodesAreOpenAtTheMenuLayer() {
+        for (MenuRegistry.MenuPage page : MenuRegistry.pages()) {
+            if (page.functionCodes().isEmpty()) {
+                for (String role : PermissionMatrix.roles()) {
+                    assertEquals(Access.ALLOW, PermissionMatrix.accessForAny(role, List.of()),
+                            page.code() + " binds no code, so it must derive ALLOW, not DENY");
+                }
+            }
+        }
+    }
+
+    @Test
+    void canonicalHashIsStable() {
+        String first = canonicalHash();
+        String second = canonicalHash();
+        assertEquals(first, second, "the canonical form must not depend on map iteration order");
+        assertEquals(64, first.length(), "SHA-256 hex");
+        System.out.println("[rbac-seed] canonical sha256 = " + first);
+        System.out.println("[rbac-seed] rows = " + rowCount());
+    }
+
+    @Test
+    void totalRowsAreSixteenEighty() {
+        assertEquals(1680L, rowCount(),
+                "10 roles × (60 functions + 36 pages + 72 actions) seeded rows per tenant");
+    }
+
+    private static long rowCount() {
+        return (long) PermissionMatrix.roles().size()
+                * (PermissionMatrix.functions().size() + MenuRegistry.pages().size()
+                + ActionRegistry.actions().size());
+    }
+
+    /** Stable text form: {@code ROLE|LAYER|code|access}, one line per seeded row, sorted. */
+    static String canonicalForm() {
+        List<String> lines = new ArrayList<>();
+        for (String role : PermissionMatrix.roles()) {
+            for (String function : PermissionMatrix.functions()) {
+                lines.add(role + "|FUNCTION|" + function + "|"
+                        + PermissionMatrix.accessFor(role, function).name());
+            }
+            for (MenuRegistry.MenuPage page : MenuRegistry.pages()) {
+                lines.add(role + "|MENU|" + page.code() + "|"
+                        + PermissionMatrix.accessForAny(role, page.functionCodes()).name());
+            }
+            for (ActionRegistry.ActionDef action : ActionRegistry.actions()) {
+                lines.add(role + "|ACTION|" + action.code() + "|"
+                        + PermissionMatrix.accessForAny(role, action.functionCodes()).name());
+            }
+        }
+        lines.sort(String::compareTo);
+        return String.join("\n", lines);
+    }
+
+    static String canonicalHash() {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(canonicalForm().getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(String.format(Locale.ROOT, "%02x", b));
+            }
+            return hex.toString();
+        } catch (Exception ex) {
+            throw new IllegalStateException("SHA-256 unavailable", ex);
+        }
+    }
+
+    /** {@code max} of the levels of the given codes, ALLOW when the list is empty. */
+    static Access max(String role, List<String> functions) {
+        if (functions == null || functions.isEmpty()) {
+            return Access.ALLOW;
+        }
+        Access result = Access.DENY;
+        for (String function : functions) {
+            result = PermissionMatrix.Access.max(result, PermissionMatrix.accessFor(role, function));
+        }
+        return result;
+    }
+
+    /** Kept for the s2 checker: the derivation of one role as a map, handy for ad-hoc inspection. */
+    static Map<String, String> roleRow(String role) {
+        List<String> lines = canonicalForm().lines()
+                .filter(line -> line.startsWith(role + "|")).toList();
+        return lines.stream().collect(java.util.stream.Collectors.toMap(
+                line -> line.split("\\|")[1] + ":" + line.split("\\|")[2],
+                line -> line.split("\\|")[3], (left, right) -> left,
+                java.util.LinkedHashMap::new));
+    }
+}

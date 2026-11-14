@@ -6,7 +6,7 @@
 #   s4 缓存与 epoch      s5 角色 CRUD/防锁死   s6 人员与组织       s7 负向 9 例
 #   s8 审计与 reset      s9 动作声明覆盖率
 #
-# 每段自报 `sN <pass> <total>` 到 $RBAC_COUNTS；本脚本负责
+# 每段自报 `sN <pass> <total>` 到 ${RBAC_COUNTS}；本脚本负责
 #   1) 每段下限（少于下限说明断言被删，门禁在缩水）
 #   2) 总数 >= 60（AC-21）
 #   3) PASS == TOTAL（全绿才算过）
@@ -57,7 +57,7 @@ if (( $# > 0 )) && [[ "$1" != "all" ]]; then
     for arg in "$@"; do
         case "$arg" in
             s[0-9]) SELECTED+=("$arg") ;;
-            *) die "未知分段: $arg（可用: ${SEGMENTS[*]} / all）" ;;
+            *) die "未知分段: ${arg}（可用: ${SEGMENTS[*]} / all）" ;;
         esac
     done
 fi
@@ -67,9 +67,17 @@ ALL_SELECTED=0
 log "rbac-verify：分段 ${SELECTED[*]}（每段下限见 TECHNICAL §10.2）"
 
 # ---------------------------------------------------------------- 预检
-db_up || die "MySQL 不可达（${PLATFORM_DB_HOST}:${PLATFORM_DB_PORT}/${PLATFORM_DB_NAME}）；先 make platform-up"
-req_ready || die "req-service 未就绪（${REQ_URL}/internal/health）；先 make platform-up"
+# s9 是纯静态段（读源码，不需要服务在跑），所以单独跑它时不必先 make platform-up；
+# 其余分段会打真库/真接口，缺环境就别假装跑过——直接说清楚要起什么。
+NEED_STACK=0
+for seg in "${SELECTED[@]}"; do
+    [[ "$seg" == "s9" ]] || NEED_STACK=1
+done
 command -v jq >/dev/null 2>&1 || die "缺少 jq（断言解析 JSON 用）"
+if (( NEED_STACK )); then
+    db_up || die "MySQL 不可达（${PLATFORM_DB_HOST}:${PLATFORM_DB_PORT}/${PLATFORM_DB_NAME}）；先 make platform-up"
+    req_ready || die "req-service 未就绪（${REQ_URL}/internal/health）；先 make platform-up"
+fi
 
 # ---------------------------------------------------------------- 执行
 RUN_FAILED=0

@@ -11,6 +11,7 @@ import com.example.platform.contract.ActionRegistry;
 import com.example.platform.contract.MenuRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -56,8 +57,9 @@ public class PermissionDeclarationValidator implements ApplicationRunner {
     private final RequestMappingHandlerMapping mappings;
     private final boolean failFast;
 
-    public PermissionDeclarationValidator(RequestMappingHandlerMapping mappings,
-                                          @Value("${platform.rbac.fail-fast:true}") boolean failFast) {
+    public PermissionDeclarationValidator(
+            @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping mappings,
+            @Value("${platform.rbac.fail-fast:true}") boolean failFast) {
         this.mappings = mappings;
         this.failFast = failFast;
     }
@@ -75,6 +77,9 @@ public class PermissionDeclarationValidator implements ApplicationRunner {
                     continue;
                 }
                 for (String pattern : info.getPatternValues()) {
+                    if (PermissionInterceptor.isOpen(samplePath(pattern))) {
+                        continue;
+                    }
                     checked++;
                     String problem = check(method, pattern, handler);
                     if (problem != null) {
@@ -96,6 +101,20 @@ public class PermissionDeclarationValidator implements ApplicationRunner {
             throw new IllegalStateException(message);
         }
         log.error(message);
+    }
+
+    /**
+     * A concrete path for a handler pattern, used only to ask {@link PermissionInterceptor#isOpen}
+     * whether the endpoint is public. Template variables become {@code 1}; a trailing catch-all is
+     * dropped so {@code /internal/***} samples as {@code /internal/}.
+     */
+    static String samplePath(String pattern) {
+        String path = pattern.replaceAll("\\{[^/]+}", "1");
+        int tail = path.indexOf(".*");
+        if (tail >= 0) {
+            path = path.substring(0, tail);
+        }
+        return path;
     }
 
     /** Returns {@code null} when the handler is properly declared, else the reason. */
@@ -156,9 +175,11 @@ public class PermissionDeclarationValidator implements ApplicationRunner {
             return null;
         }
         if (requirement.action() == null) {
-            if (pageOnly == null && !PermissionRouteTable.pageOnlyPatterns().isEmpty()) {
-                PAGE_ONLY_WHITELIST.add(method + " " + pattern);
-            }
+            // A page-scoped write is allowed, but never silently: it is recorded in the whitelist
+            // the startup log prints, so a reviewer can see every endpoint whose only guard is
+            // "the user may open this page" and decide whether it deserves an action code.
+            PAGE_ONLY_WHITELIST.add(method + " " + pattern
+                    + (pageOnly == null ? " (页面作用域)" : " (" + pageOnly.reason() + ")"));
             return null;
         }
         if (!ActionRegistry.isRegistered(requirement.action())) {

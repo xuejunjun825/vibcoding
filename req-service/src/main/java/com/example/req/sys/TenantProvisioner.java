@@ -4,12 +4,14 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 import com.example.platform.common.error.ApiException;
+import com.example.req.seed.RbacSeeder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Creates a tenant and everything a tenant needs to be usable: its organizations, the ten built-in
- * roles, the seven business domains, the dictionaries and one platform administrator.
+ * roles and their preset permission grid, the seven business domains, the dictionaries and one
+ * platform administrator.
  *
  * <p>Provisioning is one transaction: a half-created tenant (roles but no admin, or domains but no
  * roles) would be worse than no tenant at all, because the failure only surfaces when the first
@@ -25,10 +27,12 @@ public class TenantProvisioner {
 
     private final SysDb db;
     private final PasswordService passwords;
+    private final RbacSeeder seeder;
 
-    public TenantProvisioner(SysDb db, PasswordService passwords) {
+    public TenantProvisioner(SysDb db, PasswordService passwords, RbacSeeder seeder) {
         this.db = db;
         this.passwords = passwords;
+        this.seeder = seeder;
     }
 
     @Transactional
@@ -51,6 +55,11 @@ public class TenantProvisioner {
 
         int orgs = createOrganizations(tenantId);
         int roles = createRoles(tenantId);
+        // Same transaction as the roles: a tenant with roles but no grants would look fine until
+        // its first login, and then every request would be a 403. The preset is derived from the
+        // registries (RbacSeeder.preset), so a page added later is in the grid the moment a tenant
+        // is created — no follow-up script, no "new tenants behave differently" drift.
+        seeder.seedTenant(tenantId);
         int domains = createDomains(tenantId);
         int dicts = createDictionaries(tenantId);
         String admin = createAdmin(tenantId, adminUsername, adminPassword);

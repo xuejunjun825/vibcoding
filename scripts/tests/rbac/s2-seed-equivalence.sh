@@ -59,9 +59,9 @@ page_fn AS (
    WHERE p.function_codes <> ''
 ), expect AS (
   SELECT tenant_id, role_id, subject,
-         CASE WHEN SUM(access = 'DENY') > 0 THEN 'DENY'
+         CASE WHEN SUM(access = 'ALLOW') > 0 THEN 'ALLOW'
               WHEN SUM(access = 'RESTRICTED') > 0 THEN 'RESTRICTED'
-              ELSE 'ALLOW' END AS access
+              ELSE 'DENY' END AS access
     FROM page_fn GROUP BY tenant_id, role_id, subject)
 "
 EXPAND_ACTIONS="${EXPAND_PAGES//sys_menu p/sys_action p}"
@@ -145,14 +145,22 @@ check_eq "存在 RESTRICTED 动作格（≥1），且这些格未被 max 塌成 
 
 # ---------------------------------------------------------------- 5. 规范化哈希
 # 口径（写死在两处并互相对照，供 Java 侧 RbacSeedEquivalenceTest 的 CANONICAL_HASH 比对）：
-#   line = role_code|subject_type|subject_code|access，按整行升序，'\n' 连接，SHA-256(UTF-8)
-CANON_SQL="SELECT CONCAT(r.code, '|', p.subject_type, '|', p.subject_code, '|', p.access)
+#   line = role_code|subject_type|subject_code|access，按整行**字节序**升序（BINARY：Java 侧
+#   String.compareTo 在纯 ASCII 码上与之一致），'\n' 连接、末行不带换行，SHA-256(UTF-8)
+#   —— 只有用 BINARY 排序，本段的哈希才真的等于 RbacSeedEquivalenceTest 的 canonicalHash；
+#   用默认 utf8mb4_0900_ai_ci 排序两边会得到不同的「升序」。
+CANON_SQL="SELECT CONCAT(r.code, '|', p.subject_type, '|', p.subject_code, '|', p.access) AS l
              FROM sys_role_permission p JOIN sys_role r ON r.id = p.role_id AND r.tenant_id = p.tenant_id
             WHERE p.tenant_id = ${TENANT_ID}
-            ORDER BY 1"
-SQL_HASH="$(db_q "SELECT SHA2(GROUP_CONCAT(l ORDER BY l SEPARATOR '\n'), 256) FROM (${CANON_SQL}) x")"
+            ORDER BY BINARY l"
+# group_concat_max_len 默认 1024，1680 行规范化文本约 67KB：不抬到 1MB，MySQL 侧只会算前 1024
+# 字节的哈希，与 bash 侧的全量哈希必然不等（假红），也失去「整表一行不差」的意义。
+SQL_HASH="$(db_q "SET SESSION group_concat_max_len = 1048576;
+        SELECT SHA2(GROUP_CONCAT(l ORDER BY BINARY l SEPARATOR '\n'), 256) FROM (${CANON_SQL}) x")"
 SQL_HASH="$(printf '%s' "${SQL_HASH}" | head -n1)"
-BASH_HASH="$(db_q "$CANON_SQL" | shasum -a 256 | awk '{print $1}')"
+# 口径是「行之间用 '\n' 连接」，最后一行不带换行（Java 侧 String.join("\n") 也是如此）；
+# 命令替换会吃掉结尾换行，printf 再补回零个换行，两侧才是同一段字节。
+BASH_HASH="$(printf '%s' "$(db_q "$CANON_SQL")" | shasum -a 256 | awk '{print $1}')"
 if [[ -n "${SQL_HASH}" && "${SQL_HASH}" == "${BASH_HASH}" ]]; then
     pass "规范化 SHA-256 两侧复算一致（${SQL_HASH:0:16}…）"
 else

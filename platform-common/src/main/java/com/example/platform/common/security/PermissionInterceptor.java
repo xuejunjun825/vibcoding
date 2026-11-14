@@ -57,6 +57,11 @@ public class PermissionInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response,
                              Object handler) {
+        // 先丢上一次请求留下的判定结果：被拒绝的请求是抛异常结束的，DispatcherServlet 的
+        // triggerAfterCompletion 未必回落到本拦截器，afterCompletion 里的清理就可能不执行；
+        // 而 Tomcat 线程是复用的，一份残留的 Effective 会让下一个请求（不同用户/角色）读到
+        // 上一个请求的答案——线上表现为「某些人莫名其妙 403，重启就好」。
+        permissions.clearRequestMemo();
         String path = AuthFilter.path(request);
         if (isOpen(path)) {
             return true;
@@ -92,9 +97,13 @@ public class PermissionInterceptor implements HandlerInterceptor {
             Map<String, Object> detail = new LinkedHashMap<>();
             detail.put("path", path);
             detail.put("method", method);
-            detail.put("page", pages.isEmpty() ? null : pages.get(0));
+            if (!pages.isEmpty()) {
+                detail.put("page", pages.get(0));
+            }
             detail.put("pages", pages);
-            detail.put("action", action);
+            if (action != null) {
+                detail.put("action", action);
+            }
             if (!legacyFunctions.isEmpty()) {
                 detail.put("functions", legacyFunctions);
             }
@@ -157,10 +166,16 @@ public class PermissionInterceptor implements HandlerInterceptor {
         if (bodyPrefix != null && !bodyPrefix.isBlank()) {
             String verb = bodyField(request, "action");
             resolvedAction = verb == null || verb.isBlank() ? null : bodyPrefix + verb;
-            if (resolvedAction != null && !ActionRegistry.isRegistered(resolvedAction)) {
-                // Unregistered verb: not grantable by construction, so deny rather than guess.
-                return new Declared(pages, resolvedAction, bodyPrefix, legacyFunctions, legacyAnyOf,
-                        false);
+            if (resolvedAction != null) {
+                // 状态机用动词命名一次流转（缺陷的 start / submit_verify / verify_pass 等），
+                // 可授权的动作却是它的能力名（handle / resolve / verify）。先归一化再判注册，
+                // 否则平台管理员会被自己的状态机动词判 403；未登记且无别名的动词仍然 fail-closed。
+                resolvedAction = ActionRegistry.canonical(resolvedAction);
+                if (!ActionRegistry.isRegistered(resolvedAction)) {
+                    // Unregistered verb: not grantable by construction, so deny rather than guess.
+                    return new Declared(pages, resolvedAction, bodyPrefix, legacyFunctions,
+                            legacyAnyOf, false);
+                }
             }
         }
         boolean granted = false;
@@ -232,7 +247,12 @@ public class PermissionInterceptor implements HandlerInterceptor {
         auditService.recordInNewTx("PERMISSION_DENIED", "permission", null, detail);
     }
 
-    private static boolean isOpen(String path) {
+    /**
+     * The single list of paths that take part in no RBAC decision at all (login, health, internal
+     * callbacks, the open test-execution API). The startup declaration check reads the same method,
+     * so "public endpoint" can never mean one thing to the interceptor and another to the check.
+     */
+    public static boolean isOpen(String path) {
         if (path == null) {
             return true;
         }

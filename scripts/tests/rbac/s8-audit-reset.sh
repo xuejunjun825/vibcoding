@@ -81,9 +81,9 @@ fi
 
 # ---------------------------------------------------------------- 4. 用户审计
 api_call POST /api/req/admin/users "{\"username\":\"${TMP_USER}\",\"password\":\"Passw0rd!\",\"name\":\"s8 user\",\"roles\":[\"QA\"]}" >/dev/null
-UID="$(printf '%s' "$HTTP_BODY" | jq -r '.id // empty')"
+TMP_UID="$(printf '%s' "$HTTP_BODY" | jq -r '.id // empty')"
 U0="$(audit_count USER_)"
-api_call PUT /api/req/admin/users "{\"id\":${UID},\"name\":\"s8 user\",\"roles\":[\"QA\",\"PMO\"]}" >/dev/null
+api_call PUT /api/req/admin/users "{\"id\":${TMP_UID},\"name\":\"s8 user\",\"roles\":[\"QA\",\"PMO\"]}" >/dev/null
 U1="$(audit_count USER_)"
 if [[ "${U1:-0}" -gt "${U0:-0}" ]]; then
     pass "用户角色变更写 USER_ 审计（${U0:-0}→${U1:-0}）"
@@ -117,13 +117,18 @@ else
 fi
 
 # ---------------------------------------------------------------- 7. 幂等两次
-snapshot() { # 计数快照：两次 reset 必须逐项相等
+snapshot() { # 计数快照：两次 reset 必须逐项相等（按演示租户统计：重置只动这一个租户）
+    # 按租户过滤而不是数全库：r19 起每个租户都有 10 个内置角色（52 个租户 = 520 行），
+    # 全库计数会把「别的租户没被重置」误读成「内置角色不止 10 个」。
     db_q "SELECT CONCAT(
-            (SELECT COUNT(*) FROM sys_role_permission),
+            (SELECT COUNT(*) FROM sys_role_permission p JOIN sys_role r ON r.id = p.role_id
+              WHERE r.tenant_id = (SELECT id FROM sys_tenant WHERE code = 't1')),
             '/', (SELECT COUNT(*) FROM sys_menu),
             '/', (SELECT COUNT(*) FROM sys_action),
-            '/', (SELECT COUNT(*) FROM sys_role WHERE builtin = 1),
-            '/', (SELECT COUNT(*) FROM sys_role WHERE builtin = 0))" | head -n1
+            '/', (SELECT COUNT(*) FROM sys_role WHERE builtin = 1
+              AND tenant_id = (SELECT id FROM sys_tenant WHERE code = 't1')),
+            '/', (SELECT COUNT(*) FROM sys_role WHERE builtin = 0
+              AND tenant_id = (SELECT id FROM sys_tenant WHERE code = 't1')))" | head -n1
 }
 S1="$(snapshot)"
 internal_call POST "$REQ_URL" /internal/demo-reset >/dev/null

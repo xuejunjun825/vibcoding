@@ -108,10 +108,11 @@ ALLOW_SET="$(set_cell "$ALLOW_SET" ACTION "$RBAC_ACTION" ALLOW)"
 api_call POST /api/req/admin/users "{\"username\":\"${TMP_USER1}\",\"password\":\"Passw0rd!\",\"name\":\"s7 a\",\"roles\":[\"${TMP_ROLE}\"]}" >/dev/null
 if [[ -n "${TMP_ROLE_ID}" ]]; then
     login_as "$TMP_USER1" 'Passw0rd!' >/dev/null
-    P4A="$(probe_status)"
+    P4A="$(probe_settle allow)"
+    admin_login >/dev/null   # 停用是管理面动作：不切回管理员就只测到「探针用户 403」
     api_call PATCH "/api/req/admin/roles/${TMP_ROLE_ID}/status" '{"status":"DISABLED"}' >/dev/null
     login_as "$TMP_USER1" 'Passw0rd!' >/dev/null
-    P4B="$(probe_status)"
+    P4B="$(probe_settle 403)"
     SETS="$(api_call GET /api/req/auth/me/permissions >/dev/null; printf '%s' "$HTTP_BODY" | jq -r '[(.menus // []), (.actions // []), (.functionCodes // [])] | add | index("'"${RBAC_PAGE}"'") // "absent"')"
     if [[ "${P4A}" != "403" && "${P4B}" == "403" && "${SETS}" == "absent" ]]; then
         pass "4. 角色停用后其用户访问原授权接口 ⇒ 403，且三集合不含该码"
@@ -129,7 +130,7 @@ put_grants "$QA_ID" "$ALLOW_SET" >/dev/null
 put_grants "$DEV_ID" "$(set_cell "$DEV_ORIG" MENU "$RBAC_PAGE" DENY)" >/dev/null
 api_call POST /api/req/admin/users "{\"username\":\"${TMP_USER2}\",\"password\":\"Passw0rd!\",\"name\":\"s7 b\",\"roles\":[\"QA\",\"DEV\"]}" >/dev/null
 login_as "$TMP_USER2" 'Passw0rd!' >/dev/null
-C5="$(probe_status)"
+C5="$(probe_settle 403)"
 if [[ "${C5}" == "403" ]]; then
     pass "5. DENY 覆盖 ALLOW：QA(ALLOW)+DEV(DENY) ⇒ 403"
 else
@@ -150,12 +151,20 @@ else
 fi
 
 # ---------------------------------------------------------------- 7/8. defects 双探针
-login_as biz1 'Passw0rd!' >/dev/null
+# 先以管理员取角色与授权树：biz1 没有 org:manage，GET /admin/roles 对它是 403，
+# role_id_of 会在 403 的错误体上跑 jq（"Cannot index number with string code"）。
+admin_login >/dev/null
 # 用 BUSINESS 自己的授权格做「有动作无页面」：defect.list 页面 DENY，动作 close 仍 ALLOW
 BIZ_ID="$(role_id_of BUSINESS)"
 BIZ_ORIG="$(grants_of "$BIZ_ID")"
 put_grants "$BIZ_ID" "$(set_cell "$(set_cell "$BIZ_ORIG" MENU defect.list DENY)" ACTION defect.action.close ALLOW)" >/dev/null
 login_as biz1 'Passw0rd!' >/dev/null
+# 这条探针打的是 defects 动作端点（不是默认的 test-plans），临时把探针口径指过去，等撤权传播
+# 到位（≤TTL）再抓 body——否则抓到的是上一步放行态的 400，detail 里自然没有 page。
+SAVE_PATH="${RBAC_PROBE_PATH}"; SAVE_BODY="${RBAC_PROBE_BODY}"
+RBAC_PROBE_PATH="/api/req/defects/999999/actions"; RBAC_PROBE_BODY='{"action":"close"}'
+probe_settle 403 >/dev/null
+RBAC_PROBE_PATH="${SAVE_PATH}"; RBAC_PROBE_BODY="${SAVE_BODY}"
 api_call POST "/api/req/defects/999999/actions" '{"action":"close"}' >/dev/null
 C7="${HTTP_CODE:-000}"
 DET7="$(printf '%s' "$HTTP_BODY" | jq -r '.detail.page // empty' 2>/dev/null)"
@@ -166,8 +175,13 @@ else
         "页面码是准入的第一序：动作授权不能让被关掉的页面重新可达"
 fi
 
+admin_login >/dev/null
 put_grants "$BIZ_ID" "$(set_cell "$(set_cell "$BIZ_ORIG" MENU defect.list ALLOW)" ACTION defect.action.close DENY)" >/dev/null
 login_as biz1 'Passw0rd!' >/dev/null
+SAVE_PATH="${RBAC_PROBE_PATH}"; SAVE_BODY="${RBAC_PROBE_BODY}"
+RBAC_PROBE_PATH="/api/req/defects/999999/actions"; RBAC_PROBE_BODY='{"action":"close"}'
+probe_settle 403 >/dev/null
+RBAC_PROBE_PATH="${SAVE_PATH}"; RBAC_PROBE_BODY="${SAVE_BODY}"
 api_call POST "/api/req/defects/999999/actions" '{"action":"close"}' >/dev/null
 C8="${HTTP_CODE:-000}"
 DET8="$(printf '%s' "$HTTP_BODY" | jq -r '.detail.action // empty' 2>/dev/null)"
@@ -177,6 +191,7 @@ else
     fail "8. 有页面无动作仍放行：HTTP ${C8} detail.action=${DET8:-<空>}" \
         "按钮不渲染只是 UI；后端必须按动作码再拒一次，否则直调 API 就绕过"
 fi
+admin_login >/dev/null
 put_grants "$BIZ_ID" "$BIZ_ORIG" >/dev/null
 
 # ---------------------------------------------------------------- 9. 高危动作

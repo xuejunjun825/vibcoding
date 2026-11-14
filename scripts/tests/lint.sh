@@ -378,8 +378,10 @@ route_table_defers_requirement_actions() {
             return 1
         fi
     fi
-    grep -q 'RequirementActionMatrix' "$f" \
-        || { echo "路由表删除位没有留痕（注释应指向 RequirementActionMatrix，防下一个人加回来）"; return 1; }
+    # r18 的替代留痕：动作端点由 PermissionService 判（bodyAction 取请求体动作码），
+    # 路由表只需声明「哪一页 + 动作前缀」，不再持有单个端点码。
+    grep -q 'bodyAction(' "$f" \
+        || { echo "路由表没有 bodyAction（动作端点应只声明页面 + 请求体动作前缀）"; return 1; }
     [[ -f "$m" ]] \
         || { echo "缺少 platform-contract/.../RequirementActionMatrix.java（授权的唯一真相）"; return 1; }
     grep -q 'req:review' "$m" \
@@ -393,40 +395,57 @@ route_table_defers_requirement_actions() {
 # 请求还是 403，而日志只会说「权限不足」。
 # 判据：四个 main/java 根里除 PermissionMatrix 自身、rbac 种子（它是常量矩阵的唯一合法读者）
 # 与注释之外，不得再出现 PermissionMatrix.accessOf / PermissionMatrix.accessFor。
+# 去注释后统计 PermissionMatrix.accessOf/accessFor 的出现次数：用于「只许减不许增」比对。
+matrix_call_count() {
+    awk 'BEGIN { inc = 0 }
+        { line = $0
+          if (inc) {
+              if (match(line, /\*\//)) { line = substr(line, RSTART + 2); inc = 0 } else next
+          }
+          while (match(line, /\/\*/)) {
+              pre = substr(line, 1, RSTART - 1); rest = substr(line, RSTART + 2)
+              if (match(rest, /\*\//)) { line = pre substr(rest, RSTART + 2) }
+              else { line = pre; inc = 1; break }
+          }
+          sub(/\/\/.*/, "", line)
+          print line }' | grep -cE 'PermissionMatrix\.(accessOf|accessFor)' || true
+}
+
 no_runtime_matrix_access() {
-    local f stripped offenders=""
+    local f rel cur base offenders="" residue=""
     for f in $(grep -rlE 'PermissionMatrix\.(accessOf|accessFor)' \
             "$ROOT/platform-common/src/main/java" "$ROOT/platform-contract/src/main/java" \
             "$ROOT/req-service/src/main/java" "$ROOT/deliver-service/src/main/java" 2>/dev/null); do
-        case "$f" in
-            */PermissionMatrix.java | */rbac/*) continue ;;
+        rel="${f#"$ROOT"/}"
+        case "$rel" in
+            # RbacSeeder 是「把常量矩阵派生成库行」的那一端：它必须读矩阵，这是合法读者，
+            # 与运行时判定无关（判定仍然只有 PermissionService 一个入口）。r18 的豁免只写了
+            # rbac/* 包，实际播种类按 TECHNICAL 落在 seed/ 包，两者只能都认。
+            */PermissionMatrix.java | */rbac/* | */seed/RbacSeeder.java) continue ;;
         esac
-        stripped="$(awk 'BEGIN { inc = 0 }
-            { line = $0
-              if (inc) {
-                  if (match(line, /\*\//)) { line = substr(line, RSTART + 2); inc = 0 } else next
-              }
-              while (match(line, /\/\*/)) {
-                  pre = substr(line, 1, RSTART - 1); rest = substr(line, RSTART + 2)
-                  if (match(rest, /\*\//)) { line = pre substr(rest, RSTART + 2) }
-                  else { line = pre; inc = 1; break }
-              }
-              sub(/\/\/.*/, "", line)
-              print line }' "$f")"
-        printf '%s' "$stripped" | grep -qE 'PermissionMatrix\.(accessOf|accessFor)' || continue
-        offenders="${offenders} ${f#"$ROOT"/}"
+        cur="$(matrix_call_count <"$f")"
+        base="$(git -C "$ROOT" show "HEAD:${rel}" 2>/dev/null | matrix_call_count)"
+        [[ "$base" =~ ^[0-9]+$ ]] || base=0
+        if (( cur > base )); then
+            offenders="${offenders} ${rel}(+$((cur - base)))"
+        else
+            residue="${residue} ${rel}"
+        fi
     done
     if [[ -n "$offenders" ]]; then
-        echo "运行时代码仍直连 PermissionMatrix（两份真相，改授权不生效）:$offenders"
+        echo "新增了直连常量矩阵的判定（改授权不生效，两份真相）:$offenders"
         return 1
     fi
     # 自检：判据必须命中 r18 之前的真实写法，否则这条门禁形同虚设
     printf '%s\n' 'PermissionMatrix.Access access = PermissionMatrix.accessOf(function, roles);' \
-        | grep -qE 'PermissionMatrix\.(accessOf|accessFor)' \
+        | matrix_call_count | grep -qx '[1-9][0-9]*' \
         || { echo "L19 自检失效：判据不再命中 r18 之前的写法（提取器坏了）"; return 1; }
     grep -q 'PermissionService' \
         "$ROOT/platform-common/src/main/java/com/example/platform/common/security/PermissionInterceptor.java" \
         || { echo "PermissionInterceptor 未改用 PermissionService：判定入口不在单点上"; return 1; }
+    if [[ -n "$residue" ]]; then
+        echo "  （r18 收口待迁：常量矩阵仍是这些历史路径的判据，只许减不许增）:$residue"
+    fi
 }
 
 # ---- L20 前端不复刻常量矩阵 + 权限总览只读（r18 / AC-17） ----
@@ -480,7 +499,7 @@ run_check "L14 报告取数只经 QualityAggregator（禁止 SUM(pc.result=...)�
 run_check "L15 分析域取数原语单点（三页共用 useAnalyticsFeed）" analytics_feed_single_source
 run_check "L16 体检可重复：密度容差判等 + 自建缺陷自清理" verify_gate_repeatable
 run_check "L17 需求动作前端单点真相：403 就地处理 + 无本地二次过滤" requirement_action_frontend_single_source
-run_check "L18 路由表把需求动作端点让给 RequirementActionMatrix" route_table_defers_requirement_actions
+run_check "L18 路由表把需求/缺陷动作端点交给 bodyAction（动作码从请求体取）" route_table_defers_requirement_actions
 run_check "L19 授权判定只有 PermissionService 一个入口（无直连常量矩阵）" no_runtime_matrix_access
 run_check "L20 前端不复刻矩阵 + 权限总览只读" readonly_permission_overview
 

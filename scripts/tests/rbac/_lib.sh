@@ -28,6 +28,37 @@ probe_status() { # 以当前 API_TOKEN 打探针，回显状态码
     printf '%s' "${HTTP_CODE:-000}"
 }
 
+probe_settle() { # probe_settle <403|allow> [超时秒=70] → 轮询探针直到进入期望态，回显最终状态码
+    # 为什么需要轮询：授权行由 req-service 写入，探针打的是 deliver-service —— 两个 JVM 各有
+    # 一份按租户的快照（platform.rbac.cache-ttl-seconds 默认 45s），invalidate(tenantId) 只对
+    # 写请求所在的进程 epoch+1。同进程的「下一次请求即生效」由 s4 的 epoch 断言覆盖；跨进程的
+    # 传播上界就是 TTL，这里等它，不把「还没传播到」误判成「缓存没有失效」。
+    local want="$1" limit="${2:-70}" waited=0 got
+    while true; do
+        got="$(probe_status)" || true
+        if [[ "${want}" == "403" ]]; then
+            if [[ "${got}" == "403" ]]; then
+                printf '%s' "${got}"
+                return 0
+            fi
+        else
+            if [[ "${got}" != "403" && "${got}" != "000" ]]; then
+                printf '%s' "${got}"
+                return 0
+            fi
+        fi
+        if [[ "${waited}" -ge "${limit}" ]]; then
+            # 超时不算「脚本出错」：回显最后状态码并正常返回，由调用方的 if 判 FAIL 并给出原因。
+            # 这里若 return 1，调用点 `CODE1="$(probe_settle 403)"` 在 set -e 下会**静默中止整段**
+            # 脚本（没有 FAIL 行、没有 report_counts），失败原因反而丢失。
+            printf '%s' "${got}"
+            return 0
+        fi
+        sleep 3
+        waited=$((waited + 3))
+    done
+}
+
 grants_of() { # grants_of <roleId> → 扁平 [{subjectType,subjectCode,access}]
     api_call GET "/api/req/admin/roles/$1/permissions"
     [[ "${HTTP_CODE:-}" == "200" ]] || return 1
@@ -52,6 +83,16 @@ put_grants() { # put_grants <roleId> <grants-json> [confirmHighRisk] → 回显�
     body="$(jq -n --argjson g "$2" --argjson ok "${3:-true}" '{grants: $g, confirmHighRisk: $ok}')"
     api_call PUT "/api/req/admin/roles/$1/permissions" "$body" >/dev/null
     printf '%s' "${HTTP_CODE:-000}"
+}
+
+put_grants_code() { # put_grants_code <roleId> <grants-json> [confirmHighRisk] → 回显 "<状态码>|<业务码>"
+    # 状态码与响应体必须从同一次请求取：调用点常写成 X="$(put_grants ...)"，
+    # 子 shell 内更新的 HTTP_BODY 不会回传，父 shell 读到的是上一条请求的旧 body。
+    local body
+    body="$(jq -n --argjson g "$2" --argjson ok "${3:-true}" '{grants: $g, confirmHighRisk: $ok}')"
+    api_call PUT "/api/req/admin/roles/$1/permissions" "$body" >/dev/null
+    printf '%s|%s' "${HTTP_CODE:-000}" \
+        "$(printf '%s' "${HTTP_BODY:-}" | jq -r '.code // empty' 2>/dev/null)"
 }
 
 role_id_of() { # role_id_of <code>

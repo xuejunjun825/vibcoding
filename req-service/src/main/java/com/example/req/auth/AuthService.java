@@ -92,7 +92,7 @@ public class AuthService {
         return new AuthViews.LoginResponse(token, ttlMinutes * 60, sessionUser(userId,
                 SysDb.asString(user[1]), roles, domainIds, vendorId, tenantId,
                 SysDb.asString(tenant[2]), request.username().trim()),
-                permissions(roles), DEFAULT_ROUTE, tenantId, tenantCode);
+                permissions(tenantId, roles), DEFAULT_ROUTE, tenantId, tenantCode);
     }
 
     public AuthViews.MeResponse me() {
@@ -108,7 +108,7 @@ public class AuthService {
                 scope.tenantId(), principal.tenantName(), principal.username());
         List<Long> orgIds = new ArrayList<>(scope.orgSubtreeIds());
         orgIds.sort(Long::compareTo);
-        return new AuthViews.MeResponse(user, permissions(principal.roles()),
+        return new AuthViews.MeResponse(user, permissions(scope.tenantId(), principal.roles()),
                 new AuthViews.ScopeInfo(scope.tier().name(), domainIds, scope.vendorId(), orgIds,
                         label(scope)));
     }
@@ -131,9 +131,9 @@ public class AuthService {
      * function codes. It now comes from the same {@link PermissionService} snapshot as the three
      * layers, so the flat list and {@code /auth/me/permissions} can never disagree.</p>
      */
-    public List<AuthViews.PermissionEntry> permissions(List<String> roles) {
+    public List<AuthViews.PermissionEntry> permissions(long tenantId, List<String> roles) {
         List<AuthViews.PermissionEntry> entries = new ArrayList<>();
-        permissionService.effective().functions().forEach((code, access) -> {
+        permissionService.effective(tenantId, roles).functions().forEach((code, access) -> {
             if (access != PermissionMatrix.Access.DENY) {
                 entries.add(new AuthViews.PermissionEntry(code, access.name()));
             }

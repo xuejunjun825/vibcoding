@@ -93,7 +93,7 @@ QA_DENY_PAGE="$(set_cell "$QA_ORIG" MENU "$PAGE_CODE" DENY)"
 QA_DENY_PAGE="$(set_cell "$QA_DENY_PAGE" ACTION "$ACTION_CODE" ALLOW)"
 put_grants "$QA_ID" "$QA_DENY_PAGE" >/dev/null
 login_as qa1 'Passw0rd!' >/dev/null
-CODE1="$(probe_status)"
+CODE1="$(probe_settle 403)"
 if [[ "${CODE1}" == "403" ]]; then
     pass "页面 DENY + 动作 ALLOW ⇒ 403（页面前置）"
 else
@@ -104,9 +104,12 @@ fi
 # ---------------------------------------------------------------- 2. 动作档位
 QA_DENY_ACTION="$(set_cell "$QA_ORIG" MENU "$PAGE_CODE" ALLOW)"
 QA_DENY_ACTION="$(set_cell "$QA_DENY_ACTION" ACTION "$ACTION_CODE" DENY)"
+# 写授权必须用管理员身份：qa1 没有 role:grant，用它发 PUT 只会拿到 403，「改档位」这一步就静默
+# 失效了——后面的断言会拿上一步的旧状态当证据（假 PASS 与假 FAIL 都由此而来）。
+admin_login >/dev/null
 put_grants "$QA_ID" "$QA_DENY_ACTION" >/dev/null
 login_as qa1 'Passw0rd!' >/dev/null
-CODE2="$(probe_status)"
+CODE2="$(probe_settle 403)"
 if [[ "${CODE2}" == "403" ]]; then
     pass "页面 ALLOW + 动作 DENY ⇒ 403（动作档位）"
 else
@@ -117,9 +120,10 @@ fi
 # ---------------------------------------------------------------- 3. 放行
 QA_ALLOW="$(set_cell "$QA_ORIG" MENU "$PAGE_CODE" ALLOW)"
 QA_ALLOW="$(set_cell "$QA_ALLOW" ACTION "$ACTION_CODE" ALLOW)"
+admin_login >/dev/null
 put_grants "$QA_ID" "$QA_ALLOW" >/dev/null
 login_as qa1 'Passw0rd!' >/dev/null
-CODE3="$(probe_status)"
+CODE3="$(probe_settle allow)"
 if [[ "${CODE3}" != "403" && "${CODE3}" != "401" && "${CODE3}" != "000" ]]; then
     pass "页面 ALLOW + 动作 ALLOW ⇒ 放行（HTTP ${CODE3}，落到参数校验而非拦截）"
 else
@@ -130,9 +134,10 @@ fi
 # ---------------------------------------------------------------- 4. RESTRICTED
 QA_RESTRICTED="$(set_cell "$QA_ORIG" MENU "$PAGE_CODE" ALLOW)"
 QA_RESTRICTED="$(set_cell "$QA_RESTRICTED" ACTION "$ACTION_CODE" RESTRICTED)"
+admin_login >/dev/null
 put_grants "$QA_ID" "$QA_RESTRICTED" >/dev/null
 login_as qa1 'Passw0rd!' >/dev/null
-CODE4="$(probe_status)"
+CODE4="$(probe_settle allow)"
 if [[ "${CODE4}" != "403" && "${CODE4}" != "401" && "${CODE4}" != "000" ]]; then
     pass "动作 RESTRICTED ⇒ 仍过检查（HTTP ${CODE4}，范围收窄由 DataScope 承担）"
 else
@@ -149,7 +154,7 @@ TMP_USER="s3u$RANDOM"
 CREATED="$(api_call POST /api/req/admin/users "{\"username\":\"${TMP_USER}\",\"password\":\"Passw0rd!\",\"name\":\"s3 probe\",\"roles\":[\"QA\",\"DEV\"]}"; printf '%s' "${HTTP_CODE:-000}")"
 if [[ "${CREATED}" == "200" || "${CREATED}" == "201" ]]; then
     login_as "$TMP_USER" 'Passw0rd!' >/dev/null
-    CODE5="$(probe_status)"
+    CODE5="$(probe_settle 403)"
     if [[ "${CODE5}" == "403" ]]; then
         pass "多角色并集：QA(ALLOW) + DEV(DENY) ⇒ 403（任一 DENY 即 DENY）"
     else
@@ -165,6 +170,9 @@ fi
 login_as admin Admin@12345 >/dev/null
 put_grants "$QA_ID" "$QA_DENY_ACTION" >/dev/null
 login_as qa1 'Passw0rd!' >/dev/null
+# 上一步是放行态，撤权要等跨服务快照的 TTL 传播（≤45s）才拦得住；契约断言只看“确实被拦”的
+# 那一次响应，所以先 settle 到 403，再抓 body——否则抓到的是 400 参数校验，测的就不是 403 契约。
+probe_settle 403 >/dev/null
 api_call "$PROBE_METHOD" "$PROBE_PATH" "$PROBE_BODY" >/dev/null
 DET="$(printf '%s' "$HTTP_BODY" | jq -r '[.code, .message, (.detail.page // "-"), (.detail.action // "-"), (.detail.access // "-"), (.detail.method // "-")] | join("|")' 2>/dev/null)"
 if [[ "$(printf '%s' "$DET" | cut -d'|' -f1)" == "FORBIDDEN" &&

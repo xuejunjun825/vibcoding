@@ -10,7 +10,7 @@
  *
  * 运行：node scripts/tests/rbac/s1-registry-three-way.mjs
  */
-import { readFileSync, appendFileSync } from 'node:fs'
+import { readFileSync, appendFileSync, readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -210,11 +210,12 @@ eq('导航 /notifications 不参与授权（pageCode 为空）', true, notificat
 eq('导航含新增「角色与权限」入口', true, navCodes.has('admin.roles'),
   'T5a：nav.ts 需新增 /admin/roles（pageCode: admin.roles）')
 
-const routerSrc = ['web/src/router/routes/deliver.routes.ts', 'web/src/router/routes/req.routes.ts',
-  'web/src/router/routes/collab.routes.ts', 'web/src/router/routes/analytics.routes.ts',
-  'web/src/router/routes/code.routes.ts', 'web/src/router/routes/index.ts',
-  'web/src/router/routes/admin.routes.ts', 'web/src/router/routes/quality.routes.ts',
-  'web/src/router/index.ts'].map(read).join('\n')
+// 路由文件按目录扫描而不是手写清单：手写清单漏一个文件（flow/integration/base）就会
+// 把好路由报成「未声明」，让这一条断言失去意义。
+const routeDir = resolve(ROOT, 'web/src/router/routes')
+const routeFiles = readdirSync(routeDir).filter((f) => f.endsWith('.ts')).sort()
+  .map((f) => `web/src/router/routes/${f}`)
+const routerSrc = [...routeFiles, 'web/src/router/index.ts'].map(read).join('\n')
 const declaredRoutes = new Set([...routerSrc.matchAll(/name:\s*['"]([^'"]+)['"]/g)].map((m) => m[1]))
 const missingRoutes = pages.filter((p) => p.routeName && !declaredRoutes.has(p.routeName)).map((p) => p.routeName)
 eq('每个注册页面的 routeName 在路由文件里已声明', 0, missingRoutes.length,

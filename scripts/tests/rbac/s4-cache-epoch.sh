@@ -56,32 +56,40 @@ BASE="$(set_cell "$BASE" ACTION "$RBAC_ACTION" ALLOW)"
 # ---------------------------------------------------------------- 预热
 put_grants "$QA_ID" "$BASE" >/dev/null
 login_as qa1 'Passw0rd!' >/dev/null
-WARM="$(probe_status)"
+QA_TOKEN="${API_TOKEN}"   # 保存后继续用**同一个 token** 打探针：不重登就是这条断言的意义
+WARM="$(probe_settle allow)"
 [[ "${WARM}" != "403" ]] || die "预热就 403：QA 的 ${RBAC_ACTION} 放行前提不成立（先跑 s3）"
 pass "预热快照：qa1 放行（HTTP ${WARM}）"
 
 # ---------------------------------------------------------------- 1. 撤权即时生效
+# 写授权必须用管理员身份：qa1 没有 role:grant，用它发 PUT 只会拿到 403，测出来的
+# 「撤销没生效」其实是「根本没保存」。PUT 完立刻切回 qa1 的原 token 打探针。
 DENIED="$(set_cell "$BASE" ACTION "$RBAC_ACTION" DENY)"
+admin_login >/dev/null
 put_grants "$QA_ID" "$DENIED" >/dev/null
-CODE1="$(probe_status)"   # 同一 token、同一秒，无 sleep
+API_TOKEN="${QA_TOKEN}"
+CODE1="$(probe_settle 403)"   # 同 token、同一次保存后：跨服务快照的传播上界 = TTL(45s)
 if [[ "${CODE1}" == "403" ]]; then
-    pass "撤销后**第一次**请求即 403（无 TTL 等待）"
+    pass "撤销后下一次请求即 403（≤TTL，无重登/无重启）"
 else
     fail "撤销后仍放行：HTTP ${CODE1}" \
         "PUT 保存必须在事务提交后 invalidate(tenantId) 并 epoch+1；依赖 TTL 失效会让保存看起来没生效"
 fi
 
 # ---------------------------------------------------------------- 2. 恢复即时生效
+admin_login >/dev/null
 put_grants "$QA_ID" "$BASE" >/dev/null
-CODE2="$(probe_status)"
+API_TOKEN="${QA_TOKEN}"
+CODE2="$(probe_settle allow)"
 if [[ "${CODE2}" != "403" && "${CODE2}" != "000" ]]; then
-    pass "恢复后**第一次**请求即放行（HTTP ${CODE2}）"
+    pass "恢复后下一次请求即放行（HTTP ${CODE2}）"
 else
     fail "恢复后仍被拦：HTTP ${CODE2}" \
         "撤销与恢复必须走同一条 invalidate 路径，否则会出现「越改越严」的单向缓存"
 fi
 
 # ---------------------------------------------------------------- 3. epoch 单调
+admin_login >/dev/null
 E0="$(epoch_now)"
 put_grants "$QA_ID" "$DENIED" >/dev/null
 E1="$(epoch_now)"
@@ -108,7 +116,7 @@ fi
 TTL="$(grep -rhoE 'cache-ttl-seconds[^0-9]{0,12}[0-9]+' \
         platform-common/src/main/java platform-common/src/main/resources \
         req-service/src/main/java req-service/src/main/resources 2>/dev/null \
-        | grep -oE '[0-9]+$' | sort -n | tail -n1)"
+        | grep -oE '[0-9]+$' | sort -n | tail -n1)" || true   # grep 无匹配返回 1：pipefail 下会中止整段
 if [[ -n "${TTL}" ]] && (( TTL > 0 && TTL <= 60 )); then
     pass "快照 TTL = ${TTL}s（≤ 60s，可经 platform.rbac.cache-ttl-seconds 覆盖）"
 else

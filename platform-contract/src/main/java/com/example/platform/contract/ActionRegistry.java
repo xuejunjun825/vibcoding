@@ -180,6 +180,33 @@ public final class ActionRegistry {
         return Optional.empty();
     }
 
+    /**
+     * Wire verbs that name a <b>state transition</b> but no grantable capability of their own.
+     *
+     * <p>The defect loop is driven by {@link StateTables} verbs ({@code start}, {@code submit_verify},
+     * {@code verify_pass}, {@code verify_reject}, {@code close_duplicate}), while the authorizable
+     * actions of that page are the capabilities those transitions need ({@code handle},
+     * {@code resolve}, {@code verify}, {@code close}). Without this map the platform administrator
+     * — who is ALLOW on every registered action — is denied on {@code POST /defects/{id}/actions}
+     * because {@code defect.action.start} is not a code at all, and the deny is indistinguishable
+     * from a real "not granted". Canonicalising first keeps one grant subject per capability:
+     * granting "处理缺陷" covers both starting work and receiving a verification rejection.
+     *
+     * <p>Verbs with no alias stay unknown and are denied (fail-closed), so a new state verb cannot
+     * silently inherit a capability by accident.
+     */
+    private static final java.util.Map<String, String> TRANSITION_ALIASES = java.util.Map.of(
+            "defect.action.start", "defect.action.handle",
+            "defect.action.submit_verify", "defect.action.resolve",
+            "defect.action.verify_pass", "defect.action.verify",
+            "defect.action.verify_reject", "defect.action.handle",
+            "defect.action.close_duplicate", "defect.action.close");
+
+    /** Canonical grant subject for a wire action code; the code itself when no alias applies. */
+    public static String canonical(String code) {
+        return code == null ? null : TRANSITION_ALIASES.getOrDefault(code, code);
+    }
+
     public static boolean isRegistered(String code) {
         return action(code).isPresent();
     }

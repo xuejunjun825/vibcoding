@@ -374,6 +374,60 @@ check_visible vendor2 0
 API_TOKEN=""
 API_TENANT=""
 
+# ---------------------------------------------------------------- r18 三层授权回到预设（AC-4）
+
+# 重置不只是「业务数据回演示态」：被手改过的授权格也必须回到预设。否则演示时一个上一轮
+# 误设的 DENY 会长期沉默地挡人——它在演示里表现为「按钮不见了」，而不是一条报错。
+check_count_any() {
+    local k1="$1" k2="$2" want="$3" label="$4" got
+    got="$(printf '%s' "${C1}" | jq -r ".${k1} // .${k2} // empty")"
+    [[ "${got}" == "${want}" ]] \
+        && pass "${label}" \
+        || fail "${label}（期望 ${want}，实际 ${got:-<缺 ${k1}/${k2} 键>}）" \
+            "重置计数由 DemoResetService 返回，缺键说明 r18 段还没接进 reset 响应"
+}
+check_count_any rolePermission role_permission 1680 "授权行 role_permission = 1680（10 角色 × 168）"
+check_count_any customRoles custom_roles 0 "自定义角色 = 0（重置只留内置 10 个）"
+
+RBAC_TENANT_ROWS="$(db_count sys_role_permission "tenant_id = ${TENANT_ID}")"
+[[ "${RBAC_TENANT_ROWS}" == "1680" ]] \
+    && pass "库内授权行 ${RBAC_TENANT_ROWS} 行（服务端计数之外的独立复核）" \
+    || fail "库内授权行 ${RBAC_TENANT_ROWS:-<空>} 行，期望 1680" \
+            "计数表自报与服务端同源；这条独立查库，两处都说 1680 才算数"
+
+roleperm_audit_view() {
+    db_q "SELECT p.access
+            FROM sys_role_permission p
+            JOIN sys_role r ON r.id = p.role_id AND r.tenant_id = p.tenant_id
+           WHERE p.tenant_id = ${TENANT_ID} AND r.code = 'PLATFORM_ADMIN'
+             AND p.subject_type = 'FUNCTION' AND p.subject_code = 'audit:view'" | head -n1
+}
+PRESET_ACCESS="$(roleperm_audit_view)"
+if [[ -z "${PRESET_ACCESS}" ]]; then
+    fail "PLATFORM_ADMIN 的 audit:view 授权行存在" \
+        "V12 + RbacSeeder 未落地：没有授权行可回，重置就只是清业务数据"
+else
+    # 污染一格（预设置信：矩阵里 PLATFORM_ADMIN 对 audit:view 是 ALLOW），重置后必须回 ALLOW
+    db_q "UPDATE sys_role_permission p
+             JOIN sys_role r ON r.id = p.role_id AND r.tenant_id = p.tenant_id
+             SET p.access = 'DENY'
+           WHERE p.tenant_id = ${TENANT_ID} AND r.code = 'PLATFORM_ADMIN'
+             AND p.subject_type = 'FUNCTION' AND p.subject_code = 'audit:view'" >/dev/null
+    DIRTIED="$(roleperm_audit_view)"
+    reset_once
+    RESTORED="$(roleperm_audit_view)"
+    [[ "${DIRTIED}" == "DENY" && "${RESTORED}" == "${PRESET_ACCESS}" ]] \
+        && pass "被改过的授权格回到预设（audit:view ${DIRTIED} → ${RESTORED}）" \
+        || fail "授权格未回预设：污染后 ${DIRTIED:-<空>}，重置后 ${RESTORED:-<空>}，预设 ${PRESET_ACCESS}" \
+                "重置必须用 RbacSeeder 的推导覆盖内置角色的 1680 行（upsert），不能只删自定义角色的行"
+fi
+
+CUSTOM_ROLES_DB="$(db_count sys_role "tenant_id = ${TENANT_ID} AND builtin = 0")"
+[[ "${CUSTOM_ROLES_DB}" == "0" ]] \
+    && pass "库内自定义角色 0 行（重置删除自定义角色连带其授权）" \
+    || fail "库内仍有 ${CUSTOM_ROLES_DB:-?} 个自定义角色" \
+            "删角色不删授权行会留下孤儿行，之后同 code 重建角色会「带上」上一轮的权限"
+
 # ---------------------------------------------------------------- 结果
 
 if (( FAIL > 0 )); then

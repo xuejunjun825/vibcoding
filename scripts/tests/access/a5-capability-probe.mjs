@@ -494,7 +494,12 @@ async function main() {
   const routeBlank = blankComments(routeSrc)
   // 匹配「^/requirements/…/actions」形态的规则本体（不是缺陷域的 ^/defects/…/actions），
   // 也不匹配删规则后留在注释里的说明文字（注释已被 blankComments 抹平）。
-  const staleRule = /\^\/requirements\/[^\s"]*\/actions/.test(routeBlank)
+  //
+  // r18 起这条端点由 bodyAction 规则声明：动作码从请求体里的 action 派生（一个端点 N 个码），
+  // 而不是 r17 所抵制的「端点级一个码」。所以「残留」只指**非 bodyAction** 的 actions 规则：
+  // 那才会把 16 个动作压成一个码、重现 r17 的 403。矩阵仍须存在并登记 submit/req:review。
+  const actionsRule = routeBlank.match(/\^\/requirements\/[^\s"]*\/actions[^;]*;/)
+  const staleRule = Boolean(actionsRule) && !/bodyAction\s*\(/.test(actionsRule[0])
   const matrixSrc = fileExists(MATRIX_TS) ? readFileSync(path.join(ROOT, MATRIX_TS), 'utf8') : ''
   const matrixRows = /\bsubmit\b/.test(matrixSrc) && matrixSrc.includes('req:review')
   if (!staleRule && matrixSrc && matrixRows) {

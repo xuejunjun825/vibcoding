@@ -136,7 +136,7 @@ check_eq "Flyway 最新成功版本 = 12" 12 "${FLYWAY}" \
 BAD_TENANTS="$(one "SELECT COUNT(*) FROM (
         SELECT t.id FROM sys_tenant t
           LEFT JOIN sys_role_permission p ON p.tenant_id = t.id
-         GROUP BY t.id HAVING COUNT(p.id) <> 1680) x")"
+         GROUP BY t.id HAVING COUNT(*) <> 1680) x")"
 check_eq "所有租户都补齐 1680 行（RbacBootstrap 遍历全部租户）" 0 "${BAD_TENANTS}" \
     "新租户由 TenantProvisioner 同事务种子；存量租户由 RbacBootstrap.seedAllTenants 补齐"
 

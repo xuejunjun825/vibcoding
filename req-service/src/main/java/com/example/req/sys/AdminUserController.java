@@ -236,7 +236,7 @@ public class AdminUserController {
         List<String> unknown = new ArrayList<>();
         for (String code : new LinkedHashSet<>(codes)) {
             Long roleId = db.row("SELECT id FROM sys_role WHERE tenant_id = ? AND code = ?",
-                    tenantId, code).map(row -> SysDb::asLong).orElse(null);
+                    tenantId, code).map(row -> SysDb.asLong(row[0])).orElse(null);
             if (roleId == null) {
                 unknown.add(code);
             } else {
@@ -258,7 +258,7 @@ public class AdminUserController {
                 continue;
             }
             Long exists = db.row("SELECT id FROM biz_domain WHERE tenant_id = ? AND id = ?",
-                    tenantId, domainId).map(row -> SysDb::asLong).orElse(null);
+                    tenantId, domainId).map(row -> SysDb.asLong(row[0])).orElse(null);
             if (exists == null) {
                 unknown.add(domainId);
             } else {

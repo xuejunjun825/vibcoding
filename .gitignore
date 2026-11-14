@@ -35,6 +35,14 @@ coverage/
 var/
 *.hprof
 
+# ---- 本地工具缓存与数据库导出（r18 收尾审计补齐；真实工具产物，非业务文件） ----
+# *.eslintcache：Vite/ESLint 本地缓存；*.local：Vite env 覆盖；*.dump / *.sql.gz：本机 MySQL 导出。
+# 注意：不得忽略 *.sql（V12 迁移就是 .sql）与 docs/teamflow/**/evidence/*.png（验收证据必须入库）。
+*.eslintcache
+*.local
+*.dump
+*.sql.gz
+
 # ---- M7 integration stub runtime (make integration-verify) ----
 # 桩进程的 pid/日志与测试产物都是每次重跑可再生，入库只会制造噪音与冲突。
 scripts/tests/integration/.stub-run/

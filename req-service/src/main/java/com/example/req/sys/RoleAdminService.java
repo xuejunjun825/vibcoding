@@ -150,11 +150,30 @@ public class RoleAdminService {
 
     @Transactional
     public SysViews.RoleRow setStatus(long roleId, String status) {
+        return setStatus(roleId, status, null);
+    }
+
+    /**
+     * Status change carrying the operator's reason.
+     *
+     * <p>DESIGN §3.1 makes the reason part of the 停用 confirmation, and s8 asserts the audit row
+     * keeps what changed; without it the trail answers "disabled" but not "why", which is the
+     * question an incident review actually asks. The reason is optional so that
+     * {@link #setStatus(long, String)} keeps its exact pre-r19 behaviour (no extra key in the
+     * audit detail); a caller that supplies one gets it recorded, capped at the 100 chars the
+     * dialog allows.</p>
+     */
+    @Transactional
+    public SysViews.RoleRow setStatus(long roleId, String status, String reason) {
         long tenantId = tenantId();
         Role role = requireRole(tenantId, roleId);
         String target = status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
         if (!target.equals("ACTIVE") && !target.equals("DISABLED")) {
             throw new ApiException(400, "INVALID_STATUS", "状态只能是 ACTIVE 或 DISABLED");
+        }
+        String note = reason == null ? "" : reason.trim();
+        if (note.length() > 100) {
+            throw new ApiException(400, "REASON_TOO_LONG", "原因不超过 100 字");
         }
         if (role.builtin() && target.equals("DISABLED")) {
             throw new ApiException(409, "BUILTIN_ROLE_IMMUTABLE", "内置角色不能停用");
@@ -164,8 +183,14 @@ public class RoleAdminService {
         }
         db.update("UPDATE sys_role SET status = ?, updated_by = ? WHERE tenant_id = ? AND id = ?",
                 target, currentUserId(), tenantId, roleId);
-        audit.record("ROLE_STATUS", "role", roleId,
-                Map.of("code", role.code(), "before", role.status(), "after", target));
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("code", role.code());
+        detail.put("before", role.status());
+        detail.put("after", target);
+        if (!note.isEmpty()) {
+            detail.put("reason", note);
+        }
+        audit.record("ROLE_STATUS", "role", roleId, detail);
         permissions.invalidate(tenantId);
         return toRow(requireRole(tenantId, roleId).row());
     }
@@ -209,7 +234,7 @@ public class RoleAdminService {
         Diff diff = diff(before, after);
         Map<String, Access> draftFunctions = after.get("FUNCTION");
         if (role.code().equals(RoleGuard.adminRoleCode())) {
-            RoleGuard.assertNoLockout(draftFunctions, activeAdmins(tenantId));
+            RoleGuard.assertNoLockout(draftFunctions, (int) activeAdmins(tenantId));
         }
         List<String> highRisk = RoleGuard.highRiskGrants(role.code(),
                 grants == null ? List.of() : grants, storedStrings(before));
@@ -250,7 +275,7 @@ public class RoleAdminService {
             detail.put("changed", diff.changed());
             detail.put("highRiskGranted", highRisk);
             detail.put("before", storedStrings(before));
-            detail.put("after", nonDeny(after));
+            detail.put("after", storedStrings(after));
             audit.record("ROLE_PERMISSION_UPDATE", "role", roleId, detail);
         }
         permissions.invalidate(tenantId);

@@ -9,9 +9,13 @@
  *   1) 每个写端点（POST/PUT/PATCH/DELETE）要么带 @RequiresAction / @RequiresActionFromBody /
  *      @PageOnly，要么被 PermissionRouteTable 的规则命中；
  *   2) @PageOnly 必须带 reason（豁免可审计，而不是「忘了写」）；
- *   3) 路由表/注解里引用的码必须已注册（无悬空码），且注册的动作码都有引用（无死动作）；
+ *   3) 路由表/注解里引用的码必须已注册（无悬空码）；请求体动作前缀必须能解析到已注册动作；
  *   4) /admin/permissions 只读：控制器里不得有写映射；
  *   5) fail-fast 默认 true：违规要在启动期暴露，而不是运行期 403。
+ *
+ * 豁免：拦截器的 PermissionInterceptor.isOpen(path) 是「不参与 RBAC」的唯一清单（登录、健康检查、
+ * 内部回调、OpenAPI 摄取）。公开端点不能因为「本来就该随便调」而被算成漏声明——但这份清单
+ * 从源码里解析而不是手抄，改动会立刻反映到这一段的计数上。
  */
 import { readFileSync, readdirSync, statSync, appendFileSync } from 'node:fs'
 import { dirname, join, resolve, relative } from 'node:path'
@@ -74,6 +78,25 @@ for (const chunk of tableSrc.split(/rules\.add\(rule\(/).slice(1)) {
 const rulePages = new Set(rules.flatMap((r) => (r.kind === 'bodyAction' ? [r.codes[0]] : r.kind === 'action' ? [r.codes[0]] : r.codes)))
 const ruleActions = new Set(rules.flatMap((r) => (r.kind === 'action' ? [r.codes[1]] : [])))
 
+/* ------------------------------------------------------------------ 公开路径（拦截器的唯一豁免清单） */
+const interceptorSrc = read('platform-common/src/main/java/com/example/platform/common/security/PermissionInterceptor.java')
+const validatorSrc0 = read('platform-common/src/main/java/com/example/platform/common/security/PermissionDeclarationValidator.java')
+const openBody = (() => {
+  // 定位方法签名而不是调用点：isOpen(path) 在拦截器里先被调用、后定义
+  const at = interceptorSrc.search(/isOpen\s*\(\s*String\s+path\s*\)/)
+  if (at < 0) return ''
+  const start = interceptorSrc.indexOf('{', at)
+  let depth = 0
+  for (let i = start; i < interceptorSrc.length; i++) {
+    if (interceptorSrc[i] === '{') depth++
+    else if (interceptorSrc[i] === '}' && --depth === 0) return interceptorSrc.slice(start, i)
+  }
+  return ''
+})()
+const openExact = [...openBody.matchAll(/path\.equals\("([^"]+)"\)/g)].map((m) => m[1])
+const openPrefix = [...openBody.matchAll(/path\.startsWith\("([^"]+)"\)/g)].map((m) => m[1])
+const isOpen = (p) => openExact.includes(p) || openPrefix.some((pre) => p.startsWith(pre))
+
 /* ------------------------------------------------------------------ 控制器扫描 */
 const WRITE = /^@(Post|Put|Patch|Delete)Mapping/
 const controllers = [...walk('req-service/src/main/java'), ...walk('deliver-service/src/main/java')]
@@ -93,7 +116,7 @@ for (const file of controllers) {
     if (verb === 'Get') continue
     writeEndpoints += 1
     const methodPath = (args.match(/"([^"]*)"/) || [])[1] || ''
-    const full = (classPrefix + methodPath).replace(/\{[^}]*\}/g, '\\d+').replace(/\/+$/, '') || '/'
+    const full = (classPrefix + methodPath).replace(/\{[^}]*\}/g, '\\d+').replace(/\/{2,}/g, '/').replace(/\/+$/, '') || '/'
     const line = text.slice(0, m.index).split('\n').length
 
     // 声明：注解紧跟在映射注解之后、方法签名之前
@@ -104,17 +127,31 @@ for (const file of controllers) {
     if (declared) { annotated += 1; continue }
 
     const covered = rules.some((r) => (!r.method || r.method === verb.toUpperCase()) && r.regex.test(full))
-    if (!covered) violations.push(`${relative(ROOT, resolve(ROOT, file))}:${line} ${verb.toUpperCase()} ${full}`)
+    if (covered || isOpen(full)) continue
+    violations.push(`${relative(ROOT, resolve(ROOT, file))}:${line} ${verb.toUpperCase()} ${full}`)
   }
 }
 
 if (writeEndpoints === 0) {
   bad('扫描到写端点', '扫描器没找到任何写端点：正则或目录结构变了，本段会假绿')
 } else if (violations.length === 0) {
-  ok('未声明动作的写端点 = 0', `${writeEndpoints} 个写端点，其中 ${annotated} 个用注解声明，其余由路由表覆盖`)
+  ok('未声明动作的写端点 = 0',
+    `${writeEndpoints} 个写端点，其中 ${annotated} 个用注解声明，其余由路由表覆盖，公开路径 ${openExact.length + openPrefix.length} 条豁免`)
 } else {
   bad(`未声明动作的写端点 = ${violations.length}`, '给端点补 @RequiresAction(page, action) 或在 PermissionRouteTable 加规则',
     violations.slice(0, 6).join(' | '))
+}
+
+/* ------------------------------------------------------------------ 公开清单与启动校验同源 */
+if (openExact.length === 0 && openPrefix.length === 0) {
+  bad('解析不到 PermissionInterceptor.isOpen 的豁免清单',
+    'isOpen 被改名/改结构后本段会失去豁免依据：请把清单保持为 path.equals/path.startsWith 字面量')
+} else if (/isOpen\(/.test(validatorSrc0) || /PermissionInterceptor/.test(validatorSrc0)) {
+  ok(`启动校验复用拦截器的豁免清单（${openExact.length} 条精确 + ${openPrefix.length} 条前缀）`)
+} else {
+  bad('PermissionDeclarationValidator 未复用 PermissionInterceptor.isOpen 的豁免清单',
+    '启动校验会把 /auth/login、/internal/** 这类公开写端点判成「未声明」并 fail-fast 拒绝启动（二者必须同源）',
+    `拦截器豁免 ${openExact.length}+${openPrefix.length} 条，校验器 0 条`)
 }
 
 /* ------------------------------------------------------------------ @PageOnly 豁免可审计 */
@@ -157,12 +194,18 @@ if (!danglingPages.length && !danglingActions.length) {
 }
 
 const allText = tableSrc + controllers.map((f) => read(f)).join('\n')
-const deadActions = [...actionCodes].filter((c) => !allText.includes(c))
-if (!deadActions.length) {
-  ok(`注册的 ${actionCodes.size} 个动作码都被路由表或注解引用（无死动作）`)
+const bodyRules = rules.filter((r) => r.kind === 'bodyAction')
+const bodyPrefixes = [...new Set(bodyRules.map((r) => r.codes[1]).filter(Boolean))]
+const unresolved = bodyPrefixes.filter((pre) => ![...actionCodes].some((code) => code.startsWith(pre)))
+const coveredByPrefix = [...actionCodes].filter((code) => bodyPrefixes.some((pre) => code.startsWith(pre)))
+if (bodyPrefixes.length === 0) {
+  bad('路由表里没有 bodyAction 规则', '需求/缺陷的 /actions 端点共用 URL，只能从请求体取动作码（TECHNICAL §6.3）')
+} else if (unresolved.length === 0) {
+  ok(`请求体动作前缀全部可解析（${bodyPrefixes.length} 个前缀覆盖 ${coveredByPrefix.length} 个已注册动作）`,
+    bodyPrefixes.join(','))
 } else {
-  bad(`存在死动作码 ${deadActions.length} 个`, '注册了却没人用的动作会出现在授权树里，管理员勾了也没任何效果',
-    deadActions.slice(0, 8).join(', '))
+  bad(`请求体动作前缀无对应动作码：${unresolved.join(',')}`,
+    '前缀写错会让所有 body 驱动的动作恒定 403（且日志只会说「无权」）')
 }
 
 const grantRule = rules.some((r) => r.method === 'PUT' && /admin\/roles/.test(r.raw) && r.codes.includes('role.action.grant'))

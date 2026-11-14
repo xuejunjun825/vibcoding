@@ -102,9 +102,12 @@ public class PermissionService {
         if (action == Access.DENY) {
             return Access.DENY;
         }
-        // The weaker of the two still lets the call through; the value is carried to the audit so
-        // "granted but narrowed" stays distinguishable from "fully granted".
-        return Access.max(menu, action);
+        // The narrower of the two still lets the call through; the value is carried to the audit so
+        // "granted but narrowed" stays distinguishable from "fully granted". Note this is the
+        // opposite direction from {@code Access.max}, which answers "is any of
+        // these codes enough?" when deriving a seed row — here the question is "how wide is the
+        // access the caller ends up with?".
+        return menu.ordinal() >= action.ordinal() ? menu : action;
     }
 
     public Access accessOf(Layer layer, String code) {
@@ -157,6 +160,26 @@ public class PermissionService {
             }
         }
         return List.copyOf(result);
+    }
+
+    /**
+     * Effective sets for an explicit tenant and role list, ignoring the request scope.
+     *
+     * <p>登录响应必须带上扁平的功能码清单（历史页面按它决定按钮），而登录请求发生在
+     * {@code TenantContext} 建立之前——那时 {@link #effective()} 只能拿到空租户，登录响应里的
+     * {@code permissions[]} 就会是空数组：菜单与按钮全线消失，只有 {@code AUTHENTICATED} 项能显示。
+     * 所以这里按调用方给定的租户与角色直接算，不进 memo（login 只调一次，缓存没有收益，
+     * 进 memo 反而会把「同线程上一个请求的角色」带到这个响应里）。</p>
+     */
+    public Effective effective(long tenantId, Collection<String> roles) {
+        if (tenantId <= 0) {
+            return new Effective(0L, Map.of(), Map.of(), Map.of());
+        }
+        Snapshot snapshot = snapshot(tenantId);
+        return new Effective(snapshot.epoch(),
+                merge(rows(snapshot, Layer.FUNCTION, roles)),
+                merge(rows(snapshot, Layer.MENU, roles)),
+                merge(rows(snapshot, Layer.ACTION, roles)));
     }
 
     public Effective effective() {
@@ -219,7 +242,10 @@ public class PermissionService {
     }
 
     private Snapshot snapshot() {
-        long tenantId = tenantIdOrZero();
+        return snapshot(tenantIdOrZero());
+    }
+
+    private Snapshot snapshot(long tenantId) {
         if (tenantId <= 0) {
             return emptySnapshot(0);
         }

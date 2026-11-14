@@ -4,12 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.example.platform.common.error.ApiException;
+import com.example.req.seed.RbacSeeder;
 import org.junit.jupiter.api.Test;
 
 /** Provisioning validates its input before it writes anything: a bad code must not leave a tenant. */
 class TenantProvisionerTest {
 
-    private final TenantProvisioner provisioner = new TenantProvisioner(null, new PasswordService());
+    private final TenantProvisioner provisioner =
+            new TenantProvisioner(null, new PasswordService(), new RbacSeeder(null));
 
     @Test
     void rejectsInvalidCode() {

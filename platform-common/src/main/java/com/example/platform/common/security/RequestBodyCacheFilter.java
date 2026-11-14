@@ -43,13 +43,26 @@ public class RequestBodyCacheFilter extends OncePerRequestFilter {
         String method = request.getMethod();
         boolean entity = "POST".equalsIgnoreCase(method) || "PUT".equalsIgnoreCase(method)
                 || "PATCH".equalsIgnoreCase(method);
-        if (!entity || request.getContentLengthLong() > MAX_BYTES) {
+        if (!entity || request.getContentLengthLong() > MAX_BYTES || isMultipart(request)) {
             chain.doFilter(request, response);
             return;
         }
         CachedBodyRequest cached = new CachedBodyRequest(request);
         cached.cache();
         chain.doFilter(cached, response);
+    }
+
+    /**
+     * Multipart passes through untouched. A multipart body has no {@code action} field to read,
+     * and buffering it breaks the container's own parser: the resolver then calls
+     * {@code getParts()} on the wrapper, which delegates to the original request whose stream this
+     * filter already read and closed — the upload dies with {@code IOException: Stream closed}
+     * (HTTP 500) before any controller sees it.
+     */
+    private boolean isMultipart(HttpServletRequest request) {
+        String contentType = request.getContentType();
+        return contentType != null
+                && contentType.toLowerCase(java.util.Locale.ROOT).startsWith("multipart/");
     }
 
     /** Re-readable body; every {@code getInputStream()}/{@code getReader()} returns a fresh one. */

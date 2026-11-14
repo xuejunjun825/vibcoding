@@ -124,6 +124,13 @@ public final class PermissionRouteTable {
     private static List<Rule> build() {
         List<Rule> rules = new ArrayList<>();
 
+        // ---------------------------------------------------------------- exports
+        // Export is a capability on the page the caller can already read, so it has to be matched
+        // before any per-family page rule; otherwise "/requirements/5/export.csv" would be
+        // admitted by the page rule and the export capability would never be checked.
+        rules.add(rule("GET", "^/.+/export\\.csv$",
+                action("ana.reports", "report.action.export")));
+
         // ---------------------------------------------------------------- requirements
         rules.add(rule("POST", "^/requirements/\\d+/actions$",
                 bodyAction("req.pool", "req.action.")));
@@ -183,6 +190,21 @@ public final class PermissionRouteTable {
         // ---------------------------------------------------------------- test plans
         rules.add(rule("POST", "^/test-plans/\\d+/approve$",
                 action("test.plans", "test.action.plan_approve")));
+        rules.add(rule("POST", "^/test-plans/\\d+/reject$",
+                action("test.plans", "test.action.plan_approve")));
+        rules.add(rule("POST", "^/test-plans/\\d+/submit-review$",
+                action("test.plans", "test.action.plan_create")));
+        rules.add(rule("POST", "^/test-plans/\\d+/(start|complete|close|archive)$",
+                action("test.plans", "test.action.execute")));
+        rules.add(rule("PUT", "^/test-plans/\\d+/assignments$",
+                action("test.plans", "test.action.plan_create")));
+        rules.add(rule("PATCH", "^/test-plans/\\d+$",
+                action("test.plans", "test.action.plan_create")));
+        rules.add(rule("POST", "^/test-plans/\\d+/cases$",
+                action("test.plans", "test.action.plan_create")));
+        rules.add(rule("DELETE", "^/test-plans/\\d+/cases/\\d+$",
+                action("test.plans", "test.action.plan_create")));
+        rules.add(rule("POST", "^/test-plans$", action("test.plans", "test.action.plan_create")));
         rules.add(rule("POST", "^/test-plans/\\d+/execute$",
                 action("test.plans", "test.action.execute")));
         rules.add(rule("POST", "^/test-plans/\\d+/rounds.*$", action("test.plans", "test.action.execute")));
@@ -197,12 +219,22 @@ public final class PermissionRouteTable {
         // ---------------------------------------------------------------- reports / executors
         rules.add(rule("POST", "^/test-reports/\\d+/versions/\\d+/signoff$",
                 action("test.reports", "test.action.report_sign")));
+        rules.add(rule("POST", "^/test-reports$",
+                action("test.reports", "test.action.report_sign")));
         rules.add(rule(null, "^/test-reports.*$", page("test.reports")));
         rules.add(rule(null, "^/test-executors.*$", page("test.executors")));
 
         // ---------------------------------------------------------------- quality gates
+        rules.add(rule("POST", "^/quality-gates/waivers$",
+                action("qa.gates", "test.action.gate_waive")));
         rules.add(rule("POST", "^/quality-gates/waivers/\\d+/(approve|reject|revoke)$",
                 action("qa.gates", "test.action.gate_waive")));
+        rules.add(rule("PUT", "^/quality-gates/\\d+$",
+                action("qa.gates", "test.action.gate_waive")));
+        // Evaluating and replaying a gate is the admission decision itself, not a waiver: there is
+        // no action code of its own, so the qa.gates page is the whole requirement.
+        rules.add(rule("POST", "^/quality-gates/\\d+/evaluate$", page("qa.gates")));
+        rules.add(rule("POST", "^/quality-gates/snapshots/\\d+/replay$", page("qa.gates")));
         rules.add(rule(null, "^/quality-gates.*$", page("qa.gates")));
 
         // ---------------------------------------------------------------- releases
@@ -242,7 +274,13 @@ public final class PermissionRouteTable {
         rules.add(rule(null, "^/integration.*$", page("admin.integrations")));
 
         // ---------------------------------------------------------------- collaboration
-        rules.add(rule(null, "^/wiki/spaces.*$", action("collab.wiki", "wiki.action.admin")));
+        // 只有**改动空间结构**才要 wiki.action.admin：GET /wiki/spaces 是读空间列表（页面级读），
+        // GET /wiki/spaces/{id}/tree 是读某空间的页面树。原先把整个 /wiki/spaces.* 归给 admin，
+        // 于是只有 WIKI_VIEW 的 QA 连列表都读不到——读接口不该被写能力挡住。
+        rules.add(rule("POST", "^/wiki/spaces.*$", action("collab.wiki", "wiki.action.admin")));
+        rules.add(rule("PUT", "^/wiki/spaces.*$", action("collab.wiki", "wiki.action.admin")));
+        rules.add(rule("PATCH", "^/wiki/spaces.*$", action("collab.wiki", "wiki.action.admin")));
+        rules.add(rule("DELETE", "^/wiki/spaces.*$", action("collab.wiki", "wiki.action.admin")));
         rules.add(rule("DELETE", "^/wiki/pages/\\d+/purge$",
                 action("collab.wiki", "wiki.action.admin")));
         rules.add(rule("POST", "^/wiki.*$", action("collab.wiki", "wiki.action.edit")));
@@ -258,7 +296,8 @@ public final class PermissionRouteTable {
 
         // ---------------------------------------------------------------- analytics / reports
         rules.add(rule("PUT", "^/portal/config$", action("ana.portal", "portal.action.config")));
-        rules.add(rule("POST", "^/reports/\\d+/pin$", page("ana.portal")));
+        rules.add(rule("POST", "^/reports/\\d+/pin$",
+                action("ana.reports", "report.action.publish")));
         rules.add(rule("PUT", "^/reports/\\d+/share$", action("ana.reports", "report.action.share")));
         rules.add(rule("POST", "^/reports/\\d+/share$", action("ana.reports", "report.action.share")));
         rules.add(rule("POST", "^/reports/\\d+/run$", action("ana.reports", "report.action.generate")));
@@ -266,7 +305,6 @@ public final class PermissionRouteTable {
         rules.add(rule("PUT", "^/reports/\\d+$", action("ana.reports", "report.action.define")));
         rules.add(rule("DELETE", "^/reports/\\d+$", action("ana.reports", "report.action.define")));
         rules.add(rule("POST", "^/reports/\\d+/copy$", action("ana.reports", "report.action.define")));
-        rules.add(rule("GET", "^/.+/export\\.csv$", action("ana.reports", "report.action.export")));
         rules.add(rule(null, "^/reports.*$", page("ana.reports")));
         rules.add(rule(null, "^/portal.*$", page("ana.portal")));
         rules.add(rule(null, "^/analytics.*$", page("ana.dashboard")));
@@ -293,7 +331,8 @@ public final class PermissionRouteTable {
                 action("admin.users", "user.action.disable")));
         rules.add(rule("POST", "^/admin/users/\\d+/reset-password$",
                 action("admin.users", "user.action.reset_password")));
-        rules.add(rule("PUT", "^/admin/users/\\d+$", action("admin.users", "user.action.update")));
+        rules.add(rule("PUT", "^/admin/users/(\\d+)?$",
+                action("admin.users", "user.action.update")));
         rules.add(rule(null, "^/admin/users.*$", page("admin.users")));
 
         // ---------------------------------------------------------------- admin: orgs / tenants
@@ -301,7 +340,8 @@ public final class PermissionRouteTable {
         rules.add(rule("POST", "^/admin/orgs/\\d+/move-users$",
                 action("admin.orgs", "org.action.move_users")));
         rules.add(rule("DELETE", "^/admin/orgs/\\d+$", action("admin.orgs", "org.action.delete")));
-        rules.add(rule("PUT", "^/admin/orgs/\\d+$", action("admin.orgs", "org.action.update")));
+        rules.add(rule("PUT", "^/admin/orgs/(\\d+)?$",
+                action("admin.orgs", "org.action.update")));
         rules.add(rule(null, "^/admin/(orgs|tenants|dicts).*$", page("admin.orgs")));
 
         // ---------------------------------------------------------------- admin: vendors / domains

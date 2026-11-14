@@ -20,11 +20,6 @@ const VENDOR_USERS = new Set(
   (process.env.A4_VENDOR_USERS || 'vendor1').split(',').map((s) => s.trim()).filter(Boolean),
 )
 const DUMP = process.env.A4_DUMP === '1'
-const ADMIN_GROUP_LABELS = [
-  '组织与租户', '用户与角色', '厂商与域', '权限矩阵', '流程定义',
-  'API 客户端', '集成配置', '指标字典', '审计日志',
-]
-
 const ROLES = [
   { user: 'admin', pass: 'Admin@12345' },
   { user: 'pm', pass: 'Passw0rd!' },
@@ -35,12 +30,25 @@ const ROLES = [
   { user: 'vendor1', pass: 'Passw0rd!' },
 ]
 
-/** 与 web/src/layouts/navAccess.ts 完全一致的三步判定（顺序本身是契约） */
+/** 与 web/src/layouts/navAccess.ts 完全一致的四步判定（顺序本身是契约） */
 function navVisible(item, ctx) {
   if (item.routeName && !ctx.hasRoute(item.routeName)) return false
   if (item.internalOnly && ctx.vendorScoped) return false
-  // parseNav 把 nav.ts 的 functionCode 解析成 codes 数组（a3 的产物形状）；
-  // 这里两者都接受，判定语义与 navAccess.ts 逐行一致。
+  // r18 双条件之一：页面码（MENU 层）。缺省/空串退化为「登录即可见」（通知中心）。
+  const pageCode = (item.pageCode || '').trim()
+  if (pageCode && ctx.hasMenu && !ctx.hasMenu(pageCode)) return false
+  // 双条件之二：绑定的功能码（FUNCTION 层），AUTHENTICATED 是哨兵不是码
+  const raw = item.functionCode ?? item.codes ?? []
+  const codes = Array.isArray(raw) ? raw : [raw]
+  if (codes.length === 0) return false
+  if (codes.includes('AUTHENTICATED')) return true
+  return ctx.canAny(codes)
+}
+
+/** 只按功能码判（r17 语义）：与双条件结果对照，用来证明「页面码没有额外挡人」 */
+function navVisibleByFunction(item, ctx) {
+  if (item.routeName && !ctx.hasRoute(item.routeName)) return false
+  if (item.internalOnly && ctx.vendorScoped) return false
   const raw = item.functionCode ?? item.codes ?? []
   const codes = Array.isArray(raw) ? raw : [raw]
   if (codes.length === 0) return false
@@ -60,13 +68,47 @@ async function login(user, pass) {
   const body = await res.json()
   // auth store 的 normalizePermissions：access !== 'DENY' 即视为拥有（RESTRICTED 也算）
   const codes = new Set((body.permissions || []).filter((p) => p.access !== 'DENY').map((p) => p.code))
-  return { codes, tenantId: body.tenantId }
+  // r18：页面码来自 /auth/me/permissions 的 menus 集合（与登录同源，都是 PermissionService）。
+  // 端点未就绪（T4 之前）时返回 null —— ctx.hasMenu 缺省，退化为 r17 的单条件语义。
+  let menus = null
+  let epoch = null
+  try {
+    const p = await fetch(`${GATEWAY}/api/req/auth/me/permissions`, {
+      headers: {
+        Authorization: `Bearer ${body.token}`,
+        ...(body.tenantId ? { 'X-Tenant-Id': String(body.tenantId) } : {}),
+      },
+    })
+    if (p.ok) {
+      const mine = await p.json()
+      if (Array.isArray(mine.menus)) menus = new Set(mine.menus)
+      if (typeof mine.epoch === 'number') epoch = mine.epoch
+    }
+  } catch {
+    menus = null
+  }
+  return { codes, menus, epoch, tenantId: body.tenantId }
 }
 
 async function main() {
   const { sidebar, top } = parseNav()
   const routeCodes = parseRouteCodes()
   const byLabel = new Map(sidebar.map((it) => [it.label, it]))
+
+  // 后台子导航标签从 nav.ts 的解析结果派生，不再写死第二份标签真相：AC-11 把「权限矩阵」
+  // 改名「权限总览」并新增「角色与权限」后，写死的列表要么恒不命中（误报 leaked），要么漏项
+  // （新入口没人断言它该隐藏）。按 routeName 前缀取，只读一处。
+  const ADMIN_GROUP_LABELS = sidebar
+    .filter((it) => (it.routeName || '').startsWith('admin-'))
+    .map((it) => it.label)
+  // 「组织级」后台项 = 由 tenant/org/apiclient/integration 这几个管理码把守的入口（tl1/vendor1
+  // 一个都没有）。按码派生而不按标签，既避免改名后漏项，也保住 API 客户端/集成配置 两项不被
+  // 悄悄从断言里丢掉。
+  const ORG_ONLY_CODES = ['org:manage', 'apiclient:manage', 'integration:manage']
+  const ORG_ONLY_LABELS = sidebar
+    .filter((it) => (it.routeName || '').startsWith('admin-')
+      && (it.codes || []).some((c) => ORG_ONLY_CODES.includes(c)))
+    .map((it) => it.label)
 
   let pass = 0
   let total = 0
@@ -87,11 +129,17 @@ async function main() {
   const visibleByRole = new Map()
   const hiddenByRole = new Map()
   const ctxByRole = new Map()
+  const menusByRole = new Map()
+  const epochByRole = new Map()
   for (const role of ROLES) {
-    const { codes } = await login(role.user, role.pass)
+    const { codes, menus, epoch } = await login(role.user, role.pass)
+    menusByRole.set(role.user, menus)
+    epochByRole.set(role.user, epoch)
     const ctx = {
       hasRoute: (name) => routeCodes.has(name),
       canAny: (list) => list.some((c) => codes.has(c)),
+      // 页面码（MENU 层）——和 SideNav/TopNav 传进 NavContext 的是同一份数据
+      hasMenu: menus ? (code) => menus.has(code) : undefined,
       vendorScoped: VENDOR_USERS.has(role.user),
     }
     ctxByRole.set(role.user, ctx)
@@ -131,7 +179,7 @@ async function main() {
   // A4：po1 隐藏 6 类（用例库/测试计划/测试报告/分支策略/价值流 + 管理后台）
   const po1MustHide = ['用例库', '测试计划', '测试报告', '分支策略', '价值流', ...ADMIN_GROUP_LABELS]
   const po1Leaked = po1MustHide.filter((l) => !hidden('po1', l))
-  if (po1Leaked.length === 0) ok('po1 隐藏 6 类入口（用例库/测试计划/测试报告/分支策略/价值流/管理后台 9 项）')
+  if (po1Leaked.length === 0) ok(`po1 隐藏 6 类入口（用例库/测试计划/测试报告/分支策略/价值流/管理后台 ${ADMIN_GROUP_LABELS.length} 项）`)
   else bad(`po1 仍可见本应隐藏的入口: ${po1Leaked.join('、')}`,
     'po1（SUB_BUSINESS_LEADER）没有 case:manage/plan:manage/report:*/CCODE_POLICY_VIEW/FLOW_VIEW/org:manage')
 
@@ -164,7 +212,7 @@ async function main() {
   // integration/metric/audit 这些码；「流程定义」对 PMO 是正常能力，不算越权）
   const pmDenied = ['分支策略', ...ADMIN_GROUP_LABELS.filter((l) => l !== '流程定义')]
   const pmLeaked = pmDenied.filter((l) => !hidden('pm', l))
-  if (pmLeaked.length === 0) ok('pm 隐藏 分支策略 + 8 个后台入口（仅保留流程定义）')
+  if (pmLeaked.length === 0) ok(`pm 隐藏 分支策略 + ${ADMIN_GROUP_LABELS.length - 1} 个后台入口（仅保留流程定义）`)
   else bad(`pm 仍可见: ${pmLeaked.join('、')}`, 'PMO 没有 CCODE_POLICY_VIEW/org:manage/tenant:manage/apiclient:manage/integration:manage/metric:manage/audit:view')
 
   // A11：pm 可见 版本计划/我的待办/流程定义（workflow:manage 在 PMO 的权限清单里）
@@ -174,18 +222,18 @@ async function main() {
     '版本计划对 PMO 是 ALLOW；我的待办是 AUTHENTICATED；流程定义来自 workflow:manage')
 
   // A12：tl1 隐藏 6 个「组织级」后台项、可见 需求池 + 指标字典（metric:manage）
-  const orgOnly = ['组织与租户', '用户与角色', '厂商与域', '权限矩阵', 'API 客户端', '集成配置']
+  const orgOnly = ORG_ONLY_LABELS
   const tl1Leaked = orgOnly.filter((l) => !hidden('tl1', l))
   if (tl1Leaked.length === 0 && visible('tl1', '需求池') && visible('tl1', '指标字典')) {
-    ok('tl1 隐藏 6 个组织级后台入口、可见 需求池/指标字典')
+    ok(`tl1 隐藏 ${orgOnly.length} 个组织级后台入口、可见 需求池/指标字典`)
   } else {
     bad(`tl1 仍可见: ${tl1Leaked.join('、')}；缺可见: ${['需求池', '指标字典'].filter((l) => !visible('tl1', l)).join('、')}`,
       'TEAM_LEADER 无 org:manage/apiclient:manage/integration:manage；需求池 AUTHENTICATED、指标字典 metric:manage')
   }
 
-  // A13：vendor1 隐藏 用例库（internalOnly）+ 6 个组织级后台项
+  // A13：vendor1 隐藏 用例库（internalOnly）+ orgOnly 个组织级后台项
   const vendorLeaked = ['用例库', ...orgOnly].filter((l) => !hidden('vendor1', l))
-  if (vendorLeaked.length === 0) ok('vendor1 隐藏 用例库（internalOnly）+ 6 个组织级后台入口')
+  if (vendorLeaked.length === 0) ok(`vendor1 隐藏 用例库（internalOnly）+ ${orgOnly.length} 个组织级后台入口`)
   else bad(`vendor1 仍可见: ${vendorLeaked.join('、')}`,
     '厂商账号不作用例：用例库 nav 项 internalOnly + 路由 meta.internalOnly 双重拦截')
 
@@ -200,6 +248,42 @@ async function main() {
   } else {
     bad(`vendor1 看不到: ${['需求池', '缺陷'].filter((l) => !visible('vendor1', l)).join('、')}；可见数越界角色: ${rangeBad.join('、')}`,
       '厂商账号仍应看到需求池/缺陷；可见数越界通常意味着 AUTHENTICATED 哨兵判定顺序被打乱')
+  }
+
+  // A15：/auth/me/permissions 的 menus 集合 = 36 个页面码（r18 的 MENU 层已生效）
+  const adminMenus = menusByRole.get('admin')
+  const adminEpoch = epochByRole.get('admin')
+  if (adminMenus && adminMenus.size === 36) {
+    ok(`admin 的 menus 集合 = 36 个页面码（epoch=${adminEpoch}，MENU 层与 FUNCTION 同源）`)
+  } else if (!adminMenus) {
+    bad('admin 拿不到 /auth/me/permissions 的 menus 集合',
+      'T4 落地后 login 响应须带 epoch + menus（TECHNICAL §7）：否则前端只能按功能码推页面，三层授权形同两层')
+  } else {
+    bad(`admin 的 menus 集合只有 ${adminMenus.size} 个页面码（应 36）`,
+      'RbacSeeder 的 MENU 行必须覆盖 10 角色 × 36 页；缺行 = 该页面永远不可见（s0/s2 会同时红）')
+  }
+
+  // A16：页面码不额外挡人 —— 双条件可见集与「只按功能码」逐角色完全相同。
+  // 前提是 MENU 档位 = max(绑定功能码)（TECHNICAL §3.3）：若这里出现差异，说明 nav 的
+  // functionCode 与 MenuRegistry 的 functionCodes 不是同一组码，先修注册表再谈 UI。
+  {
+    const diffs = []
+    for (const role of ROLES) {
+      const ctx = ctxByRole.get(role.user)
+      const double = new Set(sidebar.filter((it) => navVisible(it, ctx)).map((it) => it.label))
+      const single = new Set(sidebar.filter((it) => navVisibleByFunction(it, ctx)).map((it) => it.label))
+      const onlyDouble = [...single].filter((l) => !double.has(l))
+      const onlySingle = [...double].filter((l) => !single.has(l))
+      if (onlyDouble.length || onlySingle.length) {
+        diffs.push(`${role.user}(页面码多挡=[${onlyDouble.join(',')}] 页面码放行=[${onlySingle.join(',')}])`)
+      }
+    }
+    if (diffs.length === 0) {
+      ok('7 角色的双条件可见集与单功能码可见集一致（MENU = max(绑定功能码)，页面码不额外挡人）')
+    } else {
+      bad(`页面码与功能码判定不一致：${diffs.join('；')}`,
+        'nav 的 functionCode 必须取自该页面在 MenuRegistry 的 functionCodes；不一致时 MENU 档位与 nav 判据会永久打架')
+    }
   }
 
   const countsFile = process.env.ACCESS_COUNTS

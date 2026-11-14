@@ -140,6 +140,23 @@
   --w-mr-comments: 420px; /* MR 评论区内滚高度 */
   --w-drawer-link: 560px;
 
+  /* ---- r18 三层授权：角色列表 + 授权页（DESIGN §5，只增不改） ---- */
+  /* 1440 正文 1024 = 左树 320 + gap 12 + 右栏 692（右栏内容 660） */
+  --w-perm-tree: 320px;
+  --w-perm-panel: 692px;
+  --w-perm-act: 240px; /* 动作列最小宽 */
+  --w-perm-endpoint: 136px; /* 端点列（<1440 隐藏） */
+  --w-perm-risk: 44px; /* 高危列 */
+  --w-perm-level: 168px; /* 三档列占位 */
+  --w-three-state: 164px; /* 三档控件宽（3×52 + 2×3 + 1） */
+  --h-three-state: 30px;
+  --h-action-row: 52px;
+  --h-save-bar: 56px; /* 保存条（页面 padding-bottom 72） */
+  --perm-card-h: calc(100vh - 288px); /* 两栏卡片高，页面侧加 min-height: 480px */
+  --w-role-code: 180px; /* 角色表编码列 */
+  --perm-half: #c77700; /* 半选琥珀点 */
+  --perm-lock: #86909c; /* 锁图标（装饰，不承载文字） */
+
   /* ---- 字体 ---- */
   --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

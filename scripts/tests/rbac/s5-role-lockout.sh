@@ -116,11 +116,14 @@ fi
 
 if (( user_created )); then
     login_as "$TMP_USER" 'Passw0rd!' >/dev/null
-    BEFORE="$(probe_status)"
+    BEFORE="$(probe_settle allow)"
 else
     BEFORE="000"
 fi
 
+# 停用必须由管理员发起：上一步的 login_as 已把 API_TOKEN 换成探针用户，
+# 不切回来测到的就是「探针用户 403」而不是「停用是否即时失权」。
+admin_login >/dev/null
 api_call PATCH "/api/req/admin/roles/${ROLE_ID}/status" '{"status":"DISABLED"}' >/dev/null
 DISABLED_CODE="${HTTP_CODE:-000}"
 if [[ "${DISABLED_CODE}" == "200" ]]; then
@@ -131,7 +134,7 @@ fi
 
 if (( user_created )); then
     login_as "$TMP_USER" 'Passw0rd!' >/dev/null
-    AFTER="$(probe_status)"
+    AFTER="$(probe_settle 403)"
     ROWS="$(db_q "SELECT COUNT(*) FROM sys_user_role ur JOIN sys_role r ON r.id = ur.role_id
                     WHERE r.code = '${CODE}'" | head -n1)"
     if [[ "${BEFORE}" != "403" && "${AFTER}" == "403" && "${ROWS:-0}" -ge 1 ]]; then
@@ -143,6 +146,7 @@ if (( user_created )); then
 fi
 
 # ---------------------------------------------------------------- 7. 有用户不可删
+admin_login >/dev/null   # 6 的前置探针把 token 换成了探针用户，管理面动作一律先切回管理员
 api_call DELETE "/api/req/admin/roles/${ROLE_ID}" >/dev/null
 DEL_IN_USE="${HTTP_CODE:-000}"
 DEL_BODY="$(printf '%s' "$HTTP_BODY" | jq -r '.code // empty')"
@@ -154,6 +158,7 @@ else
 fi
 
 # ---------------------------------------------------------------- 8. 内置角色不可删/停
+admin_login >/dev/null
 ADMIN_ID="$(role_id_of PLATFORM_ADMIN)"
 api_call DELETE "/api/req/admin/roles/${ADMIN_ID}" >/dev/null
 B1="$(printf '%s' "${HTTP_CODE:-000}|$(printf '%s' "$HTTP_BODY" | jq -r '.code // empty')")"
@@ -171,8 +176,9 @@ ADMIN_ALLOW_BEFORE="$(db_q "SELECT COUNT(*) FROM sys_role_permission p JOIN sys_
       WHERE r.code = 'PLATFORM_ADMIN' AND p.access <> 'DENY'" | head -n1)"
 ADMIN_ORIG="$(grants_of "$ADMIN_ID")"
 EMPTY="$(printf '%s' "$ADMIN_ORIG" | jq -c 'map(.access = "DENY")')"
-LOCK_CODE="$(put_grants "$ADMIN_ID" "$EMPTY")"
-LOCK_ERR="$(printf '%s' "$HTTP_BODY" | jq -r '.code // empty')"
+LOCK_RAW="$(put_grants_code "$ADMIN_ID" "$EMPTY")"
+LOCK_CODE="${LOCK_RAW%%|*}"
+LOCK_ERR="${LOCK_RAW#*|}"
 ADMIN_ALLOW_AFTER="$(db_q "SELECT COUNT(*) FROM sys_role_permission p JOIN sys_role r ON r.id = p.role_id
       WHERE r.code = 'PLATFORM_ADMIN' AND p.access <> 'DENY'" | head -n1)"
 if [[ "${LOCK_CODE}" == "409" && "${LOCK_ERR}" == "ADMIN_LOCKOUT_RISK" &&
@@ -186,8 +192,8 @@ fi
 # ---------------------------------------------------------------- 10. 删除干净角色
 api_call PATCH "/api/req/admin/roles/${ROLE_ID}/status" '{"status":"ACTIVE"}' >/dev/null
 if (( user_created )); then
-    UID="$(user_id_of "$TMP_USER")"
-    [[ -n "${UID}" && "${UID}" != "null" ]] && api_call PATCH "/api/req/admin/users/${UID}/status" '{"status":"DISABLED"}' >/dev/null
+    TMP_UID="$(user_id_of "$TMP_USER")"
+    [[ -n "${TMP_UID}" && "${TMP_UID}" != "null" ]] && api_call PATCH "/api/req/admin/users/${TMP_UID}/status" '{"status":"DISABLED"}' >/dev/null
     db_q "DELETE FROM sys_user_role WHERE role_id = ${ROLE_ID}" >/dev/null
 fi
 DEL_CODE="$(api_call DELETE "/api/req/admin/roles/${ROLE_ID}" >/dev/null; printf '%s' "${HTTP_CODE:-000}")"

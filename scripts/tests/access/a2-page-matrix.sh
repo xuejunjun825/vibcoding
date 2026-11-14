@@ -50,6 +50,10 @@ PAGE_ENDPOINTS=(
     "/api/deliver/reports?page=1&size=5"
     "/api/deliver/reports/datasets"
 )
+# r18：准入主体从「功能码」换成「页面码」（MENU 层）。同一页面的功能码仍参与
+# 双条件（前端菜单），但**服务端拦人靠页面码**——所以这里的第二列写页面码，
+# 状态矩阵本身不变：页面码由 max(绑定功能码) 推导，单码页面与 r17 逐格一致。
+PAGE_CODES=("req.pool" "req.release" "me.approvals" "test.plans" "code.policies" "ana.portal" "ana.dashboard" "ana.reports" "ana.reports")
 PAGE_GUARDS=("仅认证" "release:plan" "仅认证" "plan:manage" "CCODE_POLICY_VIEW" "PORTAL_VIEW" "PORTAL_VIEW" "REPORT_VIEW" "REPORT_VIEW")
 ROLES=(admin pm tl1 po1 dev1 qa1 vendor1)
 
@@ -64,8 +68,11 @@ expected_code() {
 
 # =====================================================================
 section "9 页 × 7 角色：精确状态码（58 ✅ / 5 ⛔）"
+FORBIDDEN_SEEN=0
+FORBIDDEN_BAD=""
 for i in "${!PAGE_LABELS[@]}"; do
-    printf '\n  \033[1m%s\033[0m（%s，守码 %s）\n' "${PAGE_LABELS[$i]}" "${PAGE_ENDPOINTS[$i]}" "${PAGE_GUARDS[$i]}"
+    printf '\n  \033[1m%s\033[0m（%s，隐藏页面 %s / 功能码 %s）\n' "${PAGE_LABELS[$i]}" \
+        "${PAGE_ENDPOINTS[$i]}" "${PAGE_CODES[$i]}" "${PAGE_GUARDS[$i]}"
     for role in "${ROLES[@]}"; do
         role_pass="Passw0rd!"
         [[ "$role" == "admin" ]] && role_pass="Admin@12345"
@@ -78,10 +85,30 @@ for i in "${!PAGE_LABELS[@]}"; do
             pass "$desc"
         else
             fail "$desc（实际 ${HTTP_CODE}: $(printf '%s' "$HTTP_BODY" | head -c 200)）" \
-                "矩阵见 TECHNICAL §5：⛔ 必须 403（200 也算红），✅ 必须 200；守码 ${PAGE_GUARDS[$i]}"
+                "矩阵见 TECHNICAL §5：⛔ 必须 403（200 也算红），✅ 必须 200；页面码 ${PAGE_CODES[$i]}"
+        fi
+        # r18 契约：403 必须说清是谁拦的（detail.page / detail.access），否则排障只能猜
+        if [[ "$HTTP_CODE" == "403" ]]; then
+            FORBIDDEN_SEEN=$((FORBIDDEN_SEEN + 1))
+            got_page="$(jget "$HTTP_BODY" '.detail.page // empty' 2>/dev/null || true)"
+            got_access="$(jget "$HTTP_BODY" '.detail.access // empty' 2>/dev/null || true)"
+            got_code="$(jget "$HTTP_BODY" '.code // empty' 2>/dev/null || true)"
+            if [[ -z "$got_page" || "$got_access" != "DENY" || "$got_code" != "FORBIDDEN" ]]; then
+                FORBIDDEN_BAD="${FORBIDDEN_BAD} ${role}:${PAGE_LABELS[$i]}(${got_code}/${got_page:-<无 page>}/${got_access:-<无 access>})"
+            fi
         fi
     done
 done
+
+# 单独一条：5 个 ⛔ 的响应体都自带 page 与 DENY，前端与审计都靠这两个字段定位
+if [[ "$FORBIDDEN_SEEN" -eq 0 ]]; then
+    fail "403 响应契约：一个 403 样本都没采到" "矩阵若全绿就没有 ⛔ 格，说明页面准入被放开了（AC-5）"
+elif [[ -z "$FORBIDDEN_BAD" ]]; then
+    pass "403 响应契约：${FORBIDDEN_SEEN} 个 ⛔ 格全部带 code=FORBIDDEN + detail.page + detail.access=DENY"
+else
+    fail "403 响应体缺 page/access 或 code 不是 FORBIDDEN:${FORBIDDEN_BAD}" \
+        "TECHNICAL §6.4：detail 必须带 page/action/access/method/path，前端据此定位、审计据此留痕"
+fi
 
 # =====================================================================
 printf '\n'
