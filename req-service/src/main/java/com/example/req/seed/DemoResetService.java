@@ -149,10 +149,21 @@ public class DemoResetService {
      * 调坏（例如把 {@code audit:view} 设成 DENY），下次演示就少了一整块功能，而它不会报错。
      * 重置的口径因此是<b>回到预设</b>：先按租户删掉全部授权行，再用
      * {@link RbacSeeder#preset} 这一处公式写回，于是「种子派生」只有一份实现。</p>
+     *
+     * <p>已是预设就<b>不写</b>：{@link RbacSeeder#driftCells} 逐格比对（同一公式），差异 0 且没有
+     * 自定义角色时直接返回。重置的语义是「回到预设」，本来就已在预设，再删 1680 行、插 1680 行
+     * 只是把主机写满——那两次整表重写正是 reset 偶发超时的写放大来源。跳过不影响计数与不变量，
+     * 所以连续两次 reset 的 counts 仍逐键相等（s8、platform-demo-reset.sh 的幂等判据不变）。</p>
      */
     private void restoreRoleGrants(long tenantId) {
         long customRoles = db.count(
                 "SELECT COUNT(*) FROM sys_role WHERE tenant_id = ? AND builtin = 0", tenantId);
+        long drift = rbacSeeder.driftCells(tenantId);
+        if (customRoles == 0 && drift == 0) {
+            log.info("demo-reset: tenant={} 授权已是预设（差异 0 格、自定义角色 0 个），跳过重写",
+                    tenantCode);
+            return;
+        }
         // 绑定先删：sys_user_role 的 role_id 指向即将消失的自定义角色，留着就是脏引用。
         db.update("DELETE ur FROM sys_user_role ur JOIN sys_role r ON r.id = ur.role_id"
                 + " WHERE r.tenant_id = ? AND r.builtin = 0", tenantId);
@@ -162,8 +173,8 @@ public class DemoResetService {
         long wiped = db.update("DELETE FROM sys_role_permission WHERE tenant_id = ?", tenantId);
         db.update("DELETE FROM sys_role WHERE tenant_id = ? AND builtin = 0", tenantId);
         int rewritten = rbacSeeder.seedTenant(tenantId);
-        log.info("demo-reset: tenant={} 授权回到预设（自定义角色 {} 个、旧授权 {} 行 → 重写 {} 行）",
-                tenantCode, customRoles, wiped, rewritten);
+        log.info("demo-reset: tenant={} 授权回到预设（自定义角色 {} 个、差异 {} 格、旧授权 {} 行 → 重写 {} 行）",
+                tenantCode, customRoles, drift, wiped, rewritten);
     }
 
     /**

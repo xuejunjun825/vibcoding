@@ -778,10 +778,25 @@ export interface GrantWarning {
   message?: string | null
 }
 
+/**
+ * 未绑定任何页面的功能码分组（r20，`GET /admin/roles/{id}/permissions` 的**顶层**键）。
+ *
+ * 这 30 个 FUNCTION 码没有页面承载（没有 page.functionCodes 引用它们），却仍能被角色授权，
+ * 且 `req.action.approve` / `deploy.action.force_release` / `wiki.action.edit` 等动作正挂在它们上面。
+ * 放进 `modules[]` 会伪造页面语义（把 tree/s1/s2 的页面集合撑成 37、168 变 169），所以它是独立分组、
+ * 与 `modules` 平级。字段可选：旧后端不带该键时按 0 条处理，避免旧 fixture / 旧桩一起崩。
+ */
+export interface UnboundFunctionGroup {
+  code: string
+  name: string
+  functions: FunctionGrant[]
+}
+
 export interface RoleGrantView {
   role: RoleRow
   epoch: number
   modules: ModuleGrant[]
+  unboundFunctions?: UnboundFunctionGroup | null
   warnings: GrantWarning[]
 }
 

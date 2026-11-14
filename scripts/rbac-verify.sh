@@ -4,13 +4,16 @@
 # 分段：
 #   s0 迁移与计数        s1 注册表三向比对     s2 种子逐格等价     s3 三序判定
 #   s4 缓存与 epoch      s5 角色 CRUD/防锁死   s6 人员与组织       s7 负向 9 例
-#   s8 审计与 reset      s9 动作声明覆盖率
+#   s8 审计与 reset      s9 动作声明覆盖率     s2r 收尾：套件结束后库仍=预设（复用 s2）
 #
 # 每段自报 `sN <pass> <total>` 到 ${RBAC_COUNTS}；本脚本负责
 #   1) 每段下限（少于下限说明断言被删，门禁在缩水）
 #   2) 总数 >= 60（AC-21）
 #   3) PASS == TOTAL（全绿才算过）
-# 单个分段可单独跑：`bash scripts/rbac-verify.sh s3`（此时不校验总数下限，只给提示）。
+# s2r 是门禁级兜底：s3/s4/s7 都靠 trap 还原授权，任何一段漏还原（典型是备份口径少 30 行）
+# 都会让 s2r 红，而不是留给下一次运行去发现。它复用 s2 的脚本与阈值，只增断言不改判据。
+# 单个分段可单独跑：`bash scripts/rbac-verify.sh s3`（此时不校验总数下限，只给提示）；
+# `s2r` 也可单独跑：`bash scripts/rbac-verify.sh s2r`。
 set -uo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
@@ -18,7 +21,7 @@ RBAC_DIR="$ROOT/scripts/tests/rbac"
 RBAC_COUNTS="$(mktemp -t rbac-counts-XXXXXX)"
 export RBAC_COUNTS
 
-SEGMENTS=(s0 s1 s2 s3 s4 s5 s6 s7 s8 s9)
+SEGMENTS=(s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s2r)
 # 每段下限 = TECHNICAL §10.2 的断言数；删断言必须先改这里并说明理由，否则门禁静默缩水。
 segment_min() {
     case "$1" in
@@ -32,6 +35,7 @@ segment_min() {
         s7) echo 9 ;;   # AC-18 九例
         s8) echo 6 ;;   # 四类审计 + 无差异不写 + reset 幂等
         s9) echo 5 ;;   # 未保护写端点=0/白名单/只读/默认 fail-fast
+        s2r) echo 8 ;;  # 与 s2 同一套 1680/168/600/320/720/hash：套件结束库=预设
         *)  echo 0 ;;
     esac
 }
@@ -47,6 +51,7 @@ segment_file() {
         s7) echo "s7-negative-nine.sh" ;;
         s8) echo "s8-audit-reset.sh" ;;
         s9) echo "s9-declaration-coverage.mjs" ;;
+        s2r) echo "s2-seed-equivalence.sh" ;;
         *)  echo "" ;;
     esac
 }
@@ -56,7 +61,7 @@ if (( $# > 0 )) && [[ "$1" != "all" ]]; then
     SELECTED=()
     for arg in "$@"; do
         case "$arg" in
-            s[0-9]) SELECTED+=("$arg") ;;
+            s[0-9]|s[0-9]r) SELECTED+=("$arg") ;;
             *) die "未知分段: ${arg}（可用: ${SEGMENTS[*]} / all）" ;;
         esac
     done
@@ -89,10 +94,12 @@ for seg in "${SELECTED[@]}"; do
         continue
     fi
     printf '\n\033[1;36m==== %s · %s ====\033[0m\n' "$seg" "$(segment_file "$seg")"
+    # RBAC_SEGMENT 让复用同一脚本的段（s2 / s2r）在自己的 report_counts 里报对段名：
+    # 计数按段名归集，报错段名会让 s2r 的计数覆盖掉 s2 的计数，总数静默少一整段。
     if [[ "$file" == *.mjs ]]; then
-        node "$file" || RUN_FAILED=1
+        RBAC_SEGMENT="$seg" node "$file" || RUN_FAILED=1
     else
-        bash "$file" || RUN_FAILED=1
+        RBAC_SEGMENT="$seg" bash "$file" || RUN_FAILED=1
     fi
 done
 

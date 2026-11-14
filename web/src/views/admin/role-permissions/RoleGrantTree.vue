@@ -1,6 +1,17 @@
+<script lang="ts">
+/**
+ * 选中「未绑定页面的功能码」分组时 `selected` 的哨兵值（r20）。
+ *
+ * 页面码永远是 `module.page` 两段形式，不可能等于这个带双下划线的串，所以右栏只认一个
+ * `selected` 就能同时表达「某个页面」与「这个分组」，不必再加一条事件通道——
+ * 模块 / 页面级开关的 `set-page` / `set-module` 签名也不用动。
+ */
+export const UNBOUND_SELECTION = '__UNBOUND__'
+</script>
+
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import type { AccessLevel, ModuleGrant, PageGrant } from '@/api/types'
+import type { AccessLevel, FunctionGrant, ModuleGrant, PageGrant, UnboundFunctionGroup } from '@/api/types'
 import { draftKey } from './useRoleGrants'
 
 /**
@@ -17,6 +28,8 @@ const props = defineProps<{
   draft: Record<string, AccessLevel>
   selected: string
   onlyGranted: boolean
+  /** 顶层「未绑定页面的功能码」分组；旧后端 / 旧 fixture 不带该键时为 null（不渲染） */
+  unbound?: UnboundFunctionGroup | null
 }>()
 
 const emit = defineEmits<{
@@ -100,6 +113,66 @@ const rows = computed(() =>
 /** 未过滤时的同构数据：模块计数按全量口径（I2），不受搜索/过滤影响 */
 const allModules = computed(() => props.modules)
 
+// ---------------------------------------------------------------- 未绑定页面的功能码（r20）
+
+/**
+ * 30 个不属任何页面的 FUNCTION 码。它们只能在这里被看到：
+ * 页面里的 `functionCodes` 只覆盖绑定到页面的 30 个，剩下 30 个（`req.fn.review`、
+ * `deploy.fn.force` 等派生动作的权源）不在任何页面节点下，漏渲染就是 r19 的「看不见的黑洞」。
+ */
+const unboundFunctions = computed<FunctionGrant[]>(() => props.unbound?.functions ?? [])
+const unboundTotal = computed(() => unboundFunctions.value.length)
+const unboundName = computed(() => props.unbound?.name ?? '未绑定页面的功能码')
+
+function fnAccess(code: string): AccessLevel {
+  return props.draft[draftKey('FUNCTION', code)] ?? 'DENY'
+}
+
+function accessLabel(access: AccessLevel): string {
+  return access === 'ALLOW' ? '允许' : access === 'RESTRICTED' ? '受限' : '拒绝'
+}
+
+const unboundGranted = computed(
+  () => unboundFunctions.value.filter((fn) => fnAccess(fn.code) !== 'DENY').length,
+)
+
+const unboundSelected = computed(() => props.selected === UNBOUND_SELECTION)
+
+/** 搜索命中：分组名或任一功能码；命中组名时保留全部 30 行，否则只留码命中的行 */
+const unboundNameHit = computed(
+  () =>
+    !!keyword.value &&
+    (unboundName.value.toLowerCase().includes(keyword.value) ||
+      (props.unbound?.code ?? '').toLowerCase().includes(keyword.value)),
+)
+
+const visibleUnbound = computed(() =>
+  unboundFunctions.value.filter((fn) => {
+    if (keyword.value && !fn.code.toLowerCase().includes(keyword.value) && !unboundNameHit.value) return false
+    // 「仅看已授权」下只留非 DENY 的码；30 个全 DENY 时整组连节点一起隐藏
+    if (props.onlyGranted && fnAccess(fn.code) === 'DENY') return false
+    return true
+  }),
+)
+
+const showUnbound = computed(() => unboundTotal.value > 0 && visibleUnbound.value.length > 0)
+
+function isUnboundOpen(): boolean {
+  if (keyword.value) return true
+  return !collapsed.value.has(UNBOUND_SELECTION)
+}
+
+function toggleUnbound(): void {
+  const next = new Set(collapsed.value)
+  if (next.has(UNBOUND_SELECTION)) next.delete(UNBOUND_SELECTION)
+  else next.add(UNBOUND_SELECTION)
+  collapsed.value = next
+}
+
+function selectUnbound(): void {
+  emit('update:selected', UNBOUND_SELECTION)
+}
+
 function isOpen(moduleCode: string): boolean {
   // 搜索命中时父级自动展开（I3）；清空搜索后回到用户自己的展开态
   if (keyword.value) return true
@@ -159,8 +232,8 @@ watch(
         v-model="query"
         class="tree__search"
         type="search"
-        placeholder="页面 / 页面码 / 动作"
-        aria-label="搜索页面、页面码或动作"
+        placeholder="页面 / 页面码 / 动作 / 功能码"
+        aria-label="搜索页面、页面码、动作或功能码"
       />
     </div>
 
@@ -219,7 +292,52 @@ watch(
         </template>
       </div>
 
-      <p v-if="rows.length === 0" class="tree__empty">
+      <!-- 未绑定页面的功能码（30）：模块列表之后的独立分组，点击整组把右栏切到功能码表 -->
+      <div v-if="showUnbound" class="tree__group tree__group--unbound" role="group">
+        <div
+          class="node node--module node--unbound"
+          :class="{ 'is-selected': unboundSelected }"
+          :data-page="UNBOUND_SELECTION"
+          role="treeitem"
+          tabindex="0"
+          :aria-expanded="isUnboundOpen() ? 'true' : 'false'"
+          :aria-selected="unboundSelected ? 'true' : 'false'"
+          @click="selectUnbound"
+          @keydown.enter.prevent="selectUnbound"
+          @keydown.space.prevent="toggleUnbound"
+        >
+          <span
+            class="node__twist"
+            :class="{ 'is-open': isUnboundOpen() }"
+            aria-hidden="true"
+            @click.stop="toggleUnbound"
+            >▸</span
+          >
+          <span class="node__name">{{ unboundName }}</span>
+          <span class="node__count">{{ unboundGranted }}/{{ unboundTotal }}</span>
+        </div>
+
+        <template v-if="isUnboundOpen()">
+          <div
+            v-for="fn in visibleUnbound"
+            :key="fn.code"
+            class="node node--fn"
+            :class="{ 'is-selected': unboundSelected }"
+            role="treeitem"
+            tabindex="0"
+            :aria-selected="unboundSelected ? 'true' : 'false'"
+            @click="selectUnbound"
+            @keydown.enter.prevent="selectUnbound"
+          >
+            <code class="node__code node__code--fn">{{ fn.code }}</code>
+            <span class="node__level" :class="`node__level--${fnAccess(fn.code).toLowerCase()}`">
+              {{ accessLabel(fnAccess(fn.code)) }}
+            </span>
+          </div>
+        </template>
+      </div>
+
+      <p v-if="rows.length === 0 && !showUnbound" class="tree__empty">
         {{ onlyGranted ? '当前角色还没有已授权的页面' : '没有匹配的页面' }}
       </p>
     </div>
@@ -276,6 +394,48 @@ watch(
 }
 .tree__group + .tree__group {
   margin-top: 2px;
+}
+/* 未绑定分组与页面树之间留一道分隔：它不是页面，语义上是另一类 subject */
+.tree__group--unbound {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--divider);
+}
+.node--unbound .node__name {
+  color: var(--text-title);
+}
+.node--unbound.is-selected {
+  background: var(--bg-selected);
+  box-shadow: inset 2px 0 0 var(--color-primary);
+}
+.node--fn {
+  height: 28px;
+  gap: 8px;
+  padding: 0 8px 0 22px;
+  font-size: 12px;
+}
+.node--fn.is-selected {
+  background: var(--bg-selected);
+}
+.node__code--fn {
+  flex: 1 1 auto;
+  max-width: none;
+  color: var(--text-body);
+}
+.node__level {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.node__level--allow {
+  color: var(--success-ink);
+}
+.node__level--restricted {
+  color: var(--warning-ink);
+}
+.node__level--deny {
+  color: var(--text-muted-aa);
 }
 .node {
   display: flex;

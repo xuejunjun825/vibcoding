@@ -1,9 +1,11 @@
 package com.example.req.seed;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.example.platform.contract.ActionRegistry;
 import com.example.platform.contract.MenuRegistry;
@@ -180,6 +182,59 @@ public class RbacSeeder {
                     PermissionMatrix.accessForAny(roleCode, action.functionCodes()).name()));
         }
         return rows;
+    }
+
+    /**
+     * 与预设逐格不同的格子数：缺行、多余行、档位不同都各计 1；恰好等于预设时为 0。
+     *
+     * <p>期望侧只来自 {@link #preset(String)}，不另写一段「SQL 版期望」：判差异与写回必须是同一个
+     * 公式，否则「seeder 认为已是预设、别处认为不是」这类分歧只能在重置后的行数上暴露。逐格口径与
+     * {@code s2-seed-equivalence.sh} 的 SQL 推导仍互为交叉验证——两边都由注册表派生，绑定关系一改，
+     * 两边同时红。</p>
+     *
+     * <p>只统计租户里<b>存在</b>的内置角色：低于当前版本的老租户可能少几个内置角色，
+     * {@link #seedTenant(long)} 也不会凭空补造它们，把缺失角色的 168 格算成差异只会让每次重置都退回
+     * 整表重写（正是本方法要消掉的写放大）。反方向的多余行（自定义角色、{@code role_id} 已不存在的
+     * 孤儿行）计入差异——它们同样不属于预设，且重置的整表口径正是要清掉它们。</p>
+     */
+    public long driftCells(long tenantId) {
+        Map<String, Long> roleIds = new LinkedHashMap<>();
+        for (Object[] row : db.rows("SELECT code, id FROM sys_role WHERE tenant_id = ? ORDER BY id",
+                tenantId)) {
+            roleIds.put(SysDb.asString(row[0]), SysDb.asLong(row[1]));
+        }
+        Map<String, String> expected = new LinkedHashMap<>();
+        for (String roleCode : PermissionMatrix.roles()) {
+            Long roleId = roleIds.get(roleCode);
+            if (roleId == null) {
+                continue;
+            }
+            for (Row row : preset(roleCode)) {
+                expected.put(cell(roleId, row.subjectType(), row.code()), row.access());
+            }
+        }
+        long drift = 0;
+        Set<String> stored = new HashSet<>();
+        for (Object[] row : db.rows("SELECT role_id, subject_type, subject_code, access"
+                + " FROM sys_role_permission WHERE tenant_id = ?", tenantId)) {
+            String key = cell(SysDb.asLong(row[0]), SysDb.asString(row[1]), SysDb.asString(row[2]));
+            stored.add(key);
+            String want = expected.get(key);
+            if (want == null || !want.equals(SysDb.asString(row[3]))) {
+                drift++;
+            }
+        }
+        for (String key : expected.keySet()) {
+            if (!stored.contains(key)) {
+                drift++;
+            }
+        }
+        return drift;
+    }
+
+    /** 一格授权：角色 + 层 + 主体码唯一确定一行（与 {@code uk_rp} 同粒度）。 */
+    private static String cell(long roleId, String subjectType, String code) {
+        return roleId + "|" + subjectType + "|" + code;
     }
 
     private int insertGrants(long tenantId, long roleId, List<Row> rows) {

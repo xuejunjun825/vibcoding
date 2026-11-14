@@ -14,30 +14,113 @@
 #
 # 不进 make test / platform-up / platform-seed（AC-14）：重置会删掉业务实例数据，
 # 只能由人（或演示前的一次手工动作）触发。
+#
+# 20261114-r20（BUG-3 / AC-9、AC-10）：失败必须可诊断、可重入——
+#   * 分类：transport（连接被重置/不可达/超时）/ api（4xx，服务端已应答但拒绝）/ assert（数据不符）；
+#   * 传输层失败立刻停：打印「停止项 + case + 已执行/未执行清单 + 重跑命令」，退出码恒非 0；
+#   * 断言层失败继续跑完（一次看全所有差异），末尾同样打印分类与清单；
+#   * 脚本内**不重试、不 sleep**：重试只发生在网关（仅幂等 GET、仅 1 次），脚本若静默重试
+#     会把「间歇失败」掩盖成「偶尔慢」。
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 FAIL=0
 CASE=0
+# 本脚本固定 57 项断言（AC-9 的「57/57」口径）。断言只增：新增/删除断言时同步改这里，
+# 末尾会校验实际执行数 == 声明数，漂移直接红——否则「57/57」会变成一句没人维护的祝福。
+TOTAL_CHECKS=57
+FAIL_TRANSPORT=0
+FAIL_API=0
+FAIL_ASSERT=0
+# 段清单只服务失败时的「未执行清单」：哪一段没跑到，就是那一段的检查全没执行。
+SECTIONS=("计数表与幂等" "库内复核" "接口复核" "可见性复核" "授权回预设")
+SECTION_IDX=0
 mkdir -p "$(run_log_dir)"
 
 pass() { CASE=$((CASE + 1)); printf '  \033[1;32mPASS\033[0m [%02d] %s\n' "$CASE" "$1"; }
 fail() { CASE=$((CASE + 1)); FAIL=$((FAIL + 1)); printf '  \033[1;31mFAIL\033[0m [%02d] %s\n' "$CASE" "$1"; printf '       修复: %s\n' "$2"; }
 
+section() { # section <1-based index>：打印段头，供失败清单定位「断在第几段」
+    SECTION_IDX="$1"
+    printf '\n\033[1m==> 段 %d/%d: %s\033[0m\n' "$SECTION_IDX" "${#SECTIONS[@]}" "${SECTIONS[$((SECTION_IDX - 1))]}"
+}
+
+# 失败分类：传输层（连接被重置/不可达/超时）→ transport；4xx → api；其余 → assert。
+# 只在「服务端/网络已经给了答案」的调用点使用；纯数据比对（db 查询）走 fail 即可。
+failure_case() {
+    case "${1:-}" in
+        000|502|503|504) printf 'transport'; return ;;
+    esac
+    # 用 grep 读尽整条流（不用 -q）：pipefail 下 -q 提前退出会让 printf 收 SIGPIPE(141)，
+    # 把「确实含 Connection reset」误判成 assert。
+    if printf '%s' "${2:-}" | grep -iE 'connection reset|connection refused|timed out|prematureclose|sockettimeoutexception' >/dev/null; then
+        printf 'transport'; return
+    fi
+    if [[ "${1:-}" =~ ^4[0-9][0-9]$ ]]; then printf 'api'; return; fi
+    printf 'assert'
+}
+
+unexecuted_list() {
+    local i out=""
+    for ((i = SECTION_IDX + 1; i <= ${#SECTIONS[@]}; i++)); do
+        out+="${out:+/}${SECTIONS[$((i - 1))]}"
+    done
+    printf '%s' "${out:-无（已是最后一段）}"
+}
+
+# fail_stop <停止项> <case> <http_code> <body> [提示]：传输层/致命错误的唯一出口。
+# 打印停止项、分类、已执行/未执行清单与重跑命令，然后恒 exit 1（不吞错、不重试）。
+fail_stop() {
+    local what="$1" kind="$2" code="${3:-?}" body="${4:-}" hint="${5:-}"
+    err "停止项: ${what}（case=${kind}，HTTP ${code}）"
+    case "${kind}" in
+        transport)
+            err "  归类: 传输层——网关/服务连接被重置或不可达，不是数据面问题"
+            err "  排查: logs/api-gateway.log 的 HttpClientConnect、logs/deliver-service.log 的 Thread starvation"
+            err "        先 make platform-up 或等 deliver JVM 恢复；重置幂等，恢复后可直接重跑" ;;
+        api)
+            err "  归类: 接口层——服务端已应答但拒绝了请求：$(printf '%s' "${body}" | head -c 300)" ;;
+        *)
+            err "  归类: 断言层——接口已应答，但内容与期望不符：$(printf '%s' "${body}" | head -c 300)" ;;
+    esac
+    if [[ -n "${hint}" ]]; then err "  ${hint}"; fi
+    err "已执行 ${CASE} 项（PASS $((CASE - FAIL)) / FAIL ${FAIL}）/ 未执行 $((TOTAL_CHECKS - CASE)) 项（共 ${TOTAL_CHECKS}）"
+    err "未执行清单: $(unexecuted_list)"
+    err "重跑: bash scripts/platform-demo-reset.sh（重置幂等，可直接重跑）"
+    exit 1
+}
+
+# fail_http <名称> <提示>：对刚返回的 HTTP_CODE/HTTP_BODY 分类后记账（不更新 CASE 之外的语义）。
+# 传输层直接停（后续检查已无意义），api/assert 记 FAIL 继续跑完，末尾统一汇总。
+fail_http() {
+    local label="$1" hint="$2" kind
+    kind="$(failure_case "${HTTP_CODE}" "${HTTP_BODY}")"
+    case "${kind}" in
+        transport) FAIL_TRANSPORT=$((FAIL_TRANSPORT + 1)); fail_stop "${label}" transport "${HTTP_CODE}" "${HTTP_BODY}" "${hint}" ;;
+        api)       FAIL_API=$((FAIL_API + 1)) ;;
+        *)         FAIL_ASSERT=$((FAIL_ASSERT + 1)) ;;
+    esac
+    fail "${label}（case=${kind}，HTTP ${HTTP_CODE}）" "${hint}"
+}
+
 # ---------------------------------------------------------------- 前置
 
+# 前置也算「停止项」：断栈时最先失败的就是这里，必须同样给出 case=transport 与重跑命令，
+# 而不是只丢一句「未就绪」。
 if ! req_ready; then
-    err "req-service 未就绪: ${REQ_URL}/internal/health"
-    err "修复: 先执行 make platform-up（重置复用演示栈，不隐式起栈、不 SKIP）"
-    exit 1
+    fail_stop "req-service 就绪 (${REQ_URL}/internal/health)" transport 000 "" \
+        "先执行 make platform-up（重置复用演示栈，不隐式起栈、不 SKIP）"
+fi
+if ! db_up; then
+    fail_stop "MySQL 就绪 (${PLATFORM_DB_HOST}:${PLATFORM_DB_PORT})" transport 000 "" \
+        "数据库不可达：先 make platform-up；重置的全部断言都要直连库复核"
 fi
 
 TENANT_CODE="${PLATFORM_TENANT:-t1}"
 TENANT_ID="$(db_q "SELECT id FROM sys_tenant WHERE code = '${TENANT_CODE}'" | head -n1)"
 if [[ -z "$TENANT_ID" ]]; then
-    err "租户 ${TENANT_CODE} 不存在"
-    err "修复: 先执行 make platform-seed（重置只清业务实例数据，不造账号/域/厂商）"
-    exit 1
+    fail_stop "租户 ${TENANT_CODE} 存在" assert "${HTTP_CODE:-?}" "" \
+        "先执行 make platform-seed（重置只清业务实例数据，不造账号/域/厂商）"
 fi
 
 # r16 演示报表（AC-1/AC-2）：脚本侧的规范名集合。服务端 DemoFixture.REPORT_NAMES 是另一份
@@ -52,12 +135,15 @@ DEMO_REPORT_NAMES_EXPECTED="$(jq -rn --args '$ARGS.positional | sort | join(",")
 reset_once() {
     internal_call POST "$REQ_URL" /internal/demo-reset
     if [[ "${HTTP_CODE}" != "200" ]]; then
-        err "POST /internal/demo-reset 失败 (HTTP ${HTTP_CODE}): $(printf '%s' "${HTTP_BODY}" | head -c 400)"
-        err "修复: 404 = PLATFORM_SEED_ENABLED=false（platform-up 已置 true）；403 = X-Internal-Token 不匹配；"
-        err "      409 DEMO_RESET_INVARIANT = 不变量不满足，事务已整体回滚（按上面列出的差异改 DemoFixture）"
-        exit 1
+        local kind
+        kind="$(failure_case "${HTTP_CODE}" "${HTTP_BODY}")"
+        fail_stop "POST /internal/demo-reset" "${kind}" "${HTTP_CODE}" "${HTTP_BODY}" \
+            "404 = PLATFORM_SEED_ENABLED=false（platform-up 已置 true）；403 = X-Internal-Token 不匹配；409 DEMO_RESET_INVARIANT = 不变量不满足，事务已整体回滚（按响应差异改 DemoFixture）"
     fi
-    json_ok "${HTTP_BODY}" || { err "响应不是 JSON: $(printf '%s' "${HTTP_BODY}" | head -c 300)"; exit 1; }
+    if ! json_ok "${HTTP_BODY}"; then
+        fail_stop "POST /internal/demo-reset 响应是 JSON" assert "${HTTP_CODE}" "${HTTP_BODY}" \
+            "响应不是 JSON：先看 req-service.log，再确认网关/反代没有截断包体"
+    fi
 }
 
 render_table() {
@@ -71,6 +157,7 @@ render_table() {
 # 保留策略只有一份实现：DemoFixture.DELETE_ORDER(+keepFilter)。脚本不再拍「重置前快照」
 # 再比「重置后相等」——那是 bash 里的第二套保留判断，会和服务端序列给出矛盾结论。
 
+section 1
 log "第一次重置（tenant=${TENANT_CODE}）"
 reset_once
 FIRST="${HTTP_BODY}"
@@ -134,6 +221,7 @@ NOTIFY="$(printf '%s' "${C1}" | jq -r '.notifications // empty')"
     && pass "通知 ${NOTIFY} 条（精确 4 条，修复前是 99+）" \
     || fail "通知 ${NOTIFY:-<缺失>} 条，期望 4" "DemoFixture.NOTIFICATION_COUNT = 4：通知必须精确，不是「不超过」"
 
+section 2
 # ---------------------------------------------------------------- 库内复核（db_q 口径）
 
 DEMO_REQS="$(db_count requirement "tenant_id = ${TENANT_ID} AND code LIKE 'DEMO-R-%'")"
@@ -225,18 +313,32 @@ DB_ENV_ROWS="$(db_count test_env "tenant_id = ${TENANT_ID}")"
     || fail "种子行被误删：流程定义 ${DB_WF_ROWS:-0}（期望≥4）/ 模块 ${DB_MODULE_ROWS:-0}（期望≥3）/ 环境 ${DB_ENV_ROWS:-0}（期望≥1）" \
             "这三张表的种子由 SeedService 种下、重置不重放：删了页面就是空白（D-02 的故障形态）"
 
+# login_or_stop <user> <password> <label>：登录失败先分类——网关不可达(000/502/503)是传输层，
+# 必须当场停并给出重跑命令，而不是记一条「登录失败」再继续跑到下一个接口才停。
+login_or_stop() {
+    local user="$1" pwd="$2" label="$3"
+    platform_login "${TENANT_CODE}" "${user}" "${pwd}" && return 0
+    if [[ "$(failure_case "${HTTP_CODE:-000}" "${HTTP_BODY:-}")" == "transport" ]]; then
+        fail_stop "${label} 登录（网关不可达）" transport "${HTTP_CODE:-000}" "${HTTP_BODY:-}" \
+            "登录就 000 说明网关或 req-service 未起：先 make platform-up 再重跑"
+    fi
+    fail "${label} 登录失败（HTTP ${HTTP_CODE:-?}）" "账号由 platform-seed 创建；重置不删账号"
+    return 1
+}
+
+section 3
 # 演示页的数据面：重置脚本自称「可直接演示」，这两个页面必须真的有数据
-platform_login "${TENANT_CODE}" admin 'Admin@12345' || fail "admin 登录失败" "账号由 platform-seed 创建；重置不删账号"
+login_or_stop admin 'Admin@12345' admin || true
 api_call GET "/api/req/code/policies"
 POLICY_ROWS="$(printf '%s' "${HTTP_BODY}" | jq 'length' 2>/dev/null || echo 0)"
 [[ "${HTTP_CODE}" == "200" && "${POLICY_ROWS:-0}" -ge 1 ]] \
     && pass "分支策略页接口非空（${POLICY_ROWS} 条）" \
-    || fail "分支策略页接口为空（HTTP ${HTTP_CODE}，${POLICY_ROWS:-0} 条）" "重置后 /code-policies 必须是可演示状态"
+    || fail_http "分支策略页接口为空（${POLICY_ROWS:-0} 条）" "重置后 /code-policies 必须是可演示状态"
 api_call GET "/api/deliver/test-executors"
 EXEC_ROWS="$(jget "${HTTP_BODY}" '.total' 2>/dev/null || echo 0)"
 [[ "${HTTP_CODE}" == "200" && "${EXEC_ROWS:-0}" == "2" ]] \
     && pass "执行器页接口恰 2 条（${EXEC_ROWS} 条）" \
-    || fail "执行器页接口 (HTTP ${HTTP_CODE}，${EXEC_ROWS:-0} 条)" "重置后 /test-executors 必须恰为保留的两条执行器"
+    || fail_http "执行器页接口（${EXEC_ROWS:-0} 条）" "重置后 /test-executors 必须恰为保留的两条执行器"
 
 # r15：报表列表与门户配置直读 DB（不吃 deliver 的 AnalyticsCache），所以适合做 API 级复核
 # r16：列表不再是空态——重置回填 2 张演示报表，计数与名称集合都要对（AC-1/AC-2）；名称集合
@@ -246,7 +348,7 @@ REPORT_TOTAL="$(jget "${HTTP_BODY}" '.total' 2>/dev/null || echo '')"
 REPORT_NAMES="$(printf '%s' "${HTTP_BODY}" | jq -r '[.items[].name] | sort | join(",")' 2>/dev/null || echo '')"
 [[ "${HTTP_CODE}" == "200" && "${REPORT_TOTAL:-x}" == "2" && "${REPORT_NAMES}" == "${DEMO_REPORT_NAMES_EXPECTED}" ]] \
     && pass "报表列表 total = 2，名称集合 = 两张演示报表（${REPORT_NAMES}）" \
-    || fail "报表列表 total = ${REPORT_TOTAL:-<缺失>}，名称集合 '${REPORT_NAMES:-<空>}'，期望 2 / '${DEMO_REPORT_NAMES_EXPECTED}'（HTTP ${HTTP_CODE}）" \
+    || fail_http "报表列表 total = ${REPORT_TOTAL:-<缺失>}，名称集合 '${REPORT_NAMES:-<空>}'，期望 2 / '${DEMO_REPORT_NAMES_EXPECTED}'" \
             "回填的名称必须与 DemoFixture.REPORT_NAMES 逐字相同，且不得多回填第三张"
 
 # AC-3/AC-4：两张表开箱就能出数——run 走 codec.read(definition_json) + 缓存 + 聚合，形状写错
@@ -268,7 +370,7 @@ if [[ -n "${REPORT_A_ID}" ]]; then
     A_OK="$(printf '%s' "${HTTP_BODY}" | jq -r '((.rowCodes | length) >= 1) and ((.colHeaders | length) >= 2) and ((.total.values[0] // 0) > 0)' 2>/dev/null || echo false)"
     [[ "${HTTP_CODE}" == "200" && "${A_OK}" == "true" ]] \
         && pass "报表 A（${DEMO_REPORTS[0]}）run 出数：rowCodes ${A_ROWS} 行 / colHeaders ${A_COLS} 列 / 首度量合计 ${A_FIRST}" \
-        || fail "报表 A（${DEMO_REPORTS[0]}）run 异常（HTTP ${HTTP_CODE}）：rowCodes ${A_ROWS:-?} / colHeaders ${A_COLS:-?} / total.values[0] ${A_FIRST:-?}" \
+        || fail_http "报表 A（${DEMO_REPORTS[0]}）run 异常：rowCodes ${A_ROWS:-?} / colHeaders ${A_COLS:-?} / total.values[0] ${A_FIRST:-?}" \
                 "definition_json 必须能被 ReportDefinitionCodec.read 反序列化；rows=[domain]/columns=[status] 在演示需求集上应各有值"
 else
     fail "报表 A（${DEMO_REPORTS[0]}）不在列表里，无法 run" "先修回填：名称与 DemoFixture.REPORT_NAMES 必须逐字相同"
@@ -284,7 +386,7 @@ if [[ -n "${REPORT_B_ID}" ]]; then
     B_OK="$(printf '%s' "${HTTP_BODY}" | jq -r '((.rowCodes | length) >= 2) and ((.total.values[1] // 0) > 0)' 2>/dev/null || echo false)"
     [[ "${HTTP_CODE}" == "200" && "${B_OK}" == "true" ]] \
         && pass "报表 B（${DEMO_REPORTS[1]}）run 出数：厂商 ${B_ROWS} 行（${B_NAMES}），预估人天合计 ${B_EST}" \
-        || fail "报表 B（${DEMO_REPORTS[1]}）run 异常（HTTP ${HTTP_CODE}）：厂商行 ${B_ROWS:-?}（${B_NAMES:-?}）/ total.values[1] ${B_EST:-?}" \
+        || fail_http "报表 B（${DEMO_REPORTS[1]}）run 异常：厂商行 ${B_ROWS:-?}（${B_NAMES:-?}）/ total.values[1] ${B_EST:-?}" \
                 "厂商行只有 1 行且名为「未设置」= 演示需求没写 assignee_vendor_id（vendor 维读该列，见 AnalyticsSql.java:172）；度量只用 requirement 已注册的人天口径"
 else
     fail "报表 B（${DEMO_REPORTS[1]}）不在列表里，无法 run" "先修回填：名称与 DemoFixture.REPORT_NAMES 必须逐字相同"
@@ -324,11 +426,11 @@ PORTAL_CARDS="$(jget "${HTTP_BODY}" '.cards | length' 2>/dev/null || echo '')"
 PORTAL_REPORT_KEYS="$(jget "${HTTP_BODY}" '[.cardKeys[] | select(startswith("report:"))] | length' 2>/dev/null || echo '')"
 [[ "${HTTP_CODE}" == "200" && "${PORTAL_CARDS:-x}" == "4" ]] \
     && pass "门户配置 cards = 4（admin 角色模板）" \
-    || fail "门户配置 cards = ${PORTAL_CARDS:-<缺失>}，期望 4（HTTP ${HTTP_CODE}）" \
+    || fail_http "门户配置 cards = ${PORTAL_CARDS:-<缺失>}，期望 4" \
             "portal_card_config 清空后必须回退到角色模板：admin 模板固定 4 张卡"
 [[ "${HTTP_CODE}" == "200" && "${PORTAL_REPORT_KEYS:-x}" == "0" ]] \
     && pass "门户配置无 report: 前缀卡片（个人 pin 证据在 portalPins=0）" \
-    || fail "门户配置仍有 ${PORTAL_REPORT_KEYS:-?} 个 report: 卡片（HTTP ${HTTP_CODE}）" \
+    || fail_http "门户配置仍有 ${PORTAL_REPORT_KEYS:-?} 个 report: 卡片" \
             "config 只由角色模板构造，出现 report: 说明个人 pin 行没被清掉"
 
 # r15-fix（QA D-02）：这两页直读 DB、不吃缓存，适合做 API 级复核——
@@ -338,27 +440,25 @@ WF_TOTAL="$(printf '%s' "${HTTP_BODY}" | jq 'length' 2>/dev/null || echo '')"
 WF_RESIDUE="$(printf '%s' "${HTTP_BODY}" | jq '[.[] | select(.name | test("^(verify-|neg-)"))] | length' 2>/dev/null || echo '')"
 [[ "${HTTP_CODE}" == "200" && "${WF_RESIDUE:-x}" == "0" ]] \
     && pass "流程定义接口无门禁残留（共 ${WF_TOTAL} 条）" \
-    || fail "流程定义接口仍有 ${WF_RESIDUE:-?} 条 verify-/neg- 残留（HTTP ${HTTP_CODE}，共 ${WF_TOTAL:-?} 条）" \
+    || fail_http "流程定义接口仍有 ${WF_RESIDUE:-?} 条 verify-/neg- 残留（共 ${WF_TOTAL:-?} 条）" \
             "wf_definition 的种子行要留、RUN_TAG 探针行要删：见 DemoFixture.GATE_RUN_TAG_RESIDUE"
 api_call GET "/api/deliver/test-modules"
 MOD_TOTAL="$(printf '%s' "${HTTP_BODY}" | jq 'length' 2>/dev/null || echo '')"
 MOD_RESIDUE="$(printf '%s' "${HTTP_BODY}" | jq '[.[] | select(.name | test("^(验证模块|neg-)"))] | length' 2>/dev/null || echo '')"
 [[ "${HTTP_CODE}" == "200" && "${MOD_RESIDUE:-x}" == "0" ]] \
     && pass "用例模块树无门禁残留（共 ${MOD_TOTAL} 条）" \
-    || fail "用例模块树仍有 ${MOD_RESIDUE:-?} 条 验证模块*/neg-* 残留（HTTP ${HTTP_CODE}，共 ${MOD_TOTAL:-?} 条）" \
+    || fail_http "用例模块树仍有 ${MOD_RESIDUE:-?} 条 验证模块*/neg-* 残留（共 ${MOD_TOTAL:-?} 条）" \
             "test_module 的种子模块树要留、门禁探针模块要删"
 
+section 4
 # ---------------------------------------------------------------- 真实登录复核（端到端）
 
 check_visible() { # check_visible <user> <expected>
     local user="$1" expected="$2" total
-    platform_login "${TENANT_CODE}" "${user}" 'Passw0rd!' || {
-        fail "${user} 登录失败" "账号由 platform-seed 创建；重置不删账号"
-        return
-    }
+    login_or_stop "${user}" 'Passw0rd!' "${user}" || return 0
     api_call GET "/api/req/requirements?page=1&size=1"
     [[ "${HTTP_CODE}" == "200" ]] || {
-        fail "${user} 查需求列表 (HTTP ${HTTP_CODE})" "检查网关与 token/tenant 头"
+        fail_http "${user} 查需求列表" "检查网关与 token/tenant 头；000/502/503 属传输层，须先修栈而非改断言"
         return
     }
     total="$(jget "${HTTP_BODY}" '.total')"
@@ -374,6 +474,7 @@ check_visible vendor2 0
 API_TOKEN=""
 API_TENANT=""
 
+section 5
 # ---------------------------------------------------------------- r18 三层授权回到预设（AC-4）
 
 # 重置不只是「业务数据回演示态」：被手改过的授权格也必须回到预设。否则演示时一个上一轮
@@ -430,8 +531,16 @@ CUSTOM_ROLES_DB="$(db_count sys_role "tenant_id = ${TENANT_ID} AND builtin = 0")
 
 # ---------------------------------------------------------------- 结果
 
-if (( FAIL > 0 )); then
-    err "platform-demo-reset: ${CASE} 项中 ${FAIL} 项失败"
+if (( CASE != TOTAL_CHECKS )); then
+    err "断言数漂移: 实际执行 ${CASE} 项，声明 ${TOTAL_CHECKS} 项——增删断言时必须同步 TOTAL_CHECKS，否则 57/57 口径失效"
     exit 1
 fi
-ok "platform-demo-reset: ${CASE}/${CASE} 全部通过（演示数据已重建，可直接演示）"
+if (( FAIL > 0 )); then
+    err "platform-demo-reset: ${CASE} 项中 ${FAIL} 项失败（transport ${FAIL_TRANSPORT} / api ${FAIL_API} / assert ${FAIL_ASSERT}）"
+    err "失败分类：transport = 栈或网络层（先 make platform-up 后重跑）；api = 接口语义；assert = 数据未回演示态"
+    err "提示：assert 类若只有个别计数偏移（如需求 16 条、test_strategy 1 行），先确认没有第二个写者"
+    err "      在同一条演示栈上并发（另一次 reset/seed/门禁探针）——重置本身幂等，独占重跑即应回到 57/57"
+    err "重跑: bash scripts/platform-demo-reset.sh"
+    exit 1
+fi
+ok "platform-demo-reset: ${CASE}/${CASE} 全部通过（演示数据已重建，可直接演示；5/5 段）"

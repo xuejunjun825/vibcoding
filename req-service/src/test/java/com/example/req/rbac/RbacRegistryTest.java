@@ -92,4 +92,24 @@ class RbacRegistryTest {
                     page.code() + " actions must come back in sort order");
         }
     }
+
+    @Test
+    void unboundFunctionCodesAreTheComplementOfPageBindings() {
+        List<String> all = PermissionMatrix.functions();
+        Set<String> bound = new HashSet<>();
+        for (MenuRegistry.MenuPage page : MenuRegistry.pages()) {
+            bound.addAll(page.functionCodes());
+        }
+        List<String> unbound = MenuRegistry.unboundFunctionCodes();
+        assertEquals(60, all.size(), "the matrix authorises 60 function codes");
+        assertEquals(30, bound.size(), "30 are bound to a page");
+        assertEquals(30, unbound.size(), "the other 30 are the group the admin tree now shows");
+        assertEquals(all.size(), bound.size() + unbound.size(), "bound + unbound == 60");
+        assertTrue(new HashSet<>(all).containsAll(unbound), "unbound must come from the matrix");
+        Set<String> overlap = new HashSet<>(bound);
+        overlap.retainAll(unbound);
+        assertTrue(overlap.isEmpty(), "a code cannot be both bound and unbound: " + overlap);
+        assertEquals(all.stream().filter(unbound::contains).toList(), unbound,
+                "unbound keeps PermissionMatrix.functions() order");
+    }
 }

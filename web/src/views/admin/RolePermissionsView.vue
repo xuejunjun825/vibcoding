@@ -3,11 +3,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import AccessSegmented from './role-permissions/AccessSegmented.vue'
-import RoleGrantTree from './role-permissions/RoleGrantTree.vue'
-import { useRoleGrants } from './role-permissions/useRoleGrants'
+import RoleGrantTree, { UNBOUND_SELECTION } from './role-permissions/RoleGrantTree.vue'
+import { useRoleGrants, draftKey } from './role-permissions/useRoleGrants'
 import ErrorState from '@/components/ErrorState.vue'
 import { useAuthStore } from '@/stores/auth'
-import type { AccessLevel, ActionGrant, GrantSaveResult, PageGrant } from '@/api/types'
+import type { AccessLevel, ActionGrant, FunctionGrant, GrantSaveResult, PageGrant } from '@/api/types'
 
 /**
  * 三级授权页（DESIGN §3.2 / TECHNICAL §4.5）。
@@ -33,6 +33,8 @@ const {
   error,
   dirty,
   dirtyCount,
+  unboundGroup,
+  unboundDirty,
   warnings,
   effective,
   highRiskPending,
@@ -66,6 +68,33 @@ const panelRef = ref<HTMLElement | null>(null)
 const currentPage = computed<PageGrant | null>(
   () => allPages.value.find((page) => page.code === selectedPage.value) ?? null,
 )
+
+/**
+ * 右栏的「未绑定页面的功能码」态（r20）。
+ *
+ * `selectedPage` 用哨兵值表示这一组，和页面共用同一个选中通道（树上只有一处选中态，
+ * 右栏只认一个来源）。这 30 个码不属任何页面，却派生 `req:review` / `deploy:force` /
+ * `WIKI_EDIT` 等动作——把它们做成只读展示就等于继续让它们当黑洞，所以这里必须是可编辑的三档表，
+ * 且不新增任何保存接口（仍走底部那一次全量 PUT）。
+ */
+const unboundSelected = computed(() => selectedPage.value === UNBOUND_SELECTION)
+const unboundRows = computed<FunctionGrant[]>(() => unboundGroup.value?.functions ?? [])
+const unboundGranted = computed(
+  () => unboundRows.value.filter((fn) => accessOf('FUNCTION', fn.code) !== 'DENY').length,
+)
+
+function isFnDirty(code: string): boolean {
+  const key = draftKey('FUNCTION', code)
+  return (baseline.value[key] ?? 'DENY') !== (draft.value[key] ?? 'DENY')
+}
+
+/** 功能码前缀即它所属的域（req / deploy / wiki / org …），仅用于帮人扫读，不参与判定 */
+function domainOf(code: string): string {
+  // 功能码是 `<域>:<动作>`（req:review / deploy:force / test:quick），不是页面码那种 `admin.roles`
+  // 点号形式——只按 '.' 切会把整串原样吐回来，那一列就成了「功能码」的重复列。两种分隔都认。
+  const cut = code.search(/[:.]/)
+  return cut > 0 ? code.slice(0, cut) : code
+}
 
 // ---------------------------------------------------------------- 计数（I2 全量口径）
 
@@ -104,9 +133,12 @@ const dirtyBreakdown = computed(() => {
   return { pages, actions, functions }
 })
 
-const dirtySummary = computed(
-  () => `页面 ${dirtyBreakdown.value.pages} / 动作 ${dirtyBreakdown.value.actions} / 功能码 ${dirtyBreakdown.value.functions}`,
-)
+const dirtySummary = computed(() => {
+  const { pages, actions, functions } = dirtyBreakdown.value
+  const base = `页面 ${pages} / 动作 ${actions} / 功能码 ${functions}`
+  // 只改了看不见的 30 格时，前三个数字会「看起来没动」，这段把差额说清楚
+  return unboundDirty.value > 0 ? `${base}（含未绑定功能码 ${unboundDirty.value}）` : base
+})
 
 const pageWarning = computed(() => {
   const page = currentPage.value
@@ -177,6 +209,8 @@ function toggleAllActions(event: Event): void {
 // ---------------------------------------------------------------- 默认选中（≤3 击）
 
 function pickDefaultPage(): void {
+  // 刷新/保存后不要把人从「未绑定分组」上顶走：该分组还在就保留这次选择
+  if (unboundSelected.value && unboundRows.value.length > 0) return
   const pages = allPages.value
   if (pages.length === 0) {
     selectedPage.value = ''
@@ -466,6 +500,7 @@ watch(roleId, () => {
           :draft="draft"
           :selected="selectedPage"
           :only-granted="onlyGranted"
+          :unbound="unboundGroup"
           @update:selected="selectedPage = $event"
           @update:only-granted="onlyGranted = $event"
           @set-page="setPage"
@@ -474,7 +509,61 @@ watch(roleId, () => {
       </aside>
 
       <section ref="panelRef" class="surface perm__panel">
-        <template v-if="currentPage">
+        <!-- 未绑定页面的功能码：独立分组，右栏是一张三档功能码表（不属任何页面） -->
+        <template v-if="unboundSelected">
+          <header class="page-head">
+            <div class="page-head__row">
+              <span class="page-head__name">{{ unboundGroup?.name ?? '未绑定页面的功能码' }}</span>
+              <code class="page-head__code">{{ unboundGroup?.code ?? 'UNBOUND' }}</code>
+              <span class="page-head__label">{{ unboundRows.length }} 个码</span>
+              <span class="unb__granted">已授 {{ unboundGranted }}/{{ unboundRows.length }}</span>
+            </div>
+          </header>
+
+          <p class="unb__hint">
+            这些功能码没有页面承载，但仍是动作的权源：置为「拒绝」会让依赖它的动作（如评审通过、发布强制放行、Wiki
+            编辑）一并失效。改动随底部「保存并生效」一次提交，不影响页面准入。
+          </p>
+
+          <div class="unb" role="table" aria-label="未绑定页面的功能码">
+            <div class="unb__thead" role="row">
+              <span class="unb__c-fn" role="columnheader">功能码</span>
+              <span class="unb__c-domain" role="columnheader">所属域</span>
+              <span class="unb__c-state" role="columnheader">当前</span>
+              <span class="c-level" role="columnheader">档位</span>
+            </div>
+
+            <div class="unb__scroll">
+              <p v-if="unboundRows.length === 0" class="acts__empty">
+                当前服务端未返回未绑定功能码分组（旧后端或全部功能码均已绑定页面）
+              </p>
+              <div
+                v-for="fn in unboundRows"
+                :key="fn.code"
+                class="unb__row"
+                :class="{ 'is-dirty': isFnDirty(fn.code) }"
+                role="row"
+              >
+                <code class="unb__code">{{ fn.code }}</code>
+                <span class="unb__c-domain">{{ domainOf(fn.code) }}</span>
+                <span
+                  class="unb__c-state"
+                  :class="`unb__state--${accessOf('FUNCTION', fn.code).toLowerCase()}`"
+                >
+                  {{ accessLabel(accessOf('FUNCTION', fn.code)) }}
+                </span>
+                <AccessSegmented
+                  class="c-level"
+                  :model-value="accessOf('FUNCTION', fn.code)"
+                  :aria-label="`功能码 ${fn.code}`"
+                  @update:model-value="setFunctionAccess(fn.code, $event)"
+                />
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template v-else-if="currentPage">
           <header class="page-head">
             <div class="page-head__row">
               <span class="page-head__name">{{ currentPage.name }}</span>
@@ -640,6 +729,13 @@ watch(roleId, () => {
             {{ saving ? '正在保存…' : dirtyCount > 0 ? `${dirtyCount} 项未保存` : '无改动' }}
           </span>
         </el-tooltip>
+        <span
+          v-if="unboundDirty > 0"
+          class="savebar__unbound"
+          :title="`${unboundDirty} 个未绑定页面的功能码被改动`"
+        >
+          含未绑定 {{ unboundDirty }} 处
+        </span>
         <span v-if="slow" class="savebar__slow">保存较慢，请勿离开</span>
         <span v-else-if="warnings.length > 0" class="savebar__slow">
           {{ warnings.length }} 项配置不生效（页面未开放）
@@ -901,6 +997,94 @@ watch(roleId, () => {
   width: 12px;
   height: 12px;
   color: var(--perm-lock, #86909c);
+}
+
+/* ---- 未绑定页面的功能码（r20：不属任何页面，但仍派生动作，必须可编辑） ---- */
+.unb__granted {
+  color: var(--text-muted-aa);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.unb__hint {
+  margin: 8px 16px 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--color-warning);
+  border-radius: 6px;
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.unb {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin-top: 8px;
+}
+.unb__thead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 16px;
+  background: var(--bg-table-head);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted-aa);
+  font-size: 12px;
+  font-weight: 500;
+}
+.unb__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.unb__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--divider);
+  transition: background 120ms var(--ease);
+}
+.unb__row:hover {
+  background: var(--bg-hover);
+}
+.unb__row.is-dirty {
+  background: var(--color-warning-bg);
+}
+.unb__code,
+.unb__c-fn {
+  flex: 1 1 auto;
+  min-width: 200px;
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.unb__c-domain {
+  flex: 0 0 72px;
+  width: 72px;
+  color: var(--text-muted-aa);
+  font-size: 12px;
+}
+.unb__c-state {
+  flex: 0 0 44px;
+  width: 44px;
+  font-size: 12px;
+}
+.unb__state--allow {
+  color: var(--success-ink);
+}
+.unb__state--restricted {
+  color: var(--warning-ink);
+}
+.unb__state--deny {
+  color: var(--text-muted-aa);
 }
 .link-btn {
   display: inline-flex;
@@ -1217,6 +1401,18 @@ watch(roleId, () => {
 .savebar__slow {
   color: var(--warning-ink);
   font-size: 12px;
+}
+.savebar__unbound {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .savebar__right {
   display: flex;

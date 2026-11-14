@@ -173,16 +173,45 @@ login_as qa1 'Passw0rd!' >/dev/null
 # 上一步是放行态，撤权要等跨服务快照的 TTL 传播（≤45s）才拦得住；契约断言只看“确实被拦”的
 # 那一次响应，所以先 settle 到 403，再抓 body——否则抓到的是 400 参数校验，测的就不是 403 契约。
 probe_settle 403 >/dev/null
-api_call "$PROBE_METHOD" "$PROBE_PATH" "$PROBE_BODY" >/dev/null
-DET="$(printf '%s' "$HTTP_BODY" | jq -r '[.code, .message, (.detail.page // "-"), (.detail.action // "-"), (.detail.access // "-"), (.detail.method // "-")] | join("|")' 2>/dev/null)"
-if [[ "$(printf '%s' "$DET" | cut -d'|' -f1)" == "FORBIDDEN" &&
-      "$(printf '%s' "$DET" | cut -d'|' -f2)" == "无权执行该操作" &&
-      "$(printf '%s' "$DET" | cut -d'|' -f3)" == "$PAGE_CODE" &&
-      "$(printf '%s' "$DET" | cut -d'|' -f4)" == "$ACTION_CODE" ]]; then
-    pass "403 契约：code/message/detail{page,action,access,method} 齐全"
+
+# 但 settle 只能证明「至少有一个 deliver 节点已生效」：网关路由是 lb://deliver-service，紧随其后
+# 的那一次请求可能落到另一个还没刷到新快照的节点，于是回 400 校验错误——本 run 实测 1 红 1 绿。
+# 契约 body 必须取自**403 的那一次响应本身**，所以在 TTL 上界窗口内重试请求，一旦拿到 403 就地收下
+# body 再断言。这里重试的是「抓哪一次响应」，不是「重试断言」：拿到 403 之后的判定仍然只有一次。
+CONTRACT_LIMIT=45   # 与 probe_settle 的 70s 同口径：跨进程传播上界是 cache-ttl（45s）
+CONTRACT_WAITED=0
+CONTRACT_CODE="000"
+CONTRACT_BODY=""
+CONTRACT_TRIES=0
+while true; do
+    CONTRACT_TRIES=$((CONTRACT_TRIES + 1))
+    api_call "$PROBE_METHOD" "$PROBE_PATH" "$PROBE_BODY" >/dev/null
+    CONTRACT_CODE="${HTTP_CODE:-000}"
+    if [[ "${CONTRACT_CODE}" == "403" ]]; then
+        CONTRACT_BODY="$HTTP_BODY"
+        break
+    fi
+    if (( CONTRACT_WAITED >= CONTRACT_LIMIT )); then
+        break
+    fi
+    sleep 3
+    CONTRACT_WAITED=$((CONTRACT_WAITED + 3))
+done
+
+if [[ "${CONTRACT_CODE}" != "403" ]]; then
+    fail "窗口内（${CONTRACT_LIMIT}s / ${CONTRACT_TRIES} 次请求）没取到 403 响应，最后 HTTP ${CONTRACT_CODE}" \
+        "撤权后每个 deliver 节点各自按 TTL 生效；若整窗都是 400，问题在授权写入或缓存失效（先看 s4 的 epoch 断言）"
 else
-    fail "403 body 不符合契约：${DET:-<空>}" \
-        "前端 403 页与审计都靠 detail；r17 的格式不能回退（detail.page/action/access/method/path）"
+    DET="$(printf '%s' "$CONTRACT_BODY" | jq -r '[.code, .message, (.detail.page // "-"), (.detail.action // "-"), (.detail.access // "-"), (.detail.method // "-")] | join("|")' 2>/dev/null)"
+    if [[ "$(printf '%s' "$DET" | cut -d'|' -f1)" == "FORBIDDEN" &&
+          "$(printf '%s' "$DET" | cut -d'|' -f2)" == "无权执行该操作" &&
+          "$(printf '%s' "$DET" | cut -d'|' -f3)" == "$PAGE_CODE" &&
+          "$(printf '%s' "$DET" | cut -d'|' -f4)" == "$ACTION_CODE" ]]; then
+        pass "403 契约：code/message/detail{page,action,access,method} 齐全（第 ${CONTRACT_TRIES} 次请求命中 403）"
+    else
+        fail "403 body 不符合契约：${DET:-<空>}" \
+            "前端 403 页与审计都靠 detail；r17 的格式不能回退（detail.page/action/access/method/path）"
+    fi
 fi
 
 # ---------------------------------------------------------------- 7. 恢复与 epoch

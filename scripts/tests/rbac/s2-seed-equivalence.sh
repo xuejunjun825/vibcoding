@@ -10,9 +10,13 @@
 #
 # 期望值不是手抄：由 sys_menu/sys_action 的 function_codes ∪ sys_role_permission 的 FUNCTION 行
 # 在 SQL 里重算，再与 MENU/ACTION 行比对——抄一份表就变成了第四份真相。
+#
+# 本脚本同时充当收尾段 s2r（rbac-verify.sh 末尾再跑一次）：套件结束时库必须仍是预设，
+# 任何段漏还原都会在这里红。段名由 RBAC_SEGMENT 注入，断言与阈值一条不变。
 set -uo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib.sh"
 
+SEGMENT="${RBAC_SEGMENT:-s2}"
 TOTAL=0
 PASS=0
 FAIL=0
@@ -32,7 +36,7 @@ fail() {
 }
 report_counts() {
     if [[ -n "${RBAC_COUNTS:-}" ]]; then
-        printf 's2 %s %s\n' "$PASS" "$TOTAL" >>"$RBAC_COUNTS"
+        printf '%s %s %s\n' "${SEGMENT}" "$PASS" "$TOTAL" >>"$RBAC_COUNTS"
     fi
 }
 
@@ -67,7 +71,7 @@ page_fn AS (
 EXPAND_ACTIONS="${EXPAND_PAGES//sys_menu p/sys_action p}"
 EXPAND_ACTIONS="${EXPAND_ACTIONS//p.code AS subject/p.code AS subject}"
 
-log "s2：种子逐格等价（tenant=${T1_TENANT} id=${TENANT_ID}）"
+log "${SEGMENT}：种子逐格等价（tenant=${T1_TENANT} id=${TENANT_ID}）"
 
 # ---------------------------------------------------------------- 1. 行数与覆盖
 check_eq "t1 授权行总数 = 1680，且每个角色 168 行" "10 168" \
@@ -170,15 +174,15 @@ fi
 
 # ---------------------------------------------------------------- 汇总
 if (( TOTAL == 0 )); then
-    err "s2: 一条断言都没执行：脚本实现有 bug"
+    err "${SEGMENT}: 一条断言都没执行：脚本实现有 bug"
     exit 1
 fi
 if (( PASS != TOTAL )); then
-    err "s2-seed-equivalence: ${FAIL} 项失败 / ${TOTAL} 项"
+    err "${SEGMENT}-seed-equivalence: ${FAIL} 项失败 / ${TOTAL} 项"
     printf '%s\n' "$FAILED_LINES" >&2
     report_counts
     exit 1
 fi
 report_counts
 printf '  \033[1;30mCANONICAL_HASH=%s\033[0m\n' "${SQL_HASH}"
-ok "s2-seed-equivalence: ${PASS}/${TOTAL} 项通过（360+720 格逐格等价）"
+ok "${SEGMENT}-seed-equivalence: ${PASS}/${TOTAL} 项通过（360+720 格逐格等价）"

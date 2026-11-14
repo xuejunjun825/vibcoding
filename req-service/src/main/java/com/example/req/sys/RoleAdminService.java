@@ -81,14 +81,14 @@ public class RoleAdminService {
         for (String module : MenuRegistry.modules()) {
             List<SysViews.PageGrant> pages = new ArrayList<>();
             for (MenuRegistry.MenuPage page : MenuRegistry.of(module)) {
-                Access pageAccess = access(stored, "MENU", page.code());
+                Access pageAccess = accessOf(stored, "MENU", page.code());
                 List<SysViews.FunctionGrant> functions = page.functionCodes().stream()
                         .map(code -> new SysViews.FunctionGrant(code,
-                                access(stored, "FUNCTION", code).name()))
+                                accessOf(stored, "FUNCTION", code).name()))
                         .toList();
                 List<SysViews.ActionGrant> actions = ActionRegistry.of(page.code()).stream()
                         .map(action -> new SysViews.ActionGrant(action.code(), action.name(),
-                                access(stored, "ACTION", action.code()).name(),
+                                accessOf(stored, "ACTION", action.code()).name(),
                                 action.highRisk(), action.functionCodes()))
                         .toList();
                 pages.add(new SysViews.PageGrant(page.code(), page.name(), page.routeName(),
@@ -104,7 +104,20 @@ public class RoleAdminService {
             }
             modules.add(new SysViews.ModuleGrant(module, module, pages));
         }
-        return new SysViews.RoleGrantView(toRow(role.row()), permissions.epoch(), modules, warnings);
+        return new SysViews.RoleGrantView(toRow(role.row()), permissions.epoch(), modules,
+                unboundGroup(stored), warnings);
+    }
+
+    /**
+     * The 30 function codes no page is bound to, level taken from the same stored snapshot as the
+     * modules — one read, one source of truth (r20 BUG-1 read half).
+     */
+    private SysViews.UnboundGroup unboundGroup(Map<String, Map<String, Access>> stored) {
+        List<SysViews.FunctionGrant> unbound = MenuRegistry.unboundFunctionCodes().stream()
+                .map(code -> new SysViews.FunctionGrant(code,
+                        accessOf(stored, "FUNCTION", code).name()))
+                .toList();
+        return new SysViews.UnboundGroup("UNBOUND", "未绑定页面的功能码", unbound);
     }
 
     // ------------------------------------------------------------------ role writes
@@ -223,7 +236,7 @@ public class RoleAdminService {
         long tenantId = tenantId();
         Role role = requireRole(tenantId, roleId);
         Map<String, Map<String, Access>> before = stored(tenantId, roleId);
-        Map<String, Map<String, Access>> after = fullGrid();
+        Map<String, Map<String, Access>> after = stored(tenantId, roleId);
 
         for (SysViews.GrantInput grant : grants == null ? List.<SysViews.GrantInput>of() : grants) {
             RoleGuard.validateSubject(grant.type(), grant.code());
@@ -353,7 +366,7 @@ public class RoleAdminService {
         return grid;
     }
 
-    private static Access access(Map<String, Map<String, Access>> grid, String layer, String code) {
+    private static Access accessOf(Map<String, Map<String, Access>> grid, String layer, String code) {
         Map<String, Access> values = grid.get(layer);
         Access access = values == null ? null : values.get(code);
         return access == null ? Access.DENY : access;
@@ -366,7 +379,7 @@ public class RoleAdminService {
         int changed = 0;
         for (String layer : List.of("FUNCTION", "MENU", "ACTION")) {
             for (Map.Entry<String, Access> entry : after.get(layer).entrySet()) {
-                Access was = access(before, layer, entry.getKey());
+                Access was = accessOf(before, layer, entry.getKey());
                 Access now = entry.getValue();
                 if (was == now) {
                     continue;
@@ -407,12 +420,12 @@ public class RoleAdminService {
     private static List<SysViews.Warning> warnings(Map<String, Map<String, Access>> grid) {
         List<SysViews.Warning> warnings = new ArrayList<>();
         for (MenuRegistry.MenuPage page : MenuRegistry.pages()) {
-            if (access(grid, "MENU", page.code()) != Access.DENY) {
+            if (accessOf(grid, "MENU", page.code()) != Access.DENY) {
                 continue;
             }
             List<String> granted = ActionRegistry.of(page.code()).stream()
                     .map(ActionRegistry.ActionDef::code)
-                    .filter(code -> access(grid, "ACTION", code) != Access.DENY)
+                    .filter(code -> accessOf(grid, "ACTION", code) != Access.DENY)
                     .toList();
             if (!granted.isEmpty()) {
                 warnings.add(new SysViews.Warning("PAGE_DENY_ACTION_GRANTED", page.code(), granted));

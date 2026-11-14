@@ -76,8 +76,18 @@ public final class SysViews {
     public record Warning(String code, String page, List<String> actions) {
     }
 
+    /**
+     * r20: the function codes no page is bound to, as a top-level group. They are not a synthesised
+     * page on purpose — {@code modules[].pages[]} is consumed as "the 36 pages" by the tree, the
+     * seed-equivalence probe and the registry checks, so a fake page would turn 168 into 169 and
+     * fake a page binding. Still editable: {@code DENY} here silently disables the actions derived
+     * from the code (force-release, Wiki edit...).
+     */
+    public record UnboundGroup(String code, String name, List<FunctionGrant> functions) {
+    }
+
     public record RoleGrantView(RoleRow role, long epoch, List<ModuleGrant> modules,
-                                List<Warning> warnings) {
+                                UnboundGroup unboundFunctions, List<Warning> warnings) {
     }
 
     public record GrantSaveResult(long epoch, int added, int removed, int changed,

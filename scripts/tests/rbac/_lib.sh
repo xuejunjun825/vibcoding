@@ -59,13 +59,24 @@ probe_settle() { # probe_settle <403|allow> [超时秒=70] → 轮询探针直�
     done
 }
 
-grants_of() { # grants_of <roleId> → 扁平 [{subjectType,subjectCode,access}]
+grants_of() { # grants_of <roleId> → 扁平 [{subjectType,subjectCode,access}]（每角色 168 个唯一格子）
+    # 口径必须与库里的格子一一对应：s3/s4/s7 的 trap 用这份快照还原，少一格就等于把
+    # 那一格主动写成 DENY（写侧基底取库内现值，少发=保留；但这份快照就是「库内现值」的唯一来源）。
+    #   1) modules[].pages[] 给 MENU 36 + ACTION 72 + 36 行页面绑定的 FUNCTION；
+    #      其中 6 行是同一个功能码被多个页面共用（org:manage 5 页、PORTAL_VIEW 2 页、
+    #      case:manage 2 页），unique_by 之后是 30 个不同格子 ⇒ 138 个唯一格子；
+    #   2) 顶层 unboundFunctions.functions 给不属任何页面的 30 个 FUNCTION 格子；
+    #   138 + 30 = 168 = sys_role_permission 每角色的行数（s2 的等式）。
+    # 不 unique_by 会发出 174 行（6 个重复键）：服务端按 (type,code) 归并后结果相同，
+    # 但「payload 行数 = 库行数 = 168」这个可断言的等式就丢了，探针也无法用长度判缺口。
     api_call GET "/api/req/admin/roles/$1/permissions"
     [[ "${HTTP_CODE:-}" == "200" ]] || return 1
-    printf '%s' "$HTTP_BODY" | jq -c '[.modules[]? | .pages[]? as $p
+    printf '%s' "$HTTP_BODY" | jq -c '([.modules[]? | .pages[]? as $p
         | ($p.functionCodes[]? | {subjectType:"FUNCTION", subjectCode:.code, access:.access}),
           ($p | {subjectType:"MENU", subjectCode:$p.code, access:$p.access}),
-          ($p.actions[]? | {subjectType:"ACTION", subjectCode:.code, access:.access})]'
+          ($p.actions[]? | {subjectType:"ACTION", subjectCode:.code, access:.access})]
+        + [(.unboundFunctions?.functions[]? | {subjectType:"FUNCTION", subjectCode:.code, access:.access})])
+        | unique_by([.subjectType, .subjectCode])'
 }
 
 set_cell() { # set_cell <grants> <TYPE> <code> <access>

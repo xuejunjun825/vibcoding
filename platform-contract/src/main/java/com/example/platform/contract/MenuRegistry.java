@@ -159,6 +159,22 @@ public final class MenuRegistry {
         return PAGES.stream().map(MenuPage::code).toList();
     }
 
+    /**
+     * Function codes no page is bound to, in {@link PermissionMatrix#functions()} order (r20).
+     *
+     * <p>These 30 codes are still grantable and still derive their page's actions, but no page
+     * carries them, so the role-permission tree never showed them: saving the tree as-is wrote
+     * {@code DENY} over the 30 hidden levels. The set is derived here — from the same
+     * {@code MenuPage.functionCodes()} the seed and the page gate read — so the read model, the
+     * probe scripts and the frontend cannot drift (r20 BUG-1).</p>
+     */
+    public static List<String> unboundFunctionCodes() {
+        List<String> bound = PAGES.stream().flatMap(page -> page.functionCodes().stream()).toList();
+        return PermissionMatrix.functions().stream()
+                .filter(code -> !bound.contains(code))
+                .toList();
+    }
+
     /** Pages of one module, in sort order; empty for an unknown module. */
     public static List<MenuPage> of(String module) {
         return PAGES.stream().filter(page -> page.module().equals(module)).toList();

@@ -7,12 +7,14 @@ import type {
   GrantWarning,
   RoleGrantView,
   SubjectType,
+  UnboundFunctionGroup,
 } from '@/api/types'
 
 /**
  * 授权草稿模型（DESIGN §3.2 / TECHNICAL §4.4）。
  *
- * 两层状态：`baseline` 是服务端最近一次确认的 168 行，`draft` 是用户此刻看到的档位。
+ * 两层状态：`baseline` 是服务端最近一次确认的 168 行（60 FUNCTION + 36 MENU + 72 ACTION，
+ * 其中 30 个 FUNCTION 来自顶层 `unboundFunctions` 分组、不属任何页面），`draft` 是用户此刻看到的档位。
  * 未保存计数、离开拦截、重置、diff 都从这一对 map 推导——不额外维护第二份状态，
  * 否则「改了又改回去」会被记成脏，「重置」也会和界面对不上。
  *
@@ -50,6 +52,15 @@ export function useRoleGrants(roleId: Ref<number>) {
   const savedDiff = ref<GrantDiff | null>(null)
   const savedHighRisk = ref<string[]>([])
 
+  /**
+   * 把一次 GET 的授权视图拍平成 168 个草稿键：60 FUNCTION + 36 MENU + 72 ACTION。
+   *
+   * 页面里的 `functionCodes` 只覆盖**绑定到页面的 30 个** FUNCTION 码；剩下 30 个不属任何页面、
+   * 却仍能被角色授权的码在顶层 `unboundFunctions` 分组里。漏掉它们就是 r19 BUG-1 的读侧一半：
+   * 原样保存时 draft 少 30 行，服务端按「少发=DELETE」把它们静默写成 DENY
+   * （`req.action.approve`、`deploy.action.force_release`、`wiki.action.edit` 这些动作随之失效）。
+   * 这里按 `draftKey` 去重：正常两侧无交集，万一后端把某个码同时放进页面和分组，以页面为准。
+   */
   function flatten(source: RoleGrantView): Record<string, AccessLevel> {
     const map: Record<string, AccessLevel> = {}
     for (const module of source.modules) {
@@ -58,6 +69,10 @@ export function useRoleGrants(roleId: Ref<number>) {
         for (const fn of page.functionCodes) map[draftKey('FUNCTION', fn.code)] = fn.access
         for (const action of page.actions) map[draftKey('ACTION', action.code)] = action.access
       }
+    }
+    for (const fn of source.unboundFunctions?.functions ?? []) {
+      const key = draftKey('FUNCTION', fn.code)
+      if (!(key in map)) map[key] = fn.access
     }
     return map
   }
@@ -69,7 +84,8 @@ export function useRoleGrants(roleId: Ref<number>) {
       const data = await getRoleGrants(roleId.value)
       view.value = data
       baseline.value = flatten(data)
-      // 必须完整物化：页面 DENY 的页也要有格，否则保存时漏行、脏计数也会失真
+      // 必须完整物化（含顶层未绑定分组的 30 行）：页面 DENY 的页也要有格，否则保存时漏行、
+      // 脏计数失真，而且漏掉的格会被服务端当成「用户要 DENY」写回去
       draft.value = { ...baseline.value }
       savedDiff.value = null
       savedHighRisk.value = []
@@ -145,6 +161,31 @@ export function useRoleGrants(roleId: Ref<number>) {
   })
 
   const dirty = computed(() => dirtyCount.value > 0)
+
+  /**
+   * 顶层「未绑定页面的功能码」分组（r20）。它是 `modules[]` 的兄弟而不是第 7 个 module：
+   * 页面集合被树、s1、s2 当绑定关系消费，合成页会把 168 撑成 169 并伪造页面可见性语义。
+   * 旧后端/旧 fixture 不带该键时为 null → 视图不渲染分组（与 30 条全 DENY 的展示口径一致）。
+   */
+  const unboundGroup = computed<UnboundFunctionGroup | null>(
+    () => view.value?.unboundFunctions ?? null,
+  )
+
+  const unboundCount = computed(() => unboundGroup.value?.functions.length ?? 0)
+
+  /**
+   * 未绑定分组里被改过的格数。单独统计是因为它们**不在左树任何页面下**：
+   * 只改了这 30 个码时，右栏的页面级 dirty 摘要会显得「明明改了却没动」，这个计数就是那次反馈。
+   */
+  const unboundDirty = computed(() => {
+    const functions = unboundGroup.value?.functions ?? []
+    let count = 0
+    for (const fn of functions) {
+      const key = draftKey('FUNCTION', fn.code)
+      if ((baseline.value[key] ?? 'DENY') !== (draft.value[key] ?? 'DENY')) count++
+    }
+    return count
+  })
 
   const diff = computed<GrantDiff>(() => {
     let added = 0
@@ -282,6 +323,9 @@ export function useRoleGrants(roleId: Ref<number>) {
     error,
     dirty,
     dirtyCount,
+    unboundGroup,
+    unboundCount,
+    unboundDirty,
     diff,
     warnings,
     effective,
@@ -295,6 +339,7 @@ export function useRoleGrants(roleId: Ref<number>) {
     setModule,
     setAllActions,
     reset,
+    payload,
     save,
   }
 }
