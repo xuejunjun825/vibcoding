@@ -44,7 +44,7 @@ import { childInfo, messageOf, requirementPath, typeLabel, usePlatformDict } fro
  */
 const route = useRoute()
 const router = useRouter()
-const { can } = usePermission()
+const { canAction } = usePermission()
 const dict = usePlatformDict()
 
 const detail = ref<ReleaseDetail | null>(null)
@@ -74,8 +74,15 @@ const lockReason = computed(() => {
   if (!scopeLocked.value) return ''
   return release.value?.status === 'LOCKED' ? '版本已锁定，需求范围不可变更' : '版本已发布或取消，需求范围不可变更'
 })
-const canPlan = computed(() => can('release:plan'))
-const canEditScope = computed(() => canPlan.value && !scopeLocked.value)
+/**
+ * 读与写必须分开：页面能进（MENU/功能码）不代表能改。
+ * - `canEdit`    → 版本内容/集成设置/里程碑（release.action.update）
+ * - `canApprove` → 提交发布审批（release.action.approve）
+ * 一个 `canPlan` 同时管两边，会把只读角色（如 VENDOR_PM）的详情页变成可写页。
+ */
+const canEdit = computed(() => canAction('release.action.update'))
+const canApprove = computed(() => canAction('release.action.approve'))
+const canEditScope = computed(() => canEdit.value && !scopeLocked.value)
 
 const stats = computed(() => {
   const fallback = { total: requirements.value.length, done: 0, estimateDays: 0, actualDays: 0 }
@@ -448,15 +455,15 @@ function statusOfMilestone(status?: string): string {
           <el-button
             size="small"
             :disabled="!canEditScope"
-            :title="canEditScope ? '' : scopeLocked ? lockReason : '需要权限：release:plan'"
+            :title="canEditScope ? '' : scopeLocked ? lockReason : '需要权限：release.action.update'"
             @click="openAdd"
           >
             纳入需求
           </el-button>
           <el-button
             size="small"
-            :disabled="!canPlan"
-            :title="canPlan ? '' : '需要权限：release:plan'"
+            :disabled="!canEdit"
+            :title="canEdit ? '' : '需要权限：release.action.update'"
             @click="(milestoneOpen = true), (milestoneError = '')"
           >
             添加里程碑
@@ -465,13 +472,13 @@ function statusOfMilestone(status?: string): string {
             type="primary"
             size="small"
             :loading="submitting"
-            :disabled="!canPlan || release?.status !== 'PLAN'"
+            :disabled="!canApprove || release?.status !== 'PLAN'"
             :title="
               release?.status !== 'PLAN'
                 ? '仅规划中的版本可发起发布审批'
-                : canPlan
+                : canApprove
                   ? ''
-                  : '需要权限：release:plan'
+                  : '需要权限：release.action.approve'
             "
             @click="approvalOpen = true"
           >
@@ -619,7 +626,7 @@ function statusOfMilestone(status?: string): string {
                   type="danger"
                   size="small"
                   :disabled="!canEditScope"
-                  :title="canEditScope ? '移出本版本' : scopeLocked ? lockReason : '需要权限：release:plan'"
+                  :title="canEditScope ? '移出本版本' : scopeLocked ? lockReason : '需要权限：release.action.update'"
                   @click.stop="askRemove(row)"
                 >
                   移出
@@ -667,7 +674,7 @@ function statusOfMilestone(status?: string): string {
               <el-switch
                 v-model="integrationAutoAdvance"
                 size="small"
-                :disabled="integrationLoading || integrationSaving || !can('release:plan')"
+                :disabled="integrationLoading || integrationSaving || !canEdit"
                 aria-label="MR 合并后自动推进需求状态"
               />
             </div>
@@ -680,7 +687,7 @@ function statusOfMilestone(status?: string): string {
                 v-model="integrationSonarKey"
                 size="small"
                 placeholder="如 supply-order-service"
-                :disabled="integrationLoading || integrationSaving || !can('release:plan')"
+                :disabled="integrationLoading || integrationSaving || !canEdit"
               />
             </div>
             <p v-if="integrationError" class="intg-error" role="alert">{{ integrationError }}</p>
@@ -689,12 +696,12 @@ function statusOfMilestone(status?: string): string {
                 size="small"
                 type="primary"
                 :loading="integrationSaving"
-                :disabled="integrationLoading || !can('release:plan')"
+                :disabled="integrationLoading || !canEdit"
                 @click="saveIntegration"
               >
                 保存
               </el-button>
-              <span v-if="!can('release:plan')" class="muted small">需要权限：release:plan</span>
+              <span v-if="!canEdit" class="muted small">需要权限：release.action.update</span>
             </div>
           </section>
         </aside>

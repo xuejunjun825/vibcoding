@@ -19,7 +19,9 @@ import { messageOf, releasePath } from '@/views/req/platform'
  * 筛选（domainId / status）与分页保存在 URL，便于分享与复现。
  */
 const router = useRouter()
-const { can } = usePermission()
+const { canAction } = usePermission()
+/** 建版是写动作：页面可见（MENU `req.release`）≠ 可写，按钮只认 ACTION 快照 */
+const canCreateRelease = computed(() => canAction('release.action.create'))
 
 const list = useListQuery<ReleaseRow>(
   (query) =>
@@ -52,6 +54,7 @@ const saving = ref(false)
 const formError = ref('')
 
 function openCreate(): void {
+  if (!canCreateRelease.value) return
   createOpen.value = true
   name.value = ''
   domainId.value = domains.value[0]?.id
@@ -65,7 +68,7 @@ function openCreate(): void {
 const canCreate = computed(() => name.value.trim().length >= 2 && domainId.value != null && !saving.value)
 
 async function submitCreate(): Promise<void> {
-  if (!canCreate.value || domainId.value == null) return
+  if (!canCreate.value || domainId.value == null || !canCreateRelease.value) return
   saving.value = true
   formError.value = ''
   try {
@@ -130,10 +133,10 @@ function domainName(id?: number): string {
           <el-option label="已取消" value="CANCELLED" />
         </el-select>
         <el-button
-          type="primary"
+          :type="canCreateRelease ? 'primary' : 'default'"
           size="small"
-          :disabled="!can('release:plan')"
-          :title="can('release:plan') ? '' : '需要权限：release:plan'"
+          :disabled="!canCreateRelease"
+          :title="canCreateRelease ? '' : '需要权限：release.action.create'"
           @click="openCreate"
         >
           新建版本
@@ -241,7 +244,7 @@ function domainName(id?: number): string {
       <p v-if="formError" class="dialog-error">{{ formError }}</p>
       <template #footer>
         <el-button @click="createOpen = false">取消</el-button>
-        <el-button type="primary" :loading="saving" :disabled="!canCreate" @click="submitCreate">创建</el-button>
+        <el-button type="primary" :loading="saving" :disabled="!canCreate || !canCreateRelease" @click="submitCreate">创建</el-button>
       </template>
     </el-dialog>
   </div>

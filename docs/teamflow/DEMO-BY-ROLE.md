@@ -25,10 +25,13 @@ make platform-down          # 演示结束
 | `qa2` | 测试-周 | QA | `Passw0rd!` | 33 | 12 |
 | `vendor1` | 厂商管理员-钱 | PMO + 厂商 VEN-A | `Passw0rd!` | 40 | **3**（仅本厂商承接） |
 | `vendor2` | 厂商研发-郑 | DEV + 厂商 VEN-B | `Passw0rd!` | 24 | **0**（未承接） |
+| `vpm1` ᵈ | 厂商项目经理-冯 | VENDOR_PM + 厂商 VEN-A | `Passw0rd!` | 13 ᵈ | **3**（仅本厂商承接，与 `vendor1` 同源） |
 | `biz1` ᵃ | 陈业务 | BUSINESS（业务部门） | `Passw0rd!` | 8 ᵃ | 8 ᵃ |
 | `suite1` ᵃ | 许二级 | SUB_BUSINESS_LEADER（二级企业业务） | `Passw0rd!` | 11 ᵃ | 8 ᵃ |
 
 ᵃ 本轮新增的两个种子账号。权限码由 `PermissionMatrix` 推导（`node logs/teamflow/tf-mw9yzocw-5kv3pt/scripts/t10-role-grants.mjs`，该推导口径已用 admin/pm/tl1/po1/dev1/qa1 六个账号的既有实测值对账通过）；「可见需求数」中 12/8/3/0 由 `make platform-demo-reset` 的 4 条不变量断言，`biz1`/`suite1` 的两个 8 是按 po1 同组织同域口径推导、未被不变量单独断言。
+
+ᵈ r24 新增的第 11 个内置角色演示账号（`VENDOR_PM`，`sys_user_role` 恰 1 条，权限行 168 格/租户）。`13` = FUNCTION 层 12 个 `ALLOW` + 1 个 `RESTRICTED`（`trace:view`）；ACTION 层另有 7 条 `ALLOW`（`req.action.schedule` + 6 个缺陷处理动作），其余 65 条 DENY（其中 11 条为显式覆盖：`release.action.create/update/approve/close`、`task.action.*`4 条、`sprint.action.create/close`、`test.action.case_edit`）。数字按 `PermissionMatrix` 与 PRD §3.3/§3.4 推导，实测以授权页 `/admin/roles/{id}/permissions` 的 168 格为准。
 
 **隔离是真实生效的**：同一租户下全量角色看到 12 条（`make platform-demo-reset` 后的干净数据集），`po1`（二级企业负责人）只看到本企业 8 条，`vendor1` 只看到本厂商承接的 3 条，`vendor2` 0 条。
 
@@ -54,28 +57,31 @@ make platform-down          # 演示结束
 
 ---
 
-## 3. 角色 × 页面可用性矩阵（r7 修复后 · 9 账号 × 13 页）
+## 3. 角色 × 页面可用性矩阵（r24 起 · 10 账号 × 13 页，新增 `vpm1`）
 
-| 页面 | admin | pm | tl1 | po1 | dev1 | qa1 | vendor1 | biz1 | suite1 |
-|---|---|---|---|---|---|---|---|---|---|
-| 需求池 `/requirements` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 版本计划 `/releases` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⛔⁴ | ✅ |
-| 审批中心 `/approvals` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 测试计划 `/test-plans` | ✅ | ✅ | ✅ | ⛔⁴ | ⛔⁴ | ✅ | ✅ | ⛔⁴ | ⛔⁴ |
-| 用例库 `/testcases` | ✅ | ✅ | ✅ | ⛔¹ | ✅³ | ✅ | ⛔³ | ⛔¹ | ⛔¹ |
-| 缺陷 `/defects` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 甘特 `/gantt` | ✅ | ✅ | ✅ | ✅ | ✅ | ⛔² | ✅ | ✅ | ✅ |
-| Wiki `/wiki` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 价值流 `/value-stream` | ✅ | ✅ | ✅ | ⛔² | ⛔² | ⛔² | ✅ | ⛔² | ⛔² |
-| 追溯矩阵 `/traceability` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 质量门 `/quality-gates` | ✅ | ✅ | ✅ | ⛔² | ✅ | ✅ | ✅ | ⛔² | ⛔² |
-| 分支策略 `/code-policies` | ✅ | ⛔² | ✅ | ⛔² | ✅ | ⛔² | ✅ | ⛔² | ⛔² |
-| 用户与角色 `/admin/users` | ✅ | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² |
+| 页面 | admin | pm | tl1 | po1 | dev1 | qa1 | vendor1 | vpm1 | biz1 | suite1 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 需求池 `/requirements` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 版本计划 `/releases` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅⁵ | ⛔⁴ | ✅ |
+| 审批中心 `/approvals` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅⁶ | ✅ | ✅ |
+| 测试计划 `/test-plans` | ✅ | ✅ | ✅ | ⛔⁴ | ⛔⁴ | ✅ | ✅ | ✅ | ⛔⁴ | ⛔⁴ |
+| 用例库 `/testcases` | ✅ | ✅ | ✅ | ⛔¹ | ✅³ | ✅ | ⛔³ | ✅⁷ | ⛔¹ | ⛔¹ |
+| 缺陷 `/defects` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 甘特 `/gantt` | ✅ | ✅ | ✅ | ✅ | ✅ | ⛔² | ✅ | ✅ | ✅ | ✅ |
+| Wiki `/wiki` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 价值流 `/value-stream` | ✅ | ✅ | ✅ | ⛔² | ⛔² | ⛔² | ✅ | ⛔² | ⛔² | ⛔² |
+| 追溯矩阵 `/traceability` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 质量门 `/quality-gates` | ✅ | ✅ | ✅ | ⛔² | ✅ | ✅ | ✅ | ⛔² | ⛔² | ⛔² |
+| 分支策略 `/code-policies` | ✅ | ⛔² | ✅ | ⛔² | ✅ | ⛔² | ✅ | ⛔² | ⛔² | ⛔² |
+| 用户与角色 `/admin/users` | ✅ | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² |
 
 ¹ `po1`/`biz1`/`suite1` 无 `case:manage`，用例库入口不渲染，深链落 `/403`。
 ² 角色确实没有该功能码（`DENY`），入口隐藏且深链 403 —— 这是权限矩阵的正确拒绝，不是故障。
-³ `dev1` 可见用例库、`vendor1` 不可见：前者是 DEV 对 `case:manage` 持 `RESTRICTED`（收窄数据范围而非拒绝，详见 `docs/teamflow/20261110-r7-role-page-access-fix/TECHNICAL.md` §7 记为唯一偏差）；后者是 `/testcases` 带 `meta.internalOnly`，厂商账号深链一律落 `/403?code=INTERNAL_ONLY`。
+³ `dev1` 可见用例库、`vendor1` 不可见：前者是 DEV 对 `case:manage` 持 `RESTRICTED`（收窄数据范围而非拒绝，详见 `docs/teamflow/20261110-r7-role-page-access-fix/TECHNICAL.md` §7 记为唯一偏差）；后者是 `/testcases` 带 `meta.internalOnly`，厂商账号深链一律落 `/403?code=INTERNAL_ONLY`。**该结论自 r24 起只对非 `VENDOR_PM` 的厂商账号成立**（见 ⁷）。
 ⁴ 5 格 ⛔ 与 §6.2 同一张表：`/test-plans` 要 `plan:manage`（`po1`/`dev1`/`biz1`/`suite1` 无），`/code-policies` 要 `CCODE_POLICY_VIEW`（`pm`/`po1`/`qa1` 无），`/releases` 要 `release:plan`（`BUSINESS` 未授）。矩阵未新增任何权限码。
+⁵ **厂商账号的版本列表会是空的（r24 起，预期，不是故障）**：版本可见性由 `ScopeSql` 的派生谓词决定 —— `EXISTS(SELECT 1 FROM release_requirement rr JOIN requirement r ON r.id = rr.requirement_id WHERE rr.release_id = release.id AND (r.owner_vendor_id = :vendor OR r.assignee_vendor_id = :vendor))`，即「版本里必须含本厂商承接的需求」才可见。演示夹具里唯一的版本 `2026 Q4` 只含 8 条内部需求（VEN-A 的 R-09/R-10/R-11 都还没排进版本），所以 `vendor1` 的版本列表从 1 条变成 0 条、`vpm1` 也是 0 条 —— 这是「严格按本厂商需求派生」的正确结果。想让版本页有内容，就用 `pm` 把 R-09 排进该版本，或用 `scripts/platform-test-negative.sh` 里的 VEN-A 版本夹具；**不要为此放宽谓词**（放宽就等于让厂商看见别家的版本）。详情与写口共用同一条谓词，他厂商版本详情一律 403 `OUT_OF_SCOPE`。
+⁶ `me.approvals` 不是 `MenuRegistry` 页面（无 MENU 行、路由无 `internalOnly`），它是所有账号的个人待办中心，`vpm1` 仍可打开自己的待办；但 `approve`/`review_*` 等审批**动作**全部 `DENY`，点了就是 403。这与 PRD AC-10 的字面「`me.approvals` 不渲染」有出入，已记为口径修正 C2（见 `docs/teamflow/20261116-r24-vendor-pm-role/TECHNICAL.md` §0）。
+⁷ **`VENDOR_PM` 是用例库 `internalOnly` 的唯一例外**（r24 定点取代 r7 AC-5）：路由 `meta.vendorPmAllowed` + 导航 `vendorPmAllowed` + 深链守卫三处同源，仅当角色码含 `VENDOR_PM` 时放行；其余 `vendorId != null` 的账号（`vendor1`/`vendor2`）维持 ⛔ 与 `/403?code=INTERNAL_ONLY`。例外只开「进入页面看」：导入/新建/复制/删除/保存新版本全部由 `test.action.case_edit` 关掉，用例数据本身仍由 `test_case.vendor_id` 经 `ScopeSql` 收敛。
 
 > 判据是**两段同源**：菜单看 `navVisible()`，路由看 `meta.functionCode`，`nav` 的码是 `meta` 的码的子集，故"看得见"与"点得开"不会再分叉（§6 P0-2）。
 
@@ -136,7 +142,7 @@ make platform-down          # 演示结束
 
 ### 4.7 厂商管理员 `vendor1`（PMO + VEN-A，演示域×厂商双维度隔离）
 - 实测：`/requirements` 总量 3（只本厂商承接）、缺陷 3；甘特、Wiki、价值流、质量门、追溯可用。
-- 用例库对厂商账号不可见（`internalOnly`），管理后台按矩阵不可见：这是本次修复让"厂商账号只能待在厂商面"的入口级证据。
+- 用例库对厂商账号不可见（`internalOnly`），管理后台按矩阵不可见：这是本次修复让"厂商账号只能待在厂商面"的入口级证据。r24 起唯一例外是第 11 个角色 `VENDOR_PM`（见 §4.9），`vendor1`/`vendor2` 维持不可见。
 - 演示话术：同一个 URL、同一个租户，换账号后数据从 12 条变成 3 条——这就是"行级双维度隔离 + 六出口同源过滤"。
 
 ### 4.8 业务方 `biz1` / `suite1`（权限 8 / 11，本轮新增账号）
@@ -144,6 +150,23 @@ make platform-down          # 演示结束
 - 不可演示（矩阵拒绝）：版本计划、测试计划、用例库、价值流、质量门、分支策略、管理后台 —— 与 §3 的 `biz1` 列一致。
 - `suite1`（SUB_BUSINESS_LEADER）：在 `biz1` 基础上多 `release:plan`（受限）与 `req:review`，故版本计划可打开、可参与评审。
 - 首次登录即验证：两个账号都不出现测试计划/分支策略/管理后台菜单（`make access-verify` 的 a4 段断言关键隐藏项）。
+
+### 4.9 厂商项目经理 `vpm1`（r24 新增第 11 角色，本厂商交付的只读驾驶舱 + 排期扳手）
+- 账号：`VENDOR_PM` + 厂商 `VEN-A`，密码 `Passw0rd!`；一个账号恰 1 条角色绑定，168 格授权（授权页 `/admin/roles/{id}/permissions` 可逐格看）。
+- **能看的**：需求池（只有 VEN-A 承接的 3 条 + 既有内部行）、版本计划、迭代、缺陷、用例库（唯一只读例外）、测试计划、追溯矩阵、甘特、Wiki、缺陷看板、质量指标；侧栏另有个人待办中心（见 §3 脚注 ⁶）。
+- **不能做的**（每一条都能当场表演 403，且状态不变）：版本新建/编辑/审批/关闭、需求评审/审批/验收/分解/指派厂商/交付/合并/完成、测试计划新建/审批/执行、用例维护（导入/新建/复制/删除/保存新版本）、甘特调整、Wiki 编辑、组织/用户/厂商/角色/权限/流程管理。
+- **唯一保留的写动作**：排期 `req.action.schedule`。在需求池里对一条可排期需求点「排期」→ 进版本，`allowedActions` 只含 `schedule`；同一条需求上看不到「评审通过」「分解」「指派厂商」（这些按钮的显示条件读 ACTION 快照，不读 `req:review`/`req:split` 等功能码）。
+- **与 `vendor1` 的差异对照**（演示最省时间的一组对照）：
+  | 维度 | `vendor1`（PMO + VEN-A） | `vpm1`（VENDOR_PM + VEN-A） |
+  |---|---|---|
+  | 用例库 | ⛔ `/403?code=INTERNAL_ONLY` | ✅ 只读进入（`vendorPmAllowed` 例外），写按钮全关 |
+  | 版本新建/编辑/审批 | ✅（PMO 有 `release.action.*`） | ⛔ 按钮不渲染、接口 403 |
+  | 需求评审/分解/指派厂商 | ✅ | ⛔ |
+  | 缺陷处理 / 排期 | ✅ / ✅ | ✅ / ✅（唯一写动作） |
+  | 用户与角色管理 | ⛔ | ⛔ |
+- **同一个厂商、同一批数据**：`vendor1` 与 `vpm1` 的需求/缺陷/任务条数相同（都只含 VEN-A），差别只在「能不能写」——这正是「厂商侧项目管理岗 ≠ 缩小版 PMO」的现场证据。
+- **版本页对 `vpm1` 是空的（预期）**：演示夹具唯一版本 `2026 Q4` 只含内部需求，严格派生下厂商账号的版本列表为 0 条。要向观众展示「厂商也能看版本」，先用 `pm` 把 R-09 排进该版本，再看 `vpm1` 的版本列表出现 1 条；**这是夹具特性，不是权限缺陷**（机制见 §3 脚注 ⁵）。同期去点他厂商版本的详情 URL，会拿到 403 `OUT_OF_SCOPE` —— 空列表 + 详情 403 一起讲，才是完整的「按本厂商需求派生」。
+- 演示顺序建议：① `pm` 排 R-09 进版本 → ② `vpm1` 登录看侧栏与需求池 3 条 → ③ 点「排期」成功 → ④ 点版本详情看只读、无「编辑/审批」→ ⑤ 手输 `/testcases` 进入只读页（写按钮灰）→ ⑥ 退出，换 `vendor1` 手输 `/testcases` 得 403 —— 六步 3 分钟讲清「角色化 vs 归属化」的区别。
 
 ---
 

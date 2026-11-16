@@ -42,6 +42,7 @@ const ctx: NavContext = {
   canAny: (codes) => perm.canAny(codes),
   hasMenu: (code) => perm.canMenu(code),
   vendorScoped: auth.user?.vendorId != null,
+  vendorPm: auth.isVendorPm,
 }
 
 const visibleItems = computed(() => items.filter((item) => navVisible(item, ctx)))

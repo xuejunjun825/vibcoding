@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# platform-test-negative.sh — TECHNICAL §8.3 的 16 段负向用例（r17 起含动作级授权）。
+# platform-test-negative.sh — TECHNICAL §8.3 的 17 段负向用例（r17 起含动作级授权）。
 # r23 增 4b) 段：流转前置门（拆解/直建/改父共用一道门）+ 提报 domainIds 必填，含正向回归。
+# r24 增 17) 段：VENDOR_PM 的第 11 个角色边界（厂商隔离 / 12 条写口 DENY / 账号必须绑厂商）。
 # 每条都断言两件事：被拒绝（4xx + 错误码），且**没有落库**（表计数不变）。
 # 绿色 = 非法路径确实走不通；不是"接口返回 200 但界面拦住了"。
 set -uo pipefail
@@ -281,18 +282,30 @@ api_call POST "/api/deliver/sprints/${NSPRINT}/close"
 deny "有未完成任务关闭迭代 → 409" 409 "" "必须要求迁移或显式遗留确认"
 
 # ---------------------------------------------------------------- 14
-section "14) 导出越权 → 0 行（不是 500）"
+# 导出必须与列表同源 scope：断言「导出的数据行数 == 该账号列表的 total」，
+# 而不是写死 0 行。r24 之后 VEN-B 会有自己的需求（第 17 段的夹具），写死 0 行会让这条
+# 断言随夹具漂移——那是断言写错，不是泄露。
+section "14) 导出越权 → 与列表同源（行数 == total，不是 500）"
 if login_as "vendor2" "Passw0rd!"; then
+    api_call GET "/api/req/requirements?page=1&size=50"
+    V2_LIST_TOTAL="$(jget_ "$HTTP_BODY" '.total')"
+    V2_LIST_PAGE="$(jget_ "$HTTP_BODY" '.items | length')"
     api_call GET "/api/req/requirements/export.csv?page=1&size=50"
     if [[ "$HTTP_CODE" == "200" ]]; then
         LINES="$(printf '%s' "$HTTP_BODY" | grep -c . || true)"
-        # 0 条数据时仍有两行：水印行 + 表头行（PRD：首行含水印元信息）
-        if (( LINES <= 2 )); then pass "越权导出无数据行（${LINES} 行 = 水印+表头）"; else fail "越权导出返回 ${LINES} 行，泄露了数据" "导出必须与列表同源 scope"; fi
+        # 首行是水印元信息、次行是表头（PRD），数据行 = 总行数 - 2。
+        DATA_LINES=$(( LINES > 2 ? LINES - 2 : 0 ))
+        if [[ -n "$V2_LIST_PAGE" && "$DATA_LINES" == "$V2_LIST_PAGE" ]]; then
+            pass "导出与列表同行数（${DATA_LINES} 行数据，total=${V2_LIST_TOTAL:-0}）：scope 同源"
+        else
+            fail "导出 ${DATA_LINES} 行 ≠ 列表本页 ${V2_LIST_PAGE:-?} 行（total=${V2_LIST_TOTAL:-?}）" \
+                "导出必须复用列表的 scope 谓词，不能各自拼 SQL"
+        fi
     else
-        fail "越权导出返回 ${HTTP_CODE}，期望 200+0 行" "200 空集，不是 500"
+        fail "导出返回 ${HTTP_CODE}，期望 200" "越权不是 500：空集也必须 200"
     fi
 else
-    warn "vendor2 登录失败，跳过导出越权"
+    warn "vendor2 登录失败，跳过导出同源断言"
 fi
 API_TOKEN="$ADMIN_TOKEN"
 
@@ -424,6 +437,254 @@ if [[ -n "$B_ID" && "$B_ID" != "null" && -n "$P_ID" && "$P_ID" != "null" ]]; the
 else
     warn "r17 夹具不完整（B=${B_ID:-空} P=${P_ID:-空}），跳过第 16 段"
 fi
+
+# ---------------------------------------------------------------- 17
+section "17) 第 11 个角色 VENDOR_PM（r24）：按厂商隔离、写口全关、账号必须绑厂商"
+
+# 演示夹具里唯一版本只含内部需求（TECHNICAL §0 C4），厂商视角本来就看它不见；
+# 所以第 17 段的正例（版本 200、排期 200）必须自建 VEN-A 数据，不能拿演示版本充数。
+VPM_VEN_A="$(db_q "SELECT id FROM sys_vendor WHERE tenant_id=${TID} AND code='VEN-A'")"
+VPM_VEN_B="$(db_q "SELECT id FROM sys_vendor WHERE tenant_id=${TID} AND code='VEN-B'")"
+# 排期只合法于 PDR 的 PENDING_ANALYSIS（StateTables），而 PDR 只能挂在已入池的 BUS 下，
+# 种子里的 POOLED BUS 就是 BUS-0001（platform-verify 也这样造夹具）。
+VPM_PARENT_BUS="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TID} AND type='BUS' AND status='POOLED' ORDER BY id LIMIT 1")"
+
+vpm_fixture() { # <tag> <vendor_id> [parent_bus_id] → 打印 "<reqId> <relId>"
+    local tag="$1" vid="$2" parent="${3:-}" rid relid body
+    if [[ -n "$parent" ]]; then
+        body="{\"type\":\"PDR\",\"title\":\"NEG-VPM-${tag}-${RUN_TAG}\",\"parentId\":${parent},\"domainIds\":[${DOMAIN1}],\"priority\":\"P2\",\"expectedDeliveryDate\":\"2026-12-31\"}"
+    else
+        body="{\"type\":\"BUS\",\"title\":\"NEG-VPM-${tag}-${RUN_TAG}\",\"domainIds\":[${DOMAIN1}],\"priority\":\"P2\",\"expectedDeliveryDate\":\"2026-12-31\"}"
+    fi
+    api_call POST /api/req/requirements "$body"
+    rid="$(jget_ "$HTTP_BODY" '.id')"
+    if [[ -z "$rid" || "$rid" == "null" ]]; then printf ''; return 0; fi
+    api_call POST "/api/req/requirements/${rid}/assign-vendor" \
+        "{\"vendorId\":${vid},\"reason\":\"r24 vendor-pm negative fixture ${tag}\"}"
+    [[ "$HTTP_CODE" == "200" ]] || warn "夹具 ${tag} 转派厂商失败（HTTP ${HTTP_CODE}）"
+    api_call POST /api/req/releases \
+        "{\"name\":\"NEG-VPM-REL-${tag}-${RUN_TAG}\",\"domainId\":${DOMAIN1},\"startDate\":\"2026-11-01\",\"endDate\":\"2026-11-30\",\"plannedReleaseDate\":\"2026-12-05\",\"gateMode\":\"LOOSE\"}"
+    relid="$(jget_ "$HTTP_BODY" '.id')"
+    if [[ -n "$relid" && "$relid" != "null" ]]; then
+        api_call POST "/api/req/releases/${relid}/requirements" "{\"requirementIds\":[${rid}]}"
+        [[ "$HTTP_CODE" == "200" ]] || warn "夹具 ${tag} 挂版本失败（HTTP ${HTTP_CODE}）"
+    fi
+    printf '%s %s' "$rid" "${relid:-}"
+}
+
+read -r VPM_REQ_A VPM_REL_A <<<"$(vpm_fixture A "${VPM_VEN_A}")"
+read -r VPM_REQ_B VPM_REL_B <<<"$(vpm_fixture B "${VPM_VEN_B}")"
+read -r VPM_REQ_SCHEDULE VPM_REL_SCHEDULE <<<"$(vpm_fixture SCHED "${VPM_VEN_A}" "${VPM_PARENT_BUS}")"
+VPM_USER_ID="$(db_q "SELECT id FROM sys_user WHERE tenant_id=${TID} AND username='vpm1'")"
+VPM_REL_COUNT="$(db_count "\`release\`" "tenant_id=${TID}")"
+
+if [[ -n "$VPM_VEN_A" && -n "$VPM_REQ_A" && -n "$VPM_REQ_B" ]]; then
+    # ---- ① 会话身份：角色 + 厂商
+    if login_as "vpm1" "Passw0rd!"; then
+        pass "vpm1 可登录（VENDOR_PM 是内置角色，不是自定义角色）"
+        VPM_ROLES="$(jget_ "$HTTP_BODY" '.user.roles | join(",")')"
+        VPM_VENDOR="$(jget_ "$HTTP_BODY" '.user.vendorId')"
+        if grep -qF 'VENDOR_PM' <<<"$VPM_ROLES"; then
+            pass "vpm1 角色含 VENDOR_PM（${VPM_ROLES}）"
+        else
+            fail "vpm1 角色为 ${VPM_ROLES:-<空>}，不含 VENDOR_PM" "SeedService 必须给 vpm1 写 VENDOR_PM 角色"
+        fi
+        if [[ "$VPM_VENDOR" == "$VPM_VEN_A" ]]; then
+            pass "vpm1 会话绑定厂商 VEN-A（vendorId=${VPM_VENDOR}）"
+        else
+            fail "vpm1 会话厂商 ${VPM_VENDOR:-<空>}，期望 ${VPM_VEN_A}" "账号未绑厂商 ⇒ 数据域退化，必须 vendor_id 非空"
+        fi
+
+        # ---- ② 需求列表只看本厂商（内部需求是共享池，不算越界）
+        api_call GET "/api/req/requirements?page=1&size=200"
+        allow "VENDOR_PM 读需求列表 → 200（不是禁读角色）" 200 "" "VENDOR_PM 必须能跟踪本厂商交付"
+        VPM_BAD_ROWS="$(printf '%s' "$HTTP_BODY" | jq -r --argjson a "${VPM_VEN_A}" \
+            '[.items[]? | select([(.ownerVendorId // 0), (.assigneeVendorId // 0)] | map(select(. != 0)) | any(. != $a))] | length' 2>/dev/null || echo x)"
+        if [[ "$VPM_BAD_ROWS" == "0" ]]; then
+            pass "VENDOR_PM 需求列表无他厂商行（owner/assignee 非空即本厂商）"
+        else
+            fail "VENDOR_PM 需求列表出现 ${VPM_BAD_ROWS} 行他厂商数据" "ScopeSql 的 requirement 谓词必须按 owner/assignee 厂商取并集"
+        fi
+        api_call GET "/api/req/requirements?page=1&size=1"
+        VPM_REQ_TOTAL="$(jget_ "$HTTP_BODY" '.total')"
+        if login_as "vendor1" "Passw0rd!"; then
+            api_call GET "/api/req/requirements?page=1&size=1"
+            V1_REQ_TOTAL="$(jget_ "$HTTP_BODY" '.total')"
+            if [[ "$VPM_REQ_TOTAL" == "$V1_REQ_TOTAL" ]]; then
+                pass "VENDOR_PM 与同厂商 PMO 的数据域一致（total=${VPM_REQ_TOTAL}，角色不同、范围相同）"
+            else
+                fail "VENDOR_PM 总数 ${VPM_REQ_TOTAL} ≠ 同厂商 PMO ${V1_REQ_TOTAL}" "同厂商两角色应看到同一批需求"
+            fi
+        else
+            warn "vendor1 登录失败，跳过「同厂商同范围」对照"
+        fi
+        API_TOKEN="$ADMIN_TOKEN"
+        api_call GET "/api/req/requirements?page=1&size=1"
+        ADMIN_REQ_TOTAL="$(jget_ "$HTTP_BODY" '.total')"
+        if [[ -n "$VPM_REQ_TOTAL" && -n "$ADMIN_REQ_TOTAL" ]] && (( VPM_REQ_TOTAL < ADMIN_REQ_TOTAL )); then
+            pass "VENDOR_PM 范围小于管理员（${VPM_REQ_TOTAL} < ${ADMIN_REQ_TOTAL}，隔离真的在生效）"
+        else
+            fail "VENDOR_PM 总数 ${VPM_REQ_TOTAL:-空} 未小于管理员 ${ADMIN_REQ_TOTAL:-空}" "厂商账号不该看到全租户需求"
+        fi
+
+        if login_as "vpm1" "Passw0rd!"; then
+            # ---- ③ 他厂商需求详情：403
+            api_call GET "/api/req/requirements/${VPM_REQ_B}"
+            deny "VENDOR_PM 读他厂商需求详情 → 403 OUT_OF_SCOPE" 403 "OUT_OF_SCOPE" \
+                "ScopeGuard.requireVisible 必须按 vendor_id 判定厂商隔离"
+            api_call GET "/api/req/requirements/${VPM_REQ_A}"
+            allow "VENDOR_PM 读本厂商需求详情 → 200（正例）" 200 "" "本厂商数据必须可见"
+
+            # ---- ④ 审批：厂商永远不能评审（REVIEW_SIDE 对 vendorId 非空一律 false）
+            API_TOKEN="$ADMIN_TOKEN"
+            api_call POST "/api/req/requirements/${VPM_REQ_A}/actions" '{"action":"submit"}'
+            [[ "$HTTP_CODE" == "200" ]] || warn "夹具 A 提交失败（HTTP ${HTTP_CODE}），审批越权断言可能失真"
+            if login_as "vpm1" "Passw0rd!"; then
+                # 这条 403 由路由级 bodyAction 判定（动作码被 DENY，请求体还没进服务层），
+                # 所以 detail 里回显的是动作码 req.action.approve，而不是裸动作名 approve。
+                api_call POST "/api/req/requirements/${VPM_REQ_A}/actions" '{"action":"approve"}'
+                deny_action "VENDOR_PM 审批本厂商需求 → 403（评审是内部职责）" \
+                    "$VPM_REQ_A" "APPROVING" '"action":"req.action.approve"' "REQ_SUBMIT" 1
+                api_call POST "/api/req/requirements/${VPM_REQ_A}/actions" '{"action":"reject"}'
+                deny_action "VENDOR_PM 驳回需求 → 403" "$VPM_REQ_A" "APPROVING" '"action":"req.action.reject"' "REQ_SUBMIT" 1
+
+                # ---- ⑤ 正例：排期是 VENDOR_PM 唯一的需求写动作（release:plan 派生）
+                api_call POST "/api/req/requirements/${VPM_REQ_SCHEDULE}/actions" '{"action":"schedule"}'
+                if [[ "$HTTP_CODE" == "200" ]]; then
+                    pass "VENDOR_PM 排期本厂商 PDR → 200（唯一的需求写动作确实开着）"
+                else
+                    fail "VENDOR_PM 排期本厂商 PDR 返回 ${HTTP_CODE}: $(printf '%s' "$HTTP_BODY" | head -c 160)" \
+                        "req.action.schedule 对 VENDOR_PM 应为 ALLOW（release:plan 派生）"
+                fi
+            fi
+
+            # ---- ⑥ 版本写口全关
+            if login_as "vpm1" "Passw0rd!"; then
+                api_call POST /api/req/releases \
+                    "{\"name\":\"NEG-VPM-DENY-${RUN_TAG}\",\"domainId\":${DOMAIN1},\"startDate\":\"2026-11-01\",\"endDate\":\"2026-11-30\",\"plannedReleaseDate\":\"2026-12-05\",\"gateMode\":\"LOOSE\"}"
+                deny "VENDOR_PM 创建版本 → 403（release.action.create 被 DENY 覆盖）" 403 "" \
+                    "RbacSeeder.ACTION_DENY_OVERRIDES 必须覆盖 release.action.create"
+                same_count "越权建版本未落库" "\`release\`" "tenant_id=${TID}" "$VPM_REL_COUNT"
+
+                VPM_REL_STATUS="$(db_q "SELECT status FROM \`release\` WHERE id=${VPM_REL_A}")"
+                api_call POST "/api/req/releases/${VPM_REL_A}/approval"
+                deny "VENDOR_PM 提交版本审批 → 403" 403 "" "版本审批是 PMO/管理员职责"
+                [[ "$(db_q "SELECT status FROM \`release\` WHERE id=${VPM_REL_A}")" == "$VPM_REL_STATUS" ]] \
+                    && pass "越权提交审批未改版本状态（仍 ${VPM_REL_STATUS}）" \
+                    || fail "越权提交审批后版本状态被改（${VPM_REL_STATUS} → $(db_q "SELECT status FROM \`release\` WHERE id=${VPM_REL_A}")）" \
+                        "拒绝必须发生在写状态之前"
+
+                api_call POST "/api/req/releases/${VPM_REL_A}/reviews" \
+                    '{"roundName":"neg-vpm","reviewers":[],"comment":"越权"}'
+                deny "VENDOR_PM 创建评审轮次 → 403（页面码已改为 release.action.update）" 403 "" \
+                    "POST /releases/{id}/reviews 必须是动作码守卫，不能只判页面码"
+
+                api_call POST "/api/req/releases/${VPM_REL_A}/lock"
+                deny "VENDOR_PM 锁定版本 → 403" 403 "" "锁定是版本治理动作"
+                api_call PATCH "/api/req/releases/${VPM_REL_A}/quality-settings" '{"gateMode":"STRICT"}'
+                deny "VENDOR_PM 改版本质量设置 → 403" 403 "" "release.action.update 必须被 DENY"
+                api_call POST "/api/req/releases/${VPM_REL_A}/requirements" "{\"requirementIds\":[${VPM_REQ_A}]}"
+                deny "VENDOR_PM 往版本里加需求 → 403" 403 "" "写口收口到 release.action.update"
+                [[ "$(db_q "SELECT status FROM \`release\` WHERE id=${VPM_REL_A}")" == "$VPM_REL_STATUS" ]] \
+                    && pass "版本写口全部拒绝后状态未变（仍 ${VPM_REL_STATUS}）" \
+                    || fail "版本写口尝试后状态漂移" "所有版本写方法都必须先过 requireVisible"
+            fi
+
+            # ---- ⑦ 版本读：只看得见「含本厂商需求」的版本（ScopeSql 派生 EXISTS）
+            if login_as "vpm1" "Passw0rd!"; then
+                api_call GET "/api/req/releases?page=1&size=100"
+                allow "VENDOR_PM 读版本列表 → 200" 200 "" "派生谓词必须让本厂商版本进入列表"
+                VPM_HAS_A="$(printf '%s' "$HTTP_BODY" | jq -r --argjson r "${VPM_REL_A}" '[.items[]? | select(.id == $r)] | length' 2>/dev/null || echo x)"
+                VPM_HAS_B="$(printf '%s' "$HTTP_BODY" | jq -r --argjson r "${VPM_REL_B}" '[.items[]? | select(.id == $r)] | length' 2>/dev/null || echo x)"
+                [[ "$VPM_HAS_A" == "1" ]] \
+                    && pass "本厂商版本出现在 VENDOR_PM 列表（release ${VPM_REL_A}）" \
+                    || fail "本厂商版本 ${VPM_REL_A} 未出现在 VENDOR_PM 版本列表" \
+                        "release 的 vendor 谓词必须是 release_requirement→requirement 的 EXISTS 派生"
+                [[ "$VPM_HAS_B" == "0" ]] \
+                    && pass "他厂商版本不出现在 VENDOR_PM 列表（release ${VPM_REL_B}）" \
+                    || fail "他厂商版本 ${VPM_REL_B} 出现在 VENDOR_PM 版本列表" "派生 EXISTS 必须带 vendor 条件"
+                api_call GET "/api/req/releases/${VPM_REL_A}"
+                allow "VENDOR_PM 读本厂商版本详情 → 200（正例）" 200 "" "列表与详情必须同一谓词"
+                api_call GET "/api/req/releases/${VPM_REL_B}"
+                deny "VENDOR_PM 读他厂商版本详情 → 403 OUT_OF_SCOPE" 403 "OUT_OF_SCOPE" \
+                    "ReleaseService.requireVisible 必须复用同一 scope marker"
+            fi
+
+            # ---- ⑧ 系统管理：角色/用户/租户全部不可达
+            if login_as "vpm1" "Passw0rd!"; then
+                VPM_ROLE_BEFORE="$(db_count sys_role "tenant_id=${TID}")"
+                api_call POST /api/req/admin/roles "{\"code\":\"NEG_VPM_ROLE\",\"name\":\"负向角色\"}"
+                deny "VENDOR_PM 建角色 → 403" 403 "" "role.action.create 对厂商角色必须 DENY"
+                same_count "越权建角色未落库" sys_role "tenant_id=${TID}" "$VPM_ROLE_BEFORE"
+                VPM_USER_BEFORE="$(db_count sys_user "tenant_id=${TID}")"
+                api_call POST /api/req/admin/users \
+                    "{\"username\":\"neg-vpm-user-${RUN_TAG}\",\"roles\":[\"DEV\"]}"
+                deny "VENDOR_PM 建用户 → 403" 403 "" "user.action.create 对厂商角色必须 DENY"
+                same_count "越权建用户未落库" sys_user "tenant_id=${TID}" "$VPM_USER_BEFORE"
+                api_call PUT /api/req/admin/users "{\"id\":${VPM_USER_ID},\"name\":\"tampered\"}"
+                deny "VENDOR_PM 改用户 → 403" 403 "" "user.action.update 对厂商角色必须 DENY"
+            fi
+            API_TOKEN="$ADMIN_TOKEN"
+
+            # ---- ⑨ 账号必须绑厂商：create 缺 vendorId → 400 且不落库
+            VPM_USER_BEFORE="$(db_count sys_user "tenant_id=${TID}")"
+            api_call POST /api/req/admin/users \
+                "{\"username\":\"neg-vpm-novendor-${RUN_TAG}\",\"roles\":[\"VENDOR_PM\"],\"password\":\"Passw0rd!\"}"
+            deny "管理员建 VENDOR_PM 用户但不给 vendorId → 400 VALIDATION_FAILED" 400 "VALIDATION_FAILED" \
+                "RoleCatalog.requiresVendor 必须先于 INSERT 拦下"
+            grep -qF '"field":"vendorId"' <<<"$HTTP_BODY" \
+                && pass "400 指明缺的是 vendorId 字段（前端能定位到表单项）" \
+                || fail "400 响应未指明 field=vendorId: $(printf '%s' "$HTTP_BODY" | head -c 160)" \
+                    "ApiException 的 detail.field 是前端回填契约"
+            same_count "无厂商的 VENDOR_PM 账号未落库" sys_user "tenant_id=${TID}" "$VPM_USER_BEFORE"
+
+            # ---- ⑩ update 用「将生效角色」：只清 vendorId、不带 roles → 仍必须 400
+            if [[ -n "$VPM_USER_ID" ]]; then
+                api_call PUT /api/req/admin/users "{\"id\":${VPM_USER_ID},\"vendorId\":null}"
+                deny "管理员清空 VENDOR_PM 用户的厂商 → 400（角色未变，仍强制厂商）" 400 "VALIDATION_FAILED" \
+                    "update 必须校验将生效角色，而不是只校验 body 里的 roles"
+                if [[ "$(db_q "SELECT vendor_id FROM sys_user WHERE id=${VPM_USER_ID}")" == "$VPM_VEN_A" ]]; then
+                    pass "被拒的更新未改库（vendor_id 仍 VEN-A）"
+                else
+                    fail "被拒的更新写入了 vendor_id=$(db_q "SELECT vendor_id FROM sys_user WHERE id=${VPM_USER_ID}")" \
+                        "校验必须在 UPDATE 之前"
+                fi
+            else
+                warn "种子里没有 vpm1 用户，跳过「清空厂商」负向"
+            fi
+
+            # ---- ⑪ 交付域写口：用例/测试计划/迭代/任务全部 DENY
+            if login_as "vpm1" "Passw0rd!"; then
+                VPM_CASE_BEFORE="$(db_count test_case "tenant_id=${TID}")"
+                api_call POST /api/deliver/testcases \
+                    "{\"title\":\"neg-vpm-case-${RUN_TAG}\",\"domainId\":${DOMAIN1}}"
+                deny "VENDOR_PM 建用例 → 403" 403 "" "test.action.case_edit 必须被 DENY 覆盖"
+                same_count "越权建用例未落库" test_case "tenant_id=${TID}" "$VPM_CASE_BEFORE"
+                VPM_PLAN_BEFORE="$(db_count test_plan "tenant_id=${TID}")"
+                api_call POST /api/deliver/test-plans \
+                    "{\"name\":\"neg-vpm-plan-${RUN_TAG}\",\"domainId\":${DOMAIN1}}"
+                deny "VENDOR_PM 建测试计划 → 403" 403 "" "test.action.plan_create 对厂商角色必须 DENY"
+                same_count "越权建测试计划未落库" test_plan "tenant_id=${TID}" "$VPM_PLAN_BEFORE"
+                api_call POST /api/req/sprints "{\"name\":\"neg-vpm-sprint-${RUN_TAG}\",\"domainId\":${DOMAIN1}}"
+                deny "VENDOR_PM 建迭代 → 403" 403 "" "sprint.action.create 必须被 DENY 覆盖"
+                api_call POST /api/req/tasks \
+                    "{\"title\":\"neg-vpm-task-${RUN_TAG}\",\"domainId\":${DOMAIN1}}"
+                deny "VENDOR_PM 建任务 → 403" 403 "" "task.action.create 必须被 DENY 覆盖"
+
+                # ---- ⑫ 唯一开着的页面：用例库只读（页面进得去、写按钮关着）
+                api_call GET "/api/deliver/testcases?page=1&size=5"
+                allow "VENDOR_PM 读用例库 → 200（vendorPmAllowed 窄例外的页面，仅只读）" 200 "" \
+                    "用例库是 VENDOR_PM 唯一的 internalOnly 例外，页面必须能进"
+            fi
+            API_TOKEN="$ADMIN_TOKEN"
+        fi
+    else
+        fail "vpm1 登录失败" "make platform-seed 必须创建 vpm1/Passw0rd!（VENDOR_PM + VEN-A）"
+    fi
+else
+    warn "第 17 段夹具不完整（VEN-A=${VPM_VEN_A:-空} reqA=${VPM_REQ_A:-空} reqB=${VPM_REQ_B:-空}），跳过 VENDOR_PM 边界"
+fi
+API_TOKEN="$ADMIN_TOKEN"
 
 printf '\n'
 if (( PASS != TOTAL || TOTAL == 0 )); then

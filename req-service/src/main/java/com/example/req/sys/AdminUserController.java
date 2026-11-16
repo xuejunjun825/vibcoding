@@ -87,6 +87,7 @@ public class AdminUserController {
         Long vendorId = AdminOrgController.longOrNull(body.get("vendorId"));
         // Validate everything first: a rejected role must not leave an account with no roles.
         Map<String, Long> roleIds = resolveRoles(tenantId, roleCodes(body));
+        validateVendorBinding(roleCodes(body), vendorId);
         requireOrg(tenantId, orgId);
         requireVendor(tenantId, vendorId);
         List<Long> domainIds = resolveDomains(tenantId, domainIds(body));
@@ -130,6 +131,11 @@ public class AdminUserController {
         boolean touchesDomains = body.containsKey("domainIds");
         Map<String, Long> roleIds = touchesRoles ? resolveRoles(tenantId, roleCodes(body)) : null;
         List<Long> domainIds = touchesDomains ? resolveDomains(tenantId, domainIds(body)) : null;
+        // The roles that will be in force once this update lands: a body that omits them keeps the
+        // stored ones, so validating `roleCodes(body)` alone would let "clear the vendor, keep
+        // VENDOR_PM" through — and that account then sees nothing and can write nothing.
+        // Checked before the UPDATE below, so a rejected edit leaves the row untouched.
+        validateVendorBinding(touchesRoles ? roleCodes(body) : roles(tenantId, id), vendorId);
         requireOrg(tenantId, orgId);
         requireVendor(tenantId, vendorId);
         if (!"ACTIVE".equals(status)) {
@@ -291,6 +297,21 @@ public class AdminUserController {
         if (!exists) {
             throw new ApiException(404, "VENDOR_NOT_FOUND", "厂商不存在",
                     Map.of("vendorId", vendorId));
+        }
+    }
+
+    /**
+     * A VENDOR_PM account without a vendor is not a usable account: its data scope resolves to no
+     * vendor, so every list is empty and every write 403s. Reject the write instead of storing an
+     * account that looks fine in the user list and does nothing anywhere else.
+     *
+     * <p>Both write entries (create and update) come through here, and update passes the roles that
+     * will be <em>in force</em> — omitting {@code roles} keeps the stored ones.</p>
+     */
+    private void validateVendorBinding(List<String> effectiveRoles, Long vendorId) {
+        if (vendorId == null && RoleCatalog.requiresVendor(effectiveRoles)) {
+            throw new ApiException(400, "VALIDATION_FAILED", "VENDOR_PM 用户必须绑定厂商（vendorId）",
+                    Map.of("field", "vendorId"));
         }
     }
 

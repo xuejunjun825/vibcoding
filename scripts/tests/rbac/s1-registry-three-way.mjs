@@ -206,7 +206,7 @@ setEq('库 sys_menu = MenuRegistry（页面码集合）', pageCodes, dbPageCodes
 setEq('nav.ts 的 pageCode = MenuRegistry（排除 notifications）', pageCodes, navCodes,
   '导航漏 pageCode 会让页面永远不可见；多出的码是幽灵菜单（AC-2）')
 eq('导航 /notifications 不参与授权（pageCode 为空）', true, notificationsHasNoPage,
-  '通知是登录可读页，注册进 sys_menu 会污染 1680 行计数')
+  '通知是登录可读页，注册进 sys_menu 会污染 1848 行计数')
 eq('导航含新增「角色与权限」入口', true, navCodes.has('admin.roles'),
   'T5a：nav.ts 需新增 /admin/roles（pageCode: admin.roles）')
 

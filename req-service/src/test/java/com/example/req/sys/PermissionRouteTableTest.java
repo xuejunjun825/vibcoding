@@ -139,6 +139,22 @@ class PermissionRouteTableTest {
     }
 
     @Test
+    void releaseReviewCreationIsAWriteOnTheRelease() {
+        // Opening a review round is a write: the page code alone admitted every role that can read
+        // the release, which is exactly the gap a read-only vendor role would fall through.
+        assertEquals("release.action.update",
+                PermissionRouteTable.requirementFor("POST", "/releases/5/reviews").action());
+        assertEquals("release.action.approve",
+                PermissionRouteTable.requirementFor("POST", "/releases/5/reviews/9/confirm").action());
+        // Reading the rounds stays page-guarded — a vendor who can see the release can read them.
+        PermissionRouteTable.Requirement read =
+                PermissionRouteTable.requirementFor("GET", "/releases/5/reviews");
+        assertNotNull(read);
+        assertEquals(List.of("req.release"), read.pages());
+        assertNull(read.action(), "reads must not be gated by a write action");
+    }
+
+    @Test
     void everyRuleNamesARegisteredPageAndAConsistentAction() {
         assertFalse(PermissionRouteTable.guardedPatterns().isEmpty());
         for (String guarded : PermissionRouteTable.guardedPatterns()) {

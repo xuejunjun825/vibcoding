@@ -101,9 +101,38 @@ class RbacSeederTest {
         ActionRegistry.ActionDef action = ActionRegistry.actions().stream()
                 .filter(candidate -> !candidate.functionCodes().isEmpty())
                 .findFirst().orElseThrow();
-        assertEquals(PermissionMatrix.accessForAny("QA", action.functionCodes()).name(),
+        assertEquals(RbacSeeder.actionAccessFor("QA", action).name(),
                 single(RbacSeeder.preset("QA"), "ACTION", action.code()).access(),
-                "ACTION row is the max over the action's function codes");
+                "ACTION row goes through actionAccessFor, not a second derivation");
+    }
+
+    /**
+     * r24: the preset is where the 11 overrides become rows. Asserting through {@code preset("VENDOR_PM")}
+     * (not only through the override map) is what proves the seeder actually used them — a preset that
+     * still called {@code accessForAny} would pass an override-map assertion and seed the wrong rows.
+     */
+    @Test
+    void vendorPmPresetCarriesTheOverridesAsDenyRows() {
+        List<RbacSeeder.Row> rows = RbacSeeder.preset("VENDOR_PM");
+        for (String code : List.of("release.action.create", "release.action.update",
+                "release.action.approve", "release.action.close",
+                "task.action.create", "task.action.assign", "task.action.update",
+                "task.action.close", "sprint.action.create", "sprint.action.close",
+                "test.action.case_edit")) {
+            assertEquals("DENY", single(rows, "ACTION", code).access(), code + " must seed DENY");
+        }
+        // The three write actions the role keeps: scheduling is its job, defects are its to handle.
+        assertEquals("ALLOW", single(rows, "ACTION", "req.action.schedule").access());
+        assertEquals("ALLOW", single(rows, "ACTION", "defect.action.handle").access());
+        assertEquals(7, rows.stream()
+                        .filter(row -> row.subjectType().equals("ACTION") && row.access().equals("ALLOW"))
+                        .count(),
+                "7 ACTION rows remain ALLOW (72 − 11 overrides − 54 derivation)");
+        // Functional layer is untouched by the override: still the matrix cell.
+        assertEquals(PermissionMatrix.accessFor("VENDOR_PM", "release:plan").name(),
+                single(rows, "FUNCTION", "release:plan").access(),
+                "the override lives on the ACTION layer only");
+        assertEquals(168, rows.size(), "the row count never moves: overrides flip a value, not a row");
     }
 
     @Test

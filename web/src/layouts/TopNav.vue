@@ -29,6 +29,7 @@ const navItems = computed(() =>
       canAny: (codes) => auth.canAny(codes),
       hasMenu: (code) => auth.canMenu(code),
       vendorScoped: auth.user?.vendorId != null,
+      vendorPm: auth.isVendorPm,
     }
     return navVisible(item, ctx)
   }),

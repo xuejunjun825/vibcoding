@@ -51,9 +51,14 @@ const STATUS_TABS = [
 
 const route = useRoute()
 const router = useRouter()
-const { can } = usePermission()
-const canManage = computed(() => can('plan:manage'))
-const canApprove = computed(() => can('plan:approve'))
+const { canAction } = usePermission()
+/**
+ * 新建 / 审批 / 执行是三个独立写动作（TECHNICAL §5.2）：
+ * 只读角色（如 VENDOR_PM）能进页面看计划，但三个按钮都必须被动作码关掉。
+ */
+const canCreate = computed(() => canAction('test.action.plan_create'))
+const canApprove = computed(() => canAction('test.action.plan_approve'))
+const canExecute = computed(() => canAction('test.action.execute'))
 
 const releases = ref<ReleaseRow[]>([])
 const users = ref<DictionaryUser[]>([])
@@ -124,7 +129,7 @@ async function loadOptions(): Promise<void> {
   } catch {
     releases.value = []
   }
-  if (!canManage.value) return
+  if (!canCreate.value) return
   try {
     users.value = await listDictionaryUsers()
   } catch {
@@ -156,6 +161,11 @@ function openPlan(row: PlanRow): void {
 }
 
 function executePlan(row: PlanRow): void {
+  // 入口复核：按钮 disabled 只是体验，函数入口再判一次（深链/键盘/程序调用都挡）
+  if (!canExecute.value) {
+    ElMessage.warning('需要权限：test.action.execute')
+    return
+  }
   void router.push({ name: 'test-plan-execute', params: { id: row.id } })
 }
 
@@ -328,7 +338,7 @@ onMounted(async () => {
         <span class="dl-meta">{{ formatNumber(total) }} 个计划 · 用例纳入时钉住当前版本</span>
       </div>
       <div class="dl-head__actions">
-        <el-button type="primary" :disabled="!canManage" :title="canManage ? '' : '缺少 plan:manage 权限'" @click="openCreate">
+        <el-button :type="canCreate ? 'primary' : 'default'" :disabled="!canCreate" :title="canCreate ? '' : '需要权限：test.action.plan_create'" @click="openCreate">
           新建计划
         </el-button>
       </div>
@@ -383,7 +393,7 @@ onMounted(async () => {
         :variant="status || releaseId || keyword ? 'filtered' : 'empty'"
         description="计划 = 版本下的一组用例，执行结果用于门禁判定"
         icon="file"
-        :action-text="canManage && !status && !keyword ? '新建计划' : undefined"
+        :action-text="canCreate && !status && !keyword ? '新建计划' : undefined"
         @action="openCreate"
       />
       <template v-else>
@@ -440,7 +450,7 @@ onMounted(async () => {
             <template #default="{ row }">
               <div class="row-actions" @click.stop>
                 <el-button link type="primary" @click="openPlan(row)">打开</el-button>
-                <el-button link @click="executePlan(row)">执行</el-button>
+                <el-button link @click="executePlan(row)" :disabled="!canExecute" :title="canExecute ? '' : '需要权限：test.action.execute'">执行</el-button>
               </div>
             </template>
           </el-table-column>

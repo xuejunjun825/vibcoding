@@ -1,0 +1,28 @@
+PASS vpm1 侧栏出现「用例库」
+PASS vpm1 侧栏无「用户与角色」（admin.* DENY）
+PASS vpm1 侧栏无「价值流」（collab.value-stream DENY）
+PASS 版本页未被 403
+PASS vpm1 版本集是 admin 的子集（派生谓词无越权） — vpm=0 admin=6 leaked=
+PASS admin 仍有 vpm1 看不见的版本（隔离非空） — 0/6
+PASS 「新建版本」按钮存在且禁用 — {"disabled":true,"title":"需要权限：release.action.create"}
+PASS 禁用提示写明动作码 — 需要权限：release.action.create
+PASS vpm1 深链 /testcases 未被 403（例外生效） — /testcases
+PASS 「新建用例」禁用 — {"disabled":true,"title":"需要权限：test.action.case_edit"}
+PASS 「导入」禁用 — {"disabled":true,"title":"需要权限：test.action.case_edit"}
+PASS 「导出 CSV」仍可用（只读保留导出） — {"disabled":false,"title":""}
+PASS 用例库可见 1 条本厂商用例
+PASS 详情只读横幅写明原因（test.action.case_edit）
+PASS 横幅承诺「可查询/导出 CSV」
+PASS 只读主操作「保存为新版本」已降级为默认按钮（非 primary 蓝） — el-button el-button--default is-disabled
+PASS 「新建计划」禁用 + 提示 plan_create — {"disabled":true,"title":"需要权限：test.action.plan_create"}
+PASS 「执行」不渲染或禁用 + 提示 execute — null
+PASS vendor1 深链落 /403 — /403?from=/testcases&code=INTERNAL_ONLY
+PASS 错误码是 INTERNAL_ONLY — /403?from=/testcases&code=INTERNAL_ONLY
+PASS vpm1 深链 /admin/users 落 /403 — /403?from=/admin/users&code=admin.users
+PASS 用户名/姓名已填（越过 el-form 必填规则） — filled:3
+PASS 角色下拉可选 VENDOR_PM — opened/true
+PASS 选 VENDOR_PM 后厂商必填提示出现
+PASS 前端先拦一次（表单就地报错，不发请求） — {"inline":"VENDOR_PM 必须绑定厂商（vendorId），否则该账号无法按厂商收窄数据","toast":"厂商项目经理（VENDOR_PM）必须选择所属厂商","dialogOpen":true,"vendorFocused":true}
+PASS 弹窗保持打开（未误关） — {"inline":"VENDOR_PM 必须绑定厂商（vendorId），否则该账号无法按厂商收窄数据","toast":"厂商项目经理（VENDOR_PM）必须选择所属厂商","dialogOpen":true,"vendorFocused":true}
+PASS 焦点落到厂商字段（内联红字 + 聚焦 = 哪错了 + 改哪里） — {"inline":"VENDOR_PM 必须绑定厂商（vendorId），否则该账号无法按厂商收窄数据","toast":"厂商项目经理（VENDOR_PM）必须选择所属厂商","dialogOpen":true,"vendorFocused":true}
+PASS 角色列表出现 VENDOR_PM

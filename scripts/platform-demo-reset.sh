@@ -28,7 +28,7 @@ FAIL=0
 CASE=0
 # 本脚本固定 57 项断言（AC-9 的「57/57」口径）。断言只增：新增/删除断言时同步改这里，
 # 末尾会校验实际执行数 == 声明数，漂移直接红——否则「57/57」会变成一句没人维护的祝福。
-TOTAL_CHECKS=57
+TOTAL_CHECKS=61
 FAIL_TRANSPORT=0
 FAIL_API=0
 FAIL_ASSERT=0
@@ -236,12 +236,12 @@ SUPPLY_REQS="$(db_count requirement "tenant_id = ${TENANT_ID} AND origin_org_id 
 
 # 账号断言的是「种子账号仍然存在」，不是「tenant 内用户总数恰好 N」：权限/账号类门禁
 # 会在同一个 t1 租户里加人（如 T1 devcheck），用总数会把别人的账号算成种子缺陷。
-# 名单与 SeedResult.loginUsers() 同源（20261110-r9 起 13 个，含 mgr1）。
-KEPT_USERS="$(db_count sys_user "tenant_id = ${TENANT_ID} AND username IN ('admin','pm','tl1','po1','biz1','suite1','dev1','dev2','qa1','qa2','vendor1','vendor2','mgr1')")"
+# 名单与 SeedResult.loginUsers() 同源（20261110-r9 起 13 个，含 mgr1；r24 加 vpm1 共 14 个）。
+KEPT_USERS="$(db_count sys_user "tenant_id = ${TENANT_ID} AND username IN ('admin','pm','tl1','po1','biz1','suite1','dev1','dev2','qa1','qa2','vendor1','vendor2','mgr1','vpm1')")"
 KEPT_DOMAINS="$(db_count biz_domain "tenant_id = ${TENANT_ID}")"
 KEPT_VENDORS="$(db_count sys_vendor "tenant_id = ${TENANT_ID}")"
-[[ "${KEPT_USERS}" == "13" && "${KEPT_DOMAINS}" == "7" && "${KEPT_VENDORS}" == "3" ]] \
-    && pass "定义数据保留：种子账号 13 / 域 7 / 厂商 3" \
+[[ "${KEPT_USERS}" == "14" && "${KEPT_DOMAINS}" == "7" && "${KEPT_VENDORS}" == "3" ]] \
+    && pass "定义数据保留：种子账号 14 / 域 7 / 厂商 3" \
     || fail "定义数据被误删：种子账号 ${KEPT_USERS} / 域 ${KEPT_DOMAINS} / 厂商 ${KEPT_VENDORS}" \
             "DELETE_ORDER 只能包含业务实例表，账号/域/厂商属定义数据"
 
@@ -471,6 +471,9 @@ check_visible() { # check_visible <user> <expected>
 check_visible po1 8
 check_visible vendor1 3
 check_visible vendor2 0
+# r24：vpm1 与 vendor1 同厂商不同角色 —— 隔离按厂商，所以需求可见数与 vendor1 相同（3）。
+# 这条登录本身也是断言：VENDOR_PM 必须能进系统，否则授权表再对也没人能用。
+check_visible vpm1 3
 API_TOKEN=""
 API_TENANT=""
 
@@ -487,14 +490,43 @@ check_count_any() {
         || fail "${label}（期望 ${want}，实际 ${got:-<缺 ${k1}/${k2} 键>}）" \
             "重置计数由 DemoResetService 返回，缺键说明 r18 段还没接进 reset 响应"
 }
-check_count_any rolePermission role_permission 1680 "授权行 role_permission = 1680（10 角色 × 168）"
-check_count_any customRoles custom_roles 0 "自定义角色 = 0（重置只留内置 10 个）"
+check_count_any rolePermission role_permission 1848 "授权行 role_permission = 1848（11 角色 × 168）"
+check_count_any customRoles custom_roles 0 "自定义角色 = 0（重置只留内置 11 个）"
 
 RBAC_TENANT_ROWS="$(db_count sys_role_permission "tenant_id = ${TENANT_ID}")"
-[[ "${RBAC_TENANT_ROWS}" == "1680" ]] \
+[[ "${RBAC_TENANT_ROWS}" == "1848" ]] \
     && pass "库内授权行 ${RBAC_TENANT_ROWS} 行（服务端计数之外的独立复核）" \
-    || fail "库内授权行 ${RBAC_TENANT_ROWS:-<空>} 行，期望 1680" \
-            "计数表自报与服务端同源；这条独立查库，两处都说 1680 才算数"
+    || fail "库内授权行 ${RBAC_TENANT_ROWS:-<空>} 行，期望 1848" \
+            "计数表自报与服务端同源；这条独立查库，两处都说 1848 才算数"
+
+# r24：第 11 个内置角色在演示账号上必须有落脚点 —— 角色与厂商必须成对出现，
+# 少一个就是「列表看得见、写什么都 403」的空壳账号（PRD AC-12）。
+VPM_ROLE_VENDOR="$(db_q "SELECT CONCAT(r.code, '/', COALESCE(v.code, 'NULL'))
+        FROM sys_user u
+        JOIN sys_user_role ur ON ur.user_id = u.id AND ur.tenant_id = u.tenant_id
+        JOIN sys_role r ON r.id = ur.role_id AND r.tenant_id = ur.tenant_id
+        LEFT JOIN sys_vendor v ON v.id = u.vendor_id AND v.tenant_id = u.tenant_id
+       WHERE u.tenant_id = ${TENANT_ID} AND u.username = 'vpm1'")"
+[[ "${VPM_ROLE_VENDOR}" == "VENDOR_PM/VEN-A" ]] \
+    && pass "vpm1 = VENDOR_PM + VEN-A（演示入口的角色与厂商都绑上了）" \
+    || fail "vpm1 角色/厂商为 ${VPM_ROLE_VENDOR:-<空>}，期望 VENDOR_PM/VEN-A" \
+            "SeedService 的 userDefs 必须给 vpm1 同时写角色码与厂商码"
+
+VPM_ROWS="$(db_count sys_role_permission "tenant_id = ${TENANT_ID} AND role_id = (SELECT id FROM sys_role WHERE tenant_id = ${TENANT_ID} AND code = 'VENDOR_PM')")"
+[[ "${VPM_ROWS}" == "168" ]] \
+    && pass "VENDOR_PM 授权 ${VPM_ROWS} 行（11 个角色各 168 格）" \
+    || fail "VENDOR_PM 授权 ${VPM_ROWS:-<空>} 行，期望 168" \
+            "RbacSeeder 必须给第 11 个内置角色落满 168 格，V13 只保证角色存在"
+
+BAD_ROLE_ROWS="$(db_q "SELECT COUNT(*) FROM (
+        SELECT r.id FROM sys_role r
+         WHERE r.tenant_id = ${TENANT_ID} AND r.builtin = 1
+           AND (SELECT COUNT(*) FROM sys_role_permission p
+                 WHERE p.tenant_id = r.tenant_id AND p.role_id = r.id) <> 168) x")"
+[[ "${BAD_ROLE_ROWS}" == "0" ]] \
+    && pass "11 个内置角色每个恰好 168 行授权" \
+    || fail "有 ${BAD_ROLE_ROWS:-?} 个内置角色的授权行数不等于 168" \
+            "1848 = 11 × 168：缺格说明预设没覆盖到新角色，多格说明有重复 upsert"
 
 roleperm_audit_view() {
     db_q "SELECT p.access
@@ -520,7 +552,7 @@ else
     [[ "${DIRTIED}" == "DENY" && "${RESTORED}" == "${PRESET_ACCESS}" ]] \
         && pass "被改过的授权格回到预设（audit:view ${DIRTIED} → ${RESTORED}）" \
         || fail "授权格未回预设：污染后 ${DIRTIED:-<空>}，重置后 ${RESTORED:-<空>}，预设 ${PRESET_ACCESS}" \
-                "重置必须用 RbacSeeder 的推导覆盖内置角色的 1680 行（upsert），不能只删自定义角色的行"
+                "重置必须用 RbacSeeder 的推导覆盖内置角色的 1848 行（upsert），不能只删自定义角色的行"
 fi
 
 CUSTOM_ROLES_DB="$(db_count sys_role "tenant_id = ${TENANT_ID} AND builtin = 0")"

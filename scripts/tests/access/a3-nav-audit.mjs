@@ -6,10 +6,13 @@
  * 路由码」「字典三个请求都 silentForbidden」这类契约是**声明**，不是运行时行为——
  * 静态审计能把它变成可执行证据，a4 再用真实权限推导「角色实际看到什么」。
  *
- * 10 条规则（R1..R10），全绿才算通过；任一失败打印具体条目与修复方向。
+ * 11 条规则（R1..R11），全绿才算通过；任一失败打印具体条目与修复方向。
  * R10 是 r18 新增：导航的 pageCode 必须与 platform-contract 的 MenuRegistry 逐字一致——
  * 页面码是服务端授权的**主体**，nav 是它的第二使用方，两边漂移就会出现「菜单可见但
  * 路由 403」或「页面授权了却永远点不到」。
+ * R11 是 r24 新增：`internalOnly` 的窄例外（`vendorPmAllowed`）只允许开在「用例库」一处，
+ * 菜单与路由 meta 必须同时声明，且判定只认角色码 VENDOR_PM（不认 vendorId）——否则
+ * 「只读例外」会退化成「整个厂商域放行」。
  * 计数通过环境变量 ACCESS_COUNTS 交给 scripts/access-verify.sh 汇总。
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
@@ -101,6 +104,7 @@ export function parseNav() {
       codes: parseFunctionCode(obj.text, { sentinel: true }),
       pageCode: parsePageCode(obj.text),
       internalOnly: /internalOnly:\s*true/.test(stripCommentLines(obj.text)),
+      vendorPmAllowed: /vendorPmAllowed:\s*true/.test(stripCommentLines(obj.text)),
     })
   }
   const top = []
@@ -114,6 +118,7 @@ export function parseNav() {
       routeName,
       codes: parseFunctionCode(obj.text, { sentinel: true }),
       internalOnly: /internalOnly:\s*true/.test(stripCommentLines(obj.text)),
+      vendorPmAllowed: /vendorPmAllowed:\s*true/.test(stripCommentLines(obj.text)),
     })
   }
   return { sidebar, top }
@@ -139,7 +144,37 @@ export function parseRouteCodes() {
   return map
 }
 
-/** 平台权限码全集（与后端 PermissionMatrix.FUNCTIONS 同一处定义） */
+/**
+ * 解析路由的准入 meta（name → { codes, internalOnly, vendorPmAllowed }）。
+ *
+ * parseRouteCodes 只取功能码（R3 的判定主体）；a4 的「深链 403」与 R11 的窄例外
+ * 还要看展示层字段，所以单独给一份完整 meta。`codes` 与 parseRouteCodes 同义
+ * （null = 路由无码）。
+ */
+export function parseRouteMeta() {
+  const dir = path.join(WEB, 'router/routes')
+  const map = new Map()
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts')).sort()) {
+    const src = readFileSync(path.join(dir, file), 'utf8')
+    const matches = [...src.matchAll(/name:\s*'([^']+)'/g)]
+    for (let i = 0; i < matches.length; i++) {
+      const m = matches[i]
+      const before = src.slice(Math.max(0, m.index - 30), m.index)
+      if (/redirect\s*:\s*\{?\s*$/.test(before)) continue
+      const end = i + 1 < matches.length ? matches[i + 1].index : src.length
+      const win = src.slice(m.index, end)
+      const metaAt = win.lastIndexOf('meta:')
+      const meta = metaAt < 0 ? '' : stripCommentLines(win.slice(metaAt))
+      map.set(m[1], {
+        codes: parseFunctionCode(meta),
+        internalOnly: /internalOnly:\s*true/.test(meta),
+        vendorPmAllowed: /vendorPmAllowed:\s*true/.test(meta),
+      })
+    }
+  }
+  return map
+}
+
 export function parseMatrixCodes() {
   const src = readFileSync(
     path.join(ROOT, 'platform-contract/src/main/java/com/example/platform/contract/PermissionMatrix.java'),
@@ -382,13 +417,57 @@ export function runAudit({ quiet = false } = {}) {
     }
   }
 
+  // R11（r24）：`internalOnly` 的窄例外只有「用例库 × VENDOR_PM」一处，且三处同源。
+  // 菜单（nav.ts）与路由 meta（deliver.routes.ts）必须同时声明 vendorPmAllowed，
+  // navAccess 的判定必须落在角色码 ctx.vendorPm 上，路由守卫必须落在 auth.isVendorPm 上。
+  // 任一处换成 vendorId，整个厂商域都会拿到只读入口——这正是本规则要挡住的那一类回归。
+  {
+    const routeMeta = parseRouteMeta()
+    const navExceptions = sidebar.filter((it) => it.vendorPmAllowed)
+    const routeExceptions = [...routeMeta.entries()].filter(([, m]) => m.vendorPmAllowed)
+    const problems = []
+    if (navExceptions.length !== 1) {
+      problems.push(`nav 的 vendorPmAllowed 有 ${navExceptions.length} 处（应恰为 1）：${navExceptions.map((it) => it.label).join('/') || '无'}`)
+    } else {
+      const it = navExceptions[0]
+      if (it.label !== '用例库') problems.push(`窄例外落在「${it.label}」而不是「用例库」`)
+      if (!it.internalOnly) problems.push(`「${it.label}」未标 internalOnly，例外无从谈起`)
+    }
+    if (routeExceptions.length !== 1) {
+      problems.push(`路由的 vendorPmAllowed 有 ${routeExceptions.length} 处（应恰为 1）：${routeExceptions.map(([n]) => n).join('/') || '无'}`)
+    } else {
+      const [name, meta] = routeExceptions[0]
+      if (name !== 'testcases') problems.push(`路由窄例外落在 ${name} 而不是 testcases`)
+      if (!meta.internalOnly) problems.push(`${name} 的路由 meta 未标 internalOnly`)
+      if (navExceptions.length === 1 && navExceptions[0].routeName !== name) {
+        problems.push(`菜单项 routeName=${navExceptions[0].routeName} 与路由窄例外 ${name} 不是同一个页面`)
+      }
+    }
+    // 判定只认角色码：navAccess 用 ctx.vendorPm，守卫用 auth.isVendorPm
+    const navAccessSrc = readFileSync(path.join(WEB, 'layouts/navAccess.ts'), 'utf8')
+    const routerSrc = readFileSync(path.join(WEB, 'router/index.ts'), 'utf8')
+    const flat = (s) => stripCommentLines(s).replace(/\s+/g, ' ')
+    if (!/!\(item\.vendorPmAllowed && ctx\.vendorPm\)/.test(flat(navAccessSrc))) {
+      problems.push('navAccess.ts 的例外不是「vendorPmAllowed && ctx.vendorPm」（改成 vendorScoped 即全厂商放行）')
+    }
+    if (!/!\(to\.meta\.vendorPmAllowed && auth\.isVendorPm\)/.test(flat(routerSrc))) {
+      problems.push('router/index.ts 的深链例外不是「vendorPmAllowed && auth.isVendorPm」（vendorId 判定会放过 vendor1）')
+    }
+    if (problems.length === 0) {
+      ok('R11', 'internalOnly 窄例外仅「用例库×VENDOR_PM」一处，菜单/路由/两处判定同源且只认角色码')
+    } else {
+      bad('R11', problems.join('；'),
+        '只读例外只能开在 testcases 一处：nav.ts 与 deliver.routes.ts 同时标 vendorPmAllowed，判定用角色码而非 vendorId')
+    }
+  }
+
   return { pass, total, failures }
 }
 
 // 作为脚本直接运行时执行并给出退出码（被 a4 import 时只取解析函数）
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (invokedDirectly) {
-  console.log('\n---- a3 导航与字典静态审计（10 条规则）----')
+  console.log('\n---- a3 导航与字典静态审计（11 条规则）----')
   const result = runAudit()
   const countsFile = process.env.ACCESS_COUNTS
   if (countsFile) {

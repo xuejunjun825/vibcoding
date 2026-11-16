@@ -19,7 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Derives the three permission layers from the registries and writes them into the database.
  *
- * <p>V12 creates the tables but inserts no rows, because the {@code 1680} rows per tenant are a
+ * <p>V12 creates the tables but inserts no rows, because the {@code 1848} rows per tenant are a
  * function of the code, not constants: {@code FUNCTION} comes from {@link PermissionMatrix},
  * {@code MENU} and {@code ACTION} from the function codes {@link MenuRegistry} and
  * {@link ActionRegistry} bind to each page / action (empty binding means {@code ALLOW}, which is
@@ -47,12 +47,33 @@ public class RbacSeeder {
 
     private static final Logger log = LoggerFactory.getLogger(RbacSeeder.class);
 
-    /** Row count per statement. 1680 rows × 5 params stays far below MySQL's placeholder limit. */
+    /** Row count per statement. 1848 rows × 5 params stays far below MySQL's placeholder limit. */
     private static final int CHUNK = 200;
 
     static final String FUNCTION = "FUNCTION";
     static final String MENU = "MENU";
     static final String ACTION = "ACTION";
+
+    /**
+     * 角色 × 动作的显式 DENY 覆盖：唯一一处「动作不只是功能码的函数」。
+     *
+     * <p>为什么在这里而不在 {@link PermissionMatrix}：那个类的契约是「角色 × 60 功能码」，运行时不读
+     * 它；动作覆盖是角色×动作的第二个维度，塞进矩阵会把网格契约与 s2 的 max 公式一起改掉。放在种子
+     * 派生层，三条写入口（启动自愈 / 建租户 / 演示重置）自动一致，且只有这一份清单。</p>
+     *
+     * <p>r24 的 11 条全部属于 VENDOR_PM：它靠 4 个页面准入键（{@code release:plan} /
+     * {@code task:manage} / {@code case:manage} / {@code plan:manage}）才能看见版本、迭代、用例与
+     * 测试计划页，而 max 派生会顺带把这些页上的 4+6+1 个写动作一起点亮。厂商项目经理要跟踪交付，
+     * 不审批版本、不新建/指派/关闭任务与迭代、不改用例——所以逐条显式 DENY。</p>
+     */
+    private static final Map<String, Set<String>> ACTION_DENY_OVERRIDES = Map.of(
+            "VENDOR_PM", Set.of(
+                    "release.action.create", "release.action.update",
+                    "release.action.approve", "release.action.close",
+                    "task.action.create", "task.action.assign",
+                    "task.action.update", "task.action.close",
+                    "sprint.action.create", "sprint.action.close",
+                    "test.action.case_edit"));
 
     private final SysDb db;
 
@@ -127,7 +148,7 @@ public class RbacSeeder {
      * Writes the preset grid of every built-in role the tenant owns.
      *
      * <p>Roles are looked up by code inside the tenant, not assumed to be 10 contiguous ids: a
-     * tenant can be created by this version (10 roles), upgraded from a version with fewer, or
+     * tenant can be created by this version (11 roles), upgraded from a version with fewer, or
      * carry extra custom roles — the seed only touches codes {@link PermissionMatrix#roles()} knows,
      * and only rows that already exist, so a preset never invents a role. Runs inside the caller's
      * transaction on purpose: provisioning a tenant and seeding its grid must commit together.</p>
@@ -178,10 +199,28 @@ public class RbacSeeder {
                     PermissionMatrix.accessForAny(roleCode, page.functionCodes()).name()));
         }
         for (ActionRegistry.ActionDef action : ActionRegistry.actions()) {
-            rows.add(new Row(ACTION, action.code(),
-                    PermissionMatrix.accessForAny(roleCode, action.functionCodes()).name()));
+            rows.add(new Row(ACTION, action.code(), actionAccessFor(roleCode, action).name()));
         }
         return rows;
+    }
+
+    /**
+     * 角色 × 动作的最终档位：先看显式覆盖，再回落到 {@code functionCodes} 的 max 派生。
+     *
+     * <p>这是 {@link #preset(String)} 里 ACTION 行的唯一判据，也是测试与 {@code s2} 重算期望值的
+     * 唯一入口：两侧都调它，才不会出现「seeder 认为该 DENY、门禁按 max 认为该 ALLOW」的分歧。</p>
+     */
+    public static PermissionMatrix.Access actionAccessFor(
+            String roleCode, ActionRegistry.ActionDef action) {
+        if (ACTION_DENY_OVERRIDES.getOrDefault(roleCode, Set.of()).contains(action.code())) {
+            return PermissionMatrix.Access.DENY;
+        }
+        return PermissionMatrix.accessForAny(roleCode, action.functionCodes());
+    }
+
+    /** 某角色的显式 ACTION 覆盖集合（只读，供测试与 s2 对照，不要让调用方改它）。 */
+    public static Set<String> actionDenyOverrides(String roleCode) {
+        return ACTION_DENY_OVERRIDES.getOrDefault(roleCode, Set.of());
     }
 
     /**

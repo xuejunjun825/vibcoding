@@ -115,4 +115,56 @@ class ScopeSqlRegistryTest {
         assertEquals("sd.tenant_id = :__scopeTenant",
                 ScopeSql.forTable("stage_definition", "sd", domain).sql());
     }
+
+    // ---------------------------------------------------------------- VENDOR_PM (r24)
+
+    @Test
+    @DisplayName("a release has no vendor column: a VENDOR caller is narrowed by a derived EXISTS")
+    void releaseVisibilityIsDerivedFromItsRequirements() {
+        DataScope vendor = DataScope.of(1L, ScopeTier.VENDOR, Set.of(), 5L, 7L, Set.of());
+        SqlPredicate predicate = ScopeSql.forTable("release", "r", vendor);
+        String sql = predicate.sql();
+        assertTrue(sql.startsWith("r.tenant_id = :__scopeTenant AND EXISTS (SELECT 1 FROM"
+                + " release_requirement __rr"), sql);
+        assertTrue(sql.contains("__rr.release_id = r.id"), sql);
+        assertTrue(sql.contains("__rr.tenant_id = r.tenant_id"), sql);
+        assertTrue(sql.contains("__rq.owner_vendor_id = :__scopeVendor"), sql);
+        assertTrue(sql.contains("__rq.assignee_vendor_id = :__scopeVendor"), sql);
+        assertEquals(5L, predicate.params().get("__scopeVendor"),
+                "the derived predicate binds the caller's vendor, not a literal");
+    }
+
+    @Test
+    @DisplayName("the derived release predicate only applies to VENDOR: TENANT/DOMAIN are untouched")
+    void releaseDerivationDoesNotAffectOtherTiers() {
+        String tenant = ScopeSql.forTable("release", "r", DataScope.system(1L)).sql();
+        assertFalse(tenant.contains("EXISTS"), tenant);
+        DataScope domain = DataScope.of(1L, ScopeTier.DOMAIN, Set.of(9L), 5L, 7L, Set.of());
+        String domainSql = ScopeSql.forTable("release", "r", domain).sql();
+        assertFalse(domainSql.contains("EXISTS"), domainSql);
+        assertFalse(domainSql.contains("__scopeVendor"), domainSql);
+
+        // a table with neither a vendor column nor a derivation keeps tenant (+ domain) only:
+        // adding a predicate here would hide the platform-wide rows from every vendor caller
+        DataScope vendor = DataScope.of(1L, ScopeTier.VENDOR, Set.of(), 5L, 7L, Set.of());
+        assertEquals("e.tenant_id = :__scopeTenant",
+                ScopeSql.forTable("test_executor", "e", vendor).sql());
+        assertEquals("sd.tenant_id = :__scopeTenant",
+                ScopeSql.forTable("stage_definition", "sd", vendor).sql());
+    }
+
+    @Test
+    @DisplayName("the derivation is release-only: vendor columns still win on every other table")
+    void derivedVendorIsReleaseOnly() {
+        DataScope vendor = DataScope.of(1L, ScopeTier.VENDOR, Set.of(), 5L, 7L, Set.of());
+        assertFalse(ScopeSql.forTable("defect", "d", vendor).sql().contains("EXISTS"),
+                "defect carries its own vendor_id");
+        String plan = ScopeSql.forTable("test_plan", "tp", vendor).sql();
+        assertTrue(plan.contains("tp.vendor_id = :__scopeVendor"), plan);
+        assertFalse(plan.contains("release_requirement"), plan);
+        // no alias means the column prefix disappears but the derivation still binds the release
+        String noAlias = ScopeSql.forTable("release", null, vendor).sql();
+        assertTrue(noAlias.contains("__rr.release_id = id"), noAlias);
+        assertTrue(noAlias.contains("__rr.tenant_id = tenant_id"), noAlias);
+    }
 }

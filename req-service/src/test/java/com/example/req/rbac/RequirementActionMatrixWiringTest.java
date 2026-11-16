@@ -138,7 +138,7 @@ class RequirementActionMatrixWiringTest {
     }
 
     @Test
-    @DisplayName("与 r17 旧规则逐格对比：差异只有 §8 那三条，本预设格上只剩 MGMT 的两条")
+    @DisplayName("与 r17 旧规则逐格对比：差异只有 §8 那三条，本预设格上只剩 MGMT/VENDOR_PM 的本人提报")
     void differencesFromTheR17RuleAreTheThreeDocumentedOnes() {
         List<String> unexplained = new ArrayList<>();
         Set<String> selfService = new TreeSet<>();
@@ -172,10 +172,13 @@ class RequirementActionMatrixWiringTest {
         // 任何一格解释不了的差异即失败：等价升级是本需求的判据，不是“大概一致”。
         assertThat(unexplained).as("r22 相对 r17 的差异必须能归到 §8 的三条里").isEmpty();
 
-        // 预设格上真正会变的只有 MGMT 的本人提报：它两个 req:report:* 都是 DENY，动作格跟着 DENY。
+        // 预设格上真正会变的只有「本人提报」：MGMT 两个 req:report:* 都是 DENY，动作格跟着 DENY。
         // 这正是 TECH §4「变化 2（收紧，有意）」——而 BUSINESS/PRODUCT/PMO/DEV/QA 的本人提报不受影响。
+        // r24 第 11 个角色 VENDOR_PM 同样缺 req:create/req:submit，落到同一条 OWN 自助路径
+        // （它只读本厂商需求，自助提报被 DENY 收口，与 MGMT 同类，不是新语义）。
         assertThat(selfService).as("本人提报受档位管的实际落点").containsExactly(
-                "MGMT|submit|OWN", "MGMT|withdraw|OWN");
+                "MGMT|submit|OWN", "MGMT|withdraw|OWN",
+                "VENDOR_PM|submit|OWN", "VENDOR_PM|withdraw|OWN");
         assertThat(delegation).as("预设格里 approve 全为 ALLOW 或 DENY，没有 RESTRICTED → 无差异"
                 + "（收窄后的行为见 delegationReadsTheApproveCell）").isEmpty();
         assertThat(registry).as("注册表已校正 → 这两格不再与 r17 判定不同"

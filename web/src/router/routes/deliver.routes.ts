@@ -49,8 +49,15 @@ const deliverRoutes: RouteRecordRaw[] = [
     path: '/testcases',
     name: 'testcases',
     component: () => import('@/views/deliver/TestCaseLibraryView.vue'),
-    // 厂商账号不作用例：菜单侧 nav.ts 同项 internalOnly，深链由 beforeEach 拦成 403
-    meta: { title: '用例库', navKey: 'testcases', functionCode: 'case:manage', internalOnly: true },
+    // 厂商账号不作用例：菜单侧 nav.ts 同项 internalOnly，深链由 beforeEach 拦成 403。
+    // 唯一例外是 VENDOR_PM（vendorPmAllowed），只读进入、写能力由 test.action.case_edit 收口。
+    meta: {
+      title: '用例库',
+      navKey: 'testcases',
+      functionCode: 'case:manage',
+      internalOnly: true,
+      vendorPmAllowed: true,
+    },
   },
   {
     path: '/test-plans',

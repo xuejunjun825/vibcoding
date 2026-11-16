@@ -29,9 +29,19 @@ import '@/views/deliver/shared.css'
  * 左模块树（由用例行聚合，≤3 层）+ 右用例表 + 抽屉内版本快照查看。
  * 历史版本一律只读：执行记录钉 case_version，任何编辑都生成新版本。
  */
-const { can } = usePermission()
+const { can, canAction } = usePermission()
 
-const canEdit = computed(() => can('case:manage'))
+/**
+ * 写能力只认 ACTION（`test.action.case_edit`）：VENDOR_PM 通过 `vendorPmAllowed`
+ * 只读进入本页（r24 窄例外），导入/新建/复制/删除/保存新版本必须全线关闭；
+ * 查询/详情/导出保留。
+ */
+const canEdit = computed(() => canAction('test.action.case_edit'))
+
+/** 只读进入的统一回执：按钮禁用 + 入口复核都走这一句，避免「点了没反应」 */
+function denyEdit(): void {
+  ElMessage.warning('需要权限：test.action.case_edit')
+}
 
 interface ModuleNode {
   id: number
@@ -142,6 +152,12 @@ const isHistorical = computed(
   () => detail.value?.readonly === true || selectedVersion.value < currentVersion.value,
 )
 
+/**
+ * 只读视图 = 历史快照 **或** 当前账号没有写能力（VENDOR_PM 经 `vendorPmAllowed`
+ * 只读进入用例库）。字段与按钮共用这一个判断，避免「能打字、保存按钮灰」的假可编辑。
+ */
+const readonlyCase = computed(() => isHistorical.value || !canEdit.value)
+
 const editForm = reactive({
   title: '',
   precondition: '',
@@ -214,6 +230,7 @@ function moveStep(index: number, delta: number): void {
 }
 
 async function saveNewVersion(): Promise<void> {
+  if (!canEdit.value) return denyEdit()
   const current = detail.value
   if (!current) return
   if (!editForm.title.trim()) {
@@ -306,6 +323,7 @@ const createForm = reactive({
 const createSteps = ref<CaseStep[]>([{ action: '', expected: '' }])
 
 function openCreate(): void {
+  if (!canEdit.value) return denyEdit()
   createForm.title = ''
   createForm.precondition = ''
   createForm.requirementId = undefined
@@ -350,6 +368,7 @@ async function submitCreate(): Promise<void> {
 }
 
 async function copyRow(row: TestCaseRow): Promise<void> {
+  if (!canEdit.value) return denyEdit()
   let title = ''
   try {
     const result = await ElMessageBox.prompt('复制后的用例标题', '复制用例', {
@@ -377,6 +396,7 @@ const deleteTarget = ref<TestCaseRow | null>(null)
 const deleting = ref(false)
 
 function askDelete(row: TestCaseRow): void {
+  if (!canEdit.value) return denyEdit()
   deleteTarget.value = row
   deleteVisible.value = true
 }
@@ -405,6 +425,11 @@ async function validateImport(file: File): Promise<{
   failed: number
   errors: Array<{ row: number; message: string }>
 }> {
+  if (!canEdit.value) {
+    // 只读进入时向导仍可被键盘打开，这里在唯一发请求处再挡一次（服务端同样 403）
+    denyEdit()
+    return { ok: 0, failed: 0, errors: [{ row: 0, message: '需要权限：test.action.case_edit' }] }
+  }
   const formData = new FormData()
   formData.append('file', file)
   return importTestCases(formData)
@@ -454,9 +479,9 @@ onMounted(() => {
         <span class="dl-meta">{{ total }} 条用例</span>
       </div>
       <div class="dl-head__actions">
-        <el-button :disabled="!canEdit" @click="importVisible = true">导入</el-button>
-        <el-button :disabled="!canEdit" @click="exportCsv">导出 CSV</el-button>
-        <el-button type="primary" :disabled="!canEdit" @click="openCreate">新建用例</el-button>
+        <el-button :disabled="!canEdit" :title="canEdit ? '' : '需要权限：test.action.case_edit'" @click="importVisible = true">导入</el-button>
+        <el-button @click="exportCsv">导出 CSV</el-button>
+        <el-button :type="canEdit ? 'primary' : 'default'" :disabled="!canEdit" :title="canEdit ? '' : '需要权限：test.action.case_edit'" @click="openCreate">新建用例</el-button>
       </div>
     </header>
 
@@ -608,7 +633,7 @@ onMounted(() => {
           <el-button
             size="small"
             style="margin-left: auto"
-            :disabled="!canReviewView || isHistorical"
+            :disabled="!canReviewView || readonlyCase"
             :title="isHistorical ? '历史版本不能发起评审，评审钉在当前版本' : '查看 / 发起 v' + detail.version + ' 的评审'"
             @click="openReviews"
           >
@@ -619,32 +644,35 @@ onMounted(() => {
         <div v-if="isHistorical" class="readonly-banner">
           只读 · 正在查看 v{{ detail.version }} 快照；历史执行按该版本重放，编辑不会回写此版本。
         </div>
+        <div v-else-if="!canEdit" class="readonly-banner">
+          只读 · 当前账号没有用例编辑能力（test.action.case_edit）；可查询、查看详情、导出 CSV，写操作一律关闭。
+        </div>
 
         <el-form label-position="top" class="case-form">
           <el-form-item label="标题" required>
-            <el-input v-model="editForm.title" :disabled="isHistorical" maxlength="120" />
+            <el-input v-model="editForm.title" :disabled="readonlyCase" maxlength="120" />
           </el-form-item>
           <div class="dl-field-grid">
             <el-form-item label="类型">
-              <el-select v-model="editForm.type" :disabled="isHistorical" style="width: 100%">
+              <el-select v-model="editForm.type" :disabled="readonlyCase" style="width: 100%">
                 <el-option v-for="item in typeOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
             <el-form-item label="优先级">
-              <el-select v-model="editForm.priority" :disabled="isHistorical" style="width: 100%">
+              <el-select v-model="editForm.priority" :disabled="readonlyCase" style="width: 100%">
                 <el-option v-for="p in ['P0', 'P1', 'P2', 'P3']" :key="p" :label="p" :value="p" />
               </el-select>
             </el-form-item>
           </div>
           <el-form-item label="前置条件">
-            <el-input v-model="editForm.precondition" type="textarea" :rows="2" :disabled="isHistorical" />
+            <el-input v-model="editForm.precondition" type="textarea" :rows="2" :disabled="readonlyCase" />
           </el-form-item>
           <el-form-item label="关联需求 ID">
             <span class="t-code">{{ detail.requirementId ? `REQ-${detail.requirementId}` : '未关联' }}</span>
           </el-form-item>
           <div class="dl-toolbar">
             <span class="dl-toolbar__title">步骤</span>
-            <el-button v-if="!isHistorical" link type="primary" @click="addStep">添加步骤</el-button>
+            <el-button v-if="!readonlyCase" link type="primary" @click="addStep">添加步骤</el-button>
           </div>
           <table class="dl-steps-editor">
             <thead>
@@ -659,13 +687,13 @@ onMounted(() => {
               <tr v-for="(step, index) in steps" :key="index">
                 <td class="dl-steps-editor__no">{{ index + 1 }}</td>
                 <td>
-                  <el-input v-model="step.action" :disabled="isHistorical" placeholder="执行动作" />
+                  <el-input v-model="step.action" :disabled="readonlyCase" placeholder="执行动作" />
                 </td>
                 <td>
-                  <el-input v-model="step.expected" :disabled="isHistorical" placeholder="预期结果" />
+                  <el-input v-model="step.expected" :disabled="readonlyCase" placeholder="预期结果" />
                 </td>
                 <td class="dl-steps-editor__ops">
-                  <template v-if="!isHistorical">
+                  <template v-if="!readonlyCase">
                     <el-button link :disabled="index === 0" @click="moveStep(index, -1)">上移</el-button>
                     <el-button link :disabled="index === steps.length - 1" @click="moveStep(index, 1)">下移</el-button>
                     <el-button link type="danger" @click="removeStep(index)">删除</el-button>
@@ -679,22 +707,28 @@ onMounted(() => {
           </table>
           <div class="dl-field-grid" style="margin-top: 12px">
             <el-form-item label="标签（逗号分隔）">
-              <el-input v-model="editForm.tags" :disabled="isHistorical" />
+              <el-input v-model="editForm.tags" :disabled="readonlyCase" />
             </el-form-item>
             <el-form-item label="自动化脚本引用">
-              <el-input v-model="editForm.scriptRef" :disabled="isHistorical" placeholder="repo/path::case" />
+              <el-input v-model="editForm.scriptRef" :disabled="readonlyCase" placeholder="repo/path::case" />
             </el-form-item>
           </div>
-          <el-checkbox v-model="editForm.automated" :disabled="isHistorical">自动化用例</el-checkbox>
+          <el-checkbox v-model="editForm.automated" :disabled="readonlyCase">自动化用例</el-checkbox>
         </el-form>
 
         <div class="drawer-footer">
           <span class="dl-hint">
-            {{ isHistorical ? '历史版本不可编辑' : '保存即生成新版本，历史执行仍按旧版本快照' }}
+            {{ isHistorical ? '历史版本不可编辑' : canEdit ? '保存即生成新版本，历史执行仍按旧版本快照' : '只读：需要权限 test.action.case_edit' }}
           </span>
           <div>
             <el-button @click="drawerVisible = false">取消</el-button>
-            <el-button type="primary" :loading="saving" :disabled="isHistorical || !canEdit" @click="saveNewVersion">
+            <el-button
+              :type="readonlyCase ? 'default' : 'primary'"
+              :loading="saving"
+              :disabled="readonlyCase"
+              :title="readonlyCase ? '需要权限：test.action.case_edit' : ''"
+              @click="saveNewVersion"
+            >
               保存为新版本
             </el-button>
           </div>

@@ -27,7 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>The save is a full overwrite on purpose. A partial write ("set these codes") makes the stored
  * grid depend on what a previous version of the software thought the subject universe was: a page
  * added later would silently inherit whatever row happened to be missing. Writing all
- * {@code 600 + 36 + 72 = 1680} subjects every time means the row set is a function of the
+ * {@code 660 + 396 + 792 = 1848} subjects every time means the row set is a function of the
  * registries, which is what s2's hash equality relies on.</p>
  *
  * <p>Order of operations in {@link #saveGrants}: validate everything, then diff, then the lockout
@@ -259,7 +259,7 @@ public class RoleAdminService {
 
         db.update("DELETE FROM sys_role_permission WHERE tenant_id = ? AND role_id = ?",
                 tenantId, roleId);
-        List<Object[]> rows = new ArrayList<>(1680);
+        List<Object[]> rows = new ArrayList<>(1848);
         for (String layer : List.of("FUNCTION", "MENU", "ACTION")) {
             for (Map.Entry<String, Access> entry : after.get(layer).entrySet()) {
                 rows.add(new Object[]{tenantId, roleId, layer, entry.getKey(),
