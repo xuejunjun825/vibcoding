@@ -139,7 +139,7 @@ fi
 
 if [[ -n "$T2_ID" && "$T2_ID" != "null" ]]; then
     expect_num "新租户预置 7 个业务域" "$(db_count biz_domain "tenant_id=${T2_ID}")" eq 7 "建租户必须预置 7 域（AC-1）"
-    expect_num "新租户预置 10 个角色" "$(db_count sys_role "tenant_id=${T2_ID}")" eq 10 "建租户必须预置 10 角色（AC-1）"
+    expect_num "新租户预置 11 个角色" "$(db_count sys_role "tenant_id=${T2_ID}")" eq 11 "建租户必须预置 11 角色（AC-1）"
 else
     fail "建租户响应缺 tenantId，无法断言预置数量" "响应需含 tenantId（TECHNICAL §4.3）"
 fi
@@ -348,14 +348,24 @@ section "AC-5 权限矩阵：接口生成探测矩阵，逐格断言 2xx/403"
 api_call GET /api/req/admin/permissions
 expect "GET /admin/permissions 200" 200
 FN_COUNT="$(jlen "$HTTP_BODY" '.functions')"
-expect_num "权限矩阵暴露 60 个函数码" "${FN_COUNT:-0}" eq 60 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码 + 1 M7 integration:manage + 14 M8 协作/代码/测试码 + 4 M9 分析域码 portal:view/portal:config/report:view/report:share；PermissionMatrixGridTest 同为 10×60）"
+expect_num "权限矩阵暴露 60 个函数码" "${FN_COUNT:-0}" eq 60 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码 + 1 M7 integration:manage + 14 M8 协作/代码/测试码 + 4 M9 分析域码 portal:view/portal:config/report:view/report:share；PermissionMatrixGridTest 同为 11×60）"
 ROLE_COUNT="$(jlen "$HTTP_BODY" '.roles')"
-expect_num "权限矩阵暴露 10 个角色" "${ROLE_COUNT:-0}" eq 10 "建租户预置的 10 角色"
-ROLE_CODES="$(db_q "SELECT GROUP_CONCAT(DISTINCT code ORDER BY code) FROM sys_role WHERE tenant_id=$(tenant_id)")"
-if [[ "$ROLE_CODES" == "BUSINESS,DEV,MGMT,OPS,PLATFORM_ADMIN,PMO,PRODUCT,QA,SUB_BUSINESS,SUB_BUSINESS_LEADER" ]]; then
-    pass "sys_role 覆盖 PRD §6.1 的 10 个角色（D-07）"
+# 矩阵接口返回的是「租户内全部 ACTIVE 角色」——自定义角色本来就是允许的（r19 起管理员可建），
+# 所以这里断的是「内置 11 个必须都在」，不是「恰好 11 个」：写死 eq 11 会被一个自定义角色打红，
+# 而那条红说明断言写错了，不是产品坏了。
+expect_num "权限矩阵至少暴露 11 个内置角色（含自定义角色时更多）" "${ROLE_COUNT:-0}" ge 11 "建租户预置的 11 角色（r24 追加 VENDOR_PM）"
+BUILTIN_ROLES="$(db_q "SELECT GROUP_CONCAT(DISTINCT code ORDER BY code) FROM sys_role WHERE tenant_id=$(tenant_id) AND builtin=1")"
+if [[ "$BUILTIN_ROLES" == "BUSINESS,DEV,MGMT,OPS,PLATFORM_ADMIN,PMO,PRODUCT,QA,SUB_BUSINESS,SUB_BUSINESS_LEADER,VENDOR_PM" ]]; then
+    pass "sys_role 的内置角色集 = PRD §6.1 的 11 个（D-07）"
 else
-    fail "sys_role 角色集不符 PRD §6.1：${ROLE_CODES}" "RoleCatalog / PermissionMatrix / SeedService 必须是同一套 10 个角色码"
+    fail "sys_role 内置角色集不符 PRD §6.1：${BUILTIN_ROLES}" "RoleCatalog / PermissionMatrix / SeedService / V13 必须是同一套 11 个角色码"
+fi
+MISSING_BUILTIN="$(printf '%s' "$HTTP_BODY" | jq -r --arg csv "${BUILTIN_ROLES}" \
+    '([.roles[]?.code] ) as $have | ($csv | split(",")) | map(select(. as $c | ($have | index($c)) == null)) | join(",")' 2>/dev/null || echo x)"
+if [[ -z "$MISSING_BUILTIN" ]]; then
+    pass "矩阵的 roles 列覆盖全部内置角色（vpm1 的 VENDOR_PM 也在其中）"
+else
+    fail "矩阵 roles 列缺少内置角色：${MISSING_BUILTIN}" "AdminPermissionController.matrix 必须把内置角色全部列出"
 fi
 
 # 逐格探测：用 DENY 格与 ALLOW 格各打一发（矩阵来自服务端，脚本不复制）
@@ -957,7 +967,52 @@ fi
 section "AC-19 种子数据规模（platform-seed 再做幂等两遍）"
 expect_num "7 个业务域" "$(db_count biz_domain "tenant_id=$(tenant_id)")" eq 7 "SeedService"
 expect_num "3 家厂商" "$(db_count sys_vendor "tenant_id=$(tenant_id)")" eq 3 "SeedService"
-expect_num "12 个账号" "$(db_q "SELECT COUNT(*) FROM sys_user WHERE tenant_id=$(tenant_id) AND username IN ('admin','pm','tl1','po1','biz1','suite1','dev1','dev2','qa1','qa2','vendor1','vendor2')")" eq 12 "SeedService.userDefs 必须写全 12 个演示账号（与 SeedResult.loginUsers / platform-seed.sh 名单同源）"
+expect_num "13 个账号（含 r24 的 vpm1）" "$(db_q "SELECT COUNT(*) FROM sys_user WHERE tenant_id=$(tenant_id) AND username IN ('admin','pm','tl1','po1','biz1','suite1','dev1','dev2','qa1','qa2','vendor1','vendor2','vpm1')")" eq 13 "SeedService.userDefs 必须写全 13 个演示账号（与 platform-seed.sh 名单同源）"
+
+# ---- r24：第 11 个角色 VENDOR_PM 的种子落地形态（角色 × 授权 × 账号三者一致）
+VPM_ROLE_ROW="$(db_q "SELECT CONCAT(code, '/', builtin) FROM sys_role WHERE tenant_id=$(tenant_id) AND code='VENDOR_PM'")"
+if [[ "$VPM_ROLE_ROW" == "VENDOR_PM/1" ]]; then
+    pass "VENDOR_PM 是内置角色（builtin=1，不可删除）"
+else
+    fail "VENDOR_PM 角色行异常：${VPM_ROLE_ROW:-<缺失>}" "V13 迁移必须幂等补角色行，RbacSeeder 必须预置 168 格授权"
+fi
+expect_num "VENDOR_PM 的授权格 = 168（60 FUNCTION + 36 MENU + 72 ACTION）" \
+    "$(db_q "SELECT COUNT(*) FROM sys_role_permission p JOIN sys_role r ON r.id=p.role_id AND r.tenant_id=p.tenant_id WHERE p.tenant_id=$(tenant_id) AND r.code='VENDOR_PM'")" \
+    eq 168 "RbacSeeder 的 preset(roleCode) 必须对这个角色落满 168 行"
+VPM_ACCOUNT="$(db_q "SELECT CONCAT(r.code,'/',v.code) FROM sys_user u
+                      JOIN sys_user_role ur ON ur.user_id=u.id AND ur.tenant_id=u.tenant_id
+                      JOIN sys_role r ON r.id=ur.role_id AND r.tenant_id=u.tenant_id
+                      LEFT JOIN sys_vendor v ON v.id=u.vendor_id AND v.tenant_id=u.tenant_id
+                      WHERE u.tenant_id=$(tenant_id) AND u.username='vpm1'")"
+if [[ "$VPM_ACCOUNT" == "VENDOR_PM/VEN-A" ]]; then
+    pass "演示账号 vpm1 = VENDOR_PM 角色 + VEN-A 厂商（与同厂商的 vendor1/PMO 并存）"
+else
+    fail "vpm1 账号绑定异常：${VPM_ACCOUNT:-<缺失>}" "VENDOR_PM 必须绑 vendor_id，否则数据域退化为空"
+fi
+# C4：演示版本只含内部需求 ⇒ 厂商视角看不到它（看到的是空集或自己的版本）。
+# 断言「200 且列表里没有演示版本 R2026-11」而不是「total 必须为 0」：第 17 段负向脚本会自建
+# VEN-A 版本留在库里，写死 0 会被合法夹具打红。正例（本厂商版本 200）由负向脚本第 17 段覆盖。
+if login_as "vpm1" "Passw0rd!"; then
+    DEMO_REL_ID="$(db_q "SELECT id FROM \`release\` WHERE tenant_id=$(tenant_id) AND code='R2026-11'")"
+    api_call GET "/api/req/releases?page=1&size=50"
+    VPM_REL_TOTAL="$(jget "$HTTP_BODY" '.total')"
+    if [[ "$HTTP_CODE" == "200" ]]; then
+        pass "vpm1 的版本列表可读（200，total=${VPM_REL_TOTAL:-0}）"
+        VPM_SEES_DEMO="$(printf '%s' "$HTTP_BODY" | jq -r --argjson r "${DEMO_REL_ID:-0}" \
+            '[.items[]? | select(.id == $r)] | length' 2>/dev/null || echo x)"
+        if [[ "$VPM_SEES_DEMO" == "0" ]]; then
+            pass "演示版本 R2026-11 不出现在厂商视角（只含内部需求，TECHNICAL §0 C4）"
+        else
+            fail "厂商视角看到了只含内部需求的演示版本（id=${DEMO_REL_ID}）" \
+                "release 的 vendor 谓词必须由 release_requirement→requirement 派生"
+        fi
+    else
+        fail "vpm1 版本列表 HTTP ${HTTP_CODE}（期望 200）" "厂商视角不能 403/500"
+    fi
+else
+    warn "vpm1 登录失败，跳过厂商视角的版本列表断言"
+fi
+API_TOKEN="$ADMIN_TOKEN"
 expect_num "1 个测试计划" "$(db_count test_plan "tenant_id=$(tenant_id)")" ge 1 "SeedService"
 PLAN_CASES="$(db_q "SELECT COUNT(*) FROM test_plan_case pc JOIN test_plan p ON p.id=pc.plan_id WHERE p.tenant_id=$(tenant_id)")"
 expect_num "计划用例 ≥10" "${PLAN_CASES:-0}" ge 10 "SeedService 必须给计划纳入 ≥10 用例"

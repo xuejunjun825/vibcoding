@@ -6,6 +6,7 @@ import com.example.platform.common.code.CodeGenerator;
 import com.example.platform.common.scope.ScopedJdbc;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
+import com.example.platform.contract.ScopeTier;
 import com.example.req.approval.ApprovalEngine;
 import com.example.req.approval.StartApproval;
 import com.example.req.requirement.RequirementEntity;
@@ -357,7 +358,29 @@ public class ReleaseService {
         ReleaseEntity release = releaseRepository.findByIdAndTenantId(id, scope.tenantId())
                 .orElseThrow(() -> RequirementErrors.notFound("版本", id));
         requireDomainVisible(release.getDomainId(), scope);
+        requireVendorVisible(release, scope);
         return release;
+    }
+
+    /**
+     * Vendor-tier visibility for a release, decided by the very same predicate the list uses.
+     *
+     * <p>{@code release} carries no vendor column, so {@link com.example.platform.common.scope.ScopeSql}
+     * derives one ({@code EXISTS} over the release's requirements). Asking {@code ScopedJdbc} with the
+     * marker instead of hand-writing a second count keeps list and detail on one SQL text: a version
+     * that cannot appear in {@code page()} cannot be read or written through here either, which is
+     * what closes approval / lock / membership / quality-settings in a single place.</p>
+     */
+    private void requireVendorVisible(ReleaseEntity release, DataScope scope) {
+        if (scope.tier() != ScopeTier.VENDOR || scope.vendorId() == null) {
+            return;
+        }
+        long visible = jdbc.count("SELECT COUNT(*) FROM `release` r WHERE r.id = :id AND /*scope:r*/",
+                Map.of("id", release.getId()));
+        if (visible == 0) {
+            auditOrSkip(release.getDomainId(), scope);
+            throw RequirementErrors.outOfScope("版本", release.getDomainId());
+        }
     }
 
     private void requireDomainVisible(Long domainId, DataScope scope) {

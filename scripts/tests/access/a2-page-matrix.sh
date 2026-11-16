@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# a2-page-matrix.sh — 9 页 × 7 角色准入矩阵（PRD AC-5 / r13 AC-17；TECHNICAL §5；63 断言）
+# a2-page-matrix.sh — 9 页 × 8 角色准入矩阵（PRD AC-5 / r13 AC-17；r24 加 vpm1；TECHNICAL §5；73 断言）
 #
 # 每格断言的是**精确状态码**：⛔ 必须 403（200 也算红），✅ 必须 200（403 说明字典修复
 # 只修了一半）。探测端点取各页首屏请求，与真实页面同一条链路（网关 → JWT → 权限码）。
@@ -55,19 +55,23 @@ PAGE_ENDPOINTS=(
 # 状态矩阵本身不变：页面码由 max(绑定功能码) 推导，单码页面与 r17 逐格一致。
 PAGE_CODES=("req.pool" "req.release" "me.approvals" "test.plans" "code.policies" "ana.portal" "ana.dashboard" "ana.reports" "ana.reports")
 PAGE_GUARDS=("仅认证" "release:plan" "仅认证" "plan:manage" "CCODE_POLICY_VIEW" "PORTAL_VIEW" "PORTAL_VIEW" "REPORT_VIEW" "REPORT_VIEW")
-ROLES=(admin pm tl1 po1 dev1 qa1 vendor1)
+# r24：vpm1（VENDOR_PM）是第 8 个探测角色。它不改任何既有格——矩阵按角色取值，加一行只新增 9 格。
+# 只看两页是 ⛔：分支策略（CCODE_POLICY_VIEW 对它是 DENY）。测试计划对它反而是 ✅ ——
+# 页面码 test.plans 绑定 plan:manage，而 VENDOR_PM 的 plan:manage 是 ALLOW（PRD：参与排期与测试计划）。
+ROLES=(admin pm tl1 po1 dev1 qa1 vendor1 vpm1)
 
-# expected_code <page-index> <role> → 精确状态码（TECHNICAL §5 的 5 个 ⛔）
+# expected_code <page-index> <role> → 精确状态码（TECHNICAL §5 的 ⛔ 格）
 expected_code() {
     case "$1:$2" in
         3:po1|3:dev1) echo 403 ;;          # 测试计划：PRODUCT / DEV 对 plan:manage 是 DENY
         4:pm|4:po1|4:qa1) echo 403 ;;      # 分支策略：PMO / SUB_BUSINESS_LEADER / QA 无 CCODE_POLICY_VIEW
+        4:vpm1) echo 403 ;;                # 分支策略：VENDOR_PM 无 CCODE_POLICY_VIEW（r24）
         *) echo 200 ;;                     # 含 r13 新增四页：十角色全开 PORTAL_VIEW/REPORT_VIEW
     esac
 }
 
 # =====================================================================
-section "9 页 × 7 角色：精确状态码（58 ✅ / 5 ⛔）"
+section "9 页 × 8 角色：精确状态码（66 ✅ / 6 ⛔）"
 FORBIDDEN_SEEN=0
 FORBIDDEN_BAD=""
 for i in "${!PAGE_LABELS[@]}"; do
@@ -84,7 +88,9 @@ for i in "${!PAGE_LABELS[@]}"; do
         if [[ "$HTTP_CODE" == "$want" ]]; then
             pass "$desc"
         else
-            fail "$desc（实际 ${HTTP_CODE}: $(printf '%s' "$HTTP_BODY" | head -c 200)）" \
+            # 变量后面直接跟全角字符必须写成 ${desc}：`$desc（` 在 C.UTF-8 下会被 bash
+            # 当成变量名的一部分（全角括号被算进标识符），报 “desc?: unbound variable”。
+            fail "${desc}（实际 ${HTTP_CODE}: $(printf '%s' "$HTTP_BODY" | head -c 200)）" \
                 "矩阵见 TECHNICAL §5：⛔ 必须 403（200 也算红），✅ 必须 200；页面码 ${PAGE_CODES[$i]}"
         fi
         # r18 契约：403 必须说清是谁拦的（detail.page / detail.access），否则排障只能猜
@@ -124,4 +130,4 @@ if (( PASS != TOTAL )); then
     exit 1
 fi
 report_counts
-ok "a2-page-matrix: ${PASS}/${TOTAL} 项通过（9 页 × 7 角色精确匹配）"
+ok "a2-page-matrix: ${PASS}/${TOTAL} 项通过（9 页 × 8 角色精确匹配）"

@@ -101,7 +101,9 @@ api_call GET "${C_REQ}/admin/permissions"
 expect "GET /admin/permissions 200" 200
 # 60 = 42 基础 + 14 M8 协作/代码/测试码 + 4 M9 分析域码（portal:view/portal:config/report:view/report:share）
 expect_jq "功能码 60 个" '.functions | length' 60
-expect_jq "角色 10 个" '.roles | length' 10
+# r24：内置角色 10→11（VENDOR_PM 厂商项目经理）。功能码不变，只多一行角色。
+expect_jq "角色 11 个" '.roles | length' 11
+expect_jq "VENDOR_PM 在内置角色里" '.roles | map(select(.code=="VENDOR_PM")) | length' 1
 NEW_CODES="WIKI_VIEW WIKI_EDIT WIKI_ADMIN GANTT_VIEW GANTT_EDIT FLOW_VIEW FLOW_CONFIG CCODE_POLICY_VIEW CCODE_POLICY_EDIT CASE_REVIEW_VIEW CASE_REVIEW_SUBMIT CASE_REVIEW_DECIDE TEST_EXECUTOR_VIEW TEST_EXECUTOR_MANAGE"
 MISSING=""
 for code in $NEW_CODES; do

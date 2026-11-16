@@ -1,5 +1,6 @@
 package com.example.req.sys;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -20,6 +21,9 @@ public final class RoleCatalog {
     public record DictDef(String type, String code, String label, int sort) {
     }
 
+    /** 厂商项目经理：厂商侧的交付跟踪岗位，账号必须绑定 vendor_id。 */
+    public static final String VENDOR_PM = "VENDOR_PM";
+
     public static final List<RoleDef> ROLES = List.of(
             new RoleDef("BUSINESS", "业务部门"),
             new RoleDef("SUB_BUSINESS", "二级企业业务"),
@@ -30,7 +34,9 @@ public final class RoleCatalog {
             new RoleDef("QA", "测试工程师"),
             new RoleDef("OPS", "运维工程师"),
             new RoleDef("MGMT", "管理层"),
-            new RoleDef("PLATFORM_ADMIN", "平台管理员"));
+            new RoleDef("PLATFORM_ADMIN", "平台管理员"),
+            // r24：第 11 个内置角色。追加在末尾，既有 code→id 顺序不变（V3 的补行也按 code 匹配）。
+            new RoleDef(VENDOR_PM, "厂商项目经理"));
 
     public static final List<DomainDef> DOMAINS = List.of(
             new DomainDef("PUR", "采购域"),
@@ -72,5 +78,16 @@ public final class RoleCatalog {
     public static String roleName(String code) {
         return ROLES.stream().filter(role -> role.code().equals(code))
                 .map(RoleDef::name).findFirst().orElse(code);
+    }
+
+    /**
+     * 这组角色是否强制绑定厂商（{@code sys_user.vendor_id} 非空）。
+     *
+     * <p>写账号的两个入口（新建与编辑）共用这一份判定：把「哪个角色必须绑厂商」的知识放在角色目录里，
+     * 才不会在 controller 与前端各写一遍、然后有一边先漂移。判定只认角色码，不认账号是否已经带了
+     * 厂商——否则「先给厂商再改角色」的路径会绕过去。</p>
+     */
+    public static boolean requiresVendor(Collection<String> roleCodes) {
+        return roleCodes != null && roleCodes.contains(VENDOR_PM);
     }
 }

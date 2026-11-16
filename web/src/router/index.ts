@@ -15,6 +15,11 @@ declare module 'vue-router' {
     /** 仅内部账号可进：厂商账号深链 → 403（code=INTERNAL_ONLY） */
     internalOnly?: boolean
     /**
+     * `internalOnly` 的窄例外（TECHNICAL §3.4）：只对 VENDOR_PM 放开指定页，
+     * 与 `navAccess.navVisible` 同一判定，避免「侧栏可见、深链 403」互相打脸。
+     */
+    vendorPmAllowed?: boolean
+    /**
      * 页面码（MENU 层，r18）：路由显式声明的准入主体，与 nav 的 pageCode
      * 一起进 `pageRegistry` 做 any-of。空/缺省 = 该路由不按页面码拦。
      */
@@ -112,8 +117,13 @@ router.beforeEach(async (to) => {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
 
-  // 展示层策略先于功能码：厂商账号不作用例，深链也不让进（不新增权限码）
-  if (to.meta.internalOnly && auth.user?.vendorId != null) {
+  // 展示层策略先于功能码：厂商账号不作用例，深链也不让进（不新增权限码）。
+  // 例外只认角色码 VENDOR_PM（`vendorPmAllowed`），不认 vendorId——否则整个厂商域都会放行。
+  if (
+    to.meta.internalOnly &&
+    auth.user?.vendorId != null &&
+    !(to.meta.vendorPmAllowed && auth.isVendorPm)
+  ) {
     return { path: '/403', query: { from: to.fullPath, code: 'INTERNAL_ONLY' } }
   }
 

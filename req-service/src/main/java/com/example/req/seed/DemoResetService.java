@@ -143,7 +143,7 @@ public class DemoResetService {
     }
 
     /**
-     * 授权面回到预设：自定义角色连同其授权一起清掉，10 个内置角色重写 1680 行预设。
+     * 授权面回到预设：自定义角色连同其授权一起清掉，11 个内置角色重写 1848 行预设。
      *
      * <p>为什么不是「只清自定义角色」：演示里最常见的破坏是有人在授权页把某个内置角色的档位
      * 调坏（例如把 {@code audit:view} 设成 DENY），下次演示就少了一整块功能，而它不会报错。
@@ -151,7 +151,7 @@ public class DemoResetService {
      * {@link RbacSeeder#preset} 这一处公式写回，于是「种子派生」只有一份实现。</p>
      *
      * <p>已是预设就<b>不写</b>：{@link RbacSeeder#driftCells} 逐格比对（同一公式），差异 0 且没有
-     * 自定义角色时直接返回。重置的语义是「回到预设」，本来就已在预设，再删 1680 行、插 1680 行
+     * 自定义角色时直接返回。重置的语义是「回到预设」，本来就已在预设，再删 1848 行、插 1848 行
      * 只是把主机写满——那两次整表重写正是 reset 偶发超时的写放大来源。跳过不影响计数与不变量，
      * 所以连续两次 reset 的 counts 仍逐键相等（s8、platform-demo-reset.sh 的幂等判据不变）。</p>
      */
@@ -223,7 +223,7 @@ public class DemoResetService {
         counts.put("testEnvs", db.count(
                 "SELECT COUNT(*) FROM test_env WHERE tenant_id = ?", tenantId));
         counts.put("gateResidue", gateResidue(tenantId));
-        // r19：授权面两个键。rolePermission 是租户内授权行数（10 内置角色 × 168 = 1680），
+        // r19：授权面两个键。rolePermission 是租户内授权行数（11 内置角色 × 168 = 1848），
         // customRoles 是自定义角色数（重置后必须为 0）——平台脚本按同名键断言，缺键即视为没接进。
         counts.put("rolePermission", db.count(
                 "SELECT COUNT(*) FROM sys_role_permission WHERE tenant_id = ?", tenantId));

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   listDomains,
@@ -98,6 +98,25 @@ const form = reactive<{
 
 const isEdit = computed(() => Boolean(form.id))
 
+/**
+ * VENDOR_PM 必须绑定厂商（TECHNICAL §4.3）：
+ * 这是服务端契约（400 `VALIDATION_FAILED` + `detail.field=vendorId`）的前置体验，
+ * 前端先拦一次、服务端 400 再回填到同一处错误位——两处都有，缺一个就会「点保存没反应」。
+ */
+const vendorRequired = computed(() => form.roles.includes('VENDOR_PM'))
+const vendorError = ref('')
+// 校验失败时光标/焦点落到厂商选择框：内联红字是「哪错了」，焦点是「改哪里」。
+// 只弹顶部 toast 时，字段在弹窗中部（角色下拉还开着）很容易被忽略。
+const vendorSelectRef = ref<{ focus?: () => void } | null>(null)
+function focusVendorField(): void {
+  void nextTick(() => vendorSelectRef.value?.focus?.())
+}
+
+/** 归一：0 / 空串 / undefined 都按「未绑定」处理（与服务端 longOrNull 同口径） */
+function vendorMissing(): boolean {
+  return form.vendorId == null || Number(form.vendorId) <= 0
+}
+
 function openCreate(): void {
   Object.assign(form, {
     id: undefined,
@@ -109,6 +128,7 @@ function openCreate(): void {
     vendorId: undefined,
     password: '',
   })
+  vendorError.value = ''
   visible.value = true
 }
 
@@ -123,16 +143,24 @@ function openEdit(row: UserRow): void {
     vendorId: row.vendorId ?? undefined,
     password: '',
   })
+  vendorError.value = ''
   visible.value = true
 }
 
 async function submit(): Promise<void> {
+  vendorError.value = ''
   if (!form.username.trim() || !form.name.trim()) {
     ElMessage.warning('用户名与姓名必填')
     return
   }
   if (!form.roles.length) {
     ElMessage.warning('至少分配一个角色（权限矩阵按角色求解）')
+    return
+  }
+  if (vendorRequired.value && vendorMissing()) {
+    vendorError.value = 'VENDOR_PM 必须绑定厂商（vendorId），否则该账号无法按厂商收窄数据'
+    ElMessage.warning('厂商项目经理（VENDOR_PM）必须选择所属厂商')
+    focusVendorField()
     return
   }
   if (!isEdit.value && form.password.length < 8) {
@@ -155,7 +183,15 @@ async function submit(): Promise<void> {
     ElMessage.success(isEdit.value ? '用户已更新（权限下一请求生效）' : '用户已创建')
     await load()
   } catch (err) {
-    const apiError = err as { status?: number; message?: string }
+    const apiError = err as { status?: number; message?: string; detail?: unknown }
+    // 服务端 400 的契约回填：detail.field=vendorId → 定位到厂商表单项，而不是弹一个无主 toast
+    const field = (apiError.detail as { field?: string } | null | undefined)?.field
+    if (apiError.status === 400 && field === 'vendorId') {
+      vendorError.value = apiError.message || 'VENDOR_PM 用户必须绑定厂商（vendorId）'
+      ElMessage.error(vendorError.value)
+      focusVendorField()
+      return
+    }
     ElMessage.error(apiError.status === 409 ? apiError.message || '用户名已存在（409）' : apiError.message || '保存失败')
   } finally {
     saving.value = false
@@ -306,7 +342,15 @@ onMounted(async () => {
           </el-form-item>
         </div>
         <el-form-item label="角色" required>
-          <el-select v-model="form.roles" multiple filterable allow-create default-first-option style="width: 100%">
+          <el-select
+            v-model="form.roles"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+            @change="vendorError = ''"
+          >
             <el-option v-for="role in roleOptions" :key="role.code" :label="`${role.name}（${role.code}）`" :value="role.code" />
           </el-select>
         </el-form-item>
@@ -316,10 +360,26 @@ onMounted(async () => {
               <el-option v-for="domain in domains" :key="domain.id" :label="domain.name" :value="domain.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="所属厂商">
-            <el-select v-model="form.vendorId" clearable filterable style="width: 100%">
+          <el-form-item
+            label="所属厂商"
+            :required="vendorRequired"
+            :error="vendorError"
+            :class="{ 'adm-vendor-error': !!vendorError }"
+          >
+            <el-select
+              ref="vendorSelectRef"
+              v-model="form.vendorId"
+              clearable
+              filterable
+              style="width: 100%"
+              :placeholder="vendorRequired ? 'VENDOR_PM 必须选择厂商' : '可选，用于按厂商收窄数据'"
+              @change="vendorError = ''"
+            >
               <el-option v-for="vendor in vendors" :key="vendor.id" :label="vendor.name" :value="vendor.id" />
             </el-select>
+            <p v-if="vendorRequired && !vendorError" class="adm-hint" style="margin: 4px 0 0">
+              VENDOR_PM（厂商项目经理）只能看到所选厂商的需求/缺陷/版本，未绑定将被服务端拒绝（400）。
+            </p>
           </el-form-item>
         </div>
         <div class="adm-form-grid">
@@ -341,6 +401,12 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* el-form-item 的校验错误默认绝对定位，会压住下一行（组织 ID/初始密码）。
+   厂商必填是「必须当场改」的错误，让它在文档流里占位，把下一行顶下去。 */
+.adm-vendor-error :deep(.el-form-item__error) {
+  position: static;
+  margin-top: 4px;
+}
 .adm-pages {
   display: flex;
   flex-direction: column;

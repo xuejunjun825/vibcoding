@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * a4-nav-visibility.mjs — 7 角色真实权限 → 菜单可见集（PRD AC-9；TECHNICAL §5）
+ * a4-nav-visibility.mjs — 8 角色真实权限 → 菜单可见集（PRD AC-9；TECHNICAL §5）
  *
  * a3 证明「声明齐全」，a4 证明「角色实际看到什么」：用登录响应的 permissions
  * 代入 navVisible 的同一算法（含 AUTHENTICATED 哨兵、internalOnly、routeName 注册），
@@ -8,16 +8,18 @@
  *
  * 厂商账号判定：登录响应不带 vendorId，所以由 access-verify.sh 用
  * sys_user.vendor_id IS NOT NULL 算出名单，经 A4_VENDOR_USERS 传入；
- * 单独运行时退化为 vendor1（本夹具的厂商账号）。
+ * 单独运行时退化为 vendor1,vpm1（本夹具的厂商账号）。
+ * r24 起多一个反例：VENDOR_PM 的 internalOnly 窄例外只开「用例库」（vendorPmAllowed），
+ * 由 A17 断言放行、A19 断言 vendor1 深链仍 403 —— 例外认角色码，不认 vendorId。
  */
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseNav, parseRouteCodes } from './a3-nav-audit.mjs'
+import { parseNav, parseRouteCodes, parseRouteMeta } from './a3-nav-audit.mjs'
 
 const GATEWAY = process.env.GATEWAY_URL || 'http://127.0.0.1:8080'
 const TENANT = process.env.A4_TENANT || 't1'
 const VENDOR_USERS = new Set(
-  (process.env.A4_VENDOR_USERS || 'vendor1').split(',').map((s) => s.trim()).filter(Boolean),
+  (process.env.A4_VENDOR_USERS || 'vendor1,vpm1').split(',').map((s) => s.trim()).filter(Boolean),
 )
 const DUMP = process.env.A4_DUMP === '1'
 const ROLES = [
@@ -28,12 +30,14 @@ const ROLES = [
   { user: 'dev1', pass: 'Passw0rd!' },
   { user: 'qa1', pass: 'Passw0rd!' },
   { user: 'vendor1', pass: 'Passw0rd!' },
+  { user: 'vpm1', pass: 'Passw0rd!' },
 ]
 
 /** 与 web/src/layouts/navAccess.ts 完全一致的四步判定（顺序本身是契约） */
 function navVisible(item, ctx) {
   if (item.routeName && !ctx.hasRoute(item.routeName)) return false
-  if (item.internalOnly && ctx.vendorScoped) return false
+  // r24：internalOnly 的唯一窄例外 —— 只有 VENDOR_PM 可进（用例库），vendorId 不算
+  if (item.internalOnly && ctx.vendorScoped && !(item.vendorPmAllowed && ctx.vendorPm)) return false
   // r18 双条件之一：页面码（MENU 层）。缺省/空串退化为「登录即可见」（通知中心）。
   const pageCode = (item.pageCode || '').trim()
   if (pageCode && ctx.hasMenu && !ctx.hasMenu(pageCode)) return false
@@ -48,7 +52,7 @@ function navVisible(item, ctx) {
 /** 只按功能码判（r17 语义）：与双条件结果对照，用来证明「页面码没有额外挡人」 */
 function navVisibleByFunction(item, ctx) {
   if (item.routeName && !ctx.hasRoute(item.routeName)) return false
-  if (item.internalOnly && ctx.vendorScoped) return false
+  if (item.internalOnly && ctx.vendorScoped && !(item.vendorPmAllowed && ctx.vendorPm)) return false
   const raw = item.functionCode ?? item.codes ?? []
   const codes = Array.isArray(raw) ? raw : [raw]
   if (codes.length === 0) return false
@@ -87,7 +91,7 @@ async function login(user, pass) {
   } catch {
     menus = null
   }
-  return { codes, menus, epoch, tenantId: body.tenantId }
+  return { codes, menus, epoch, tenantId: body.tenantId, roles: Array.isArray(body.user?.roles) ? body.user.roles : [] }
 }
 
 async function main() {
@@ -132,7 +136,7 @@ async function main() {
   const menusByRole = new Map()
   const epochByRole = new Map()
   for (const role of ROLES) {
-    const { codes, menus, epoch } = await login(role.user, role.pass)
+    const { codes, menus, epoch, roles } = await login(role.user, role.pass)
     menusByRole.set(role.user, menus)
     epochByRole.set(role.user, epoch)
     const ctx = {
@@ -141,6 +145,8 @@ async function main() {
       // 页面码（MENU 层）——和 SideNav/TopNav 传进 NavContext 的是同一份数据
       hasMenu: menus ? (code) => menus.has(code) : undefined,
       vendorScoped: VENDOR_USERS.has(role.user),
+      // r24：窄例外只认角色码（与 auth.isVendorPm 同义），vendorId 不能替代它
+      vendorPm: roles.includes('VENDOR_PM'),
     }
     ctxByRole.set(role.user, ctx)
     const visible = sidebar.filter((it) => navVisible(it, ctx)).map((it) => it.label)
@@ -244,7 +250,7 @@ async function main() {
     return n < 2 || n > sidebar.length
   })
   if (vendorSees.length === 2 && rangeBad.length === 0) {
-    ok('vendor1 可见 需求池/缺陷；7 角色可见数均在 [2, 41] 合理区间')
+    ok('vendor1 可见 需求池/缺陷；8 角色可见数均在 [2, 41] 合理区间')
   } else {
     bad(`vendor1 看不到: ${['需求池', '缺陷'].filter((l) => !visible('vendor1', l)).join('、')}；可见数越界角色: ${rangeBad.join('、')}`,
       '厂商账号仍应看到需求池/缺陷；可见数越界通常意味着 AUTHENTICATED 哨兵判定顺序被打乱')
@@ -260,7 +266,7 @@ async function main() {
       'T4 落地后 login 响应须带 epoch + menus（TECHNICAL §7）：否则前端只能按功能码推页面，三层授权形同两层')
   } else {
     bad(`admin 的 menus 集合只有 ${adminMenus.size} 个页面码（应 36）`,
-      'RbacSeeder 的 MENU 行必须覆盖 10 角色 × 36 页；缺行 = 该页面永远不可见（s0/s2 会同时红）')
+      'RbacSeeder 的 MENU 行必须覆盖 11 角色 × 36 页；缺行 = 该页面永远不可见（s0/s2 会同时红）')
   }
 
   // A16：页面码不额外挡人 —— 双条件可见集与「只按功能码」逐角色完全相同。
@@ -279,10 +285,49 @@ async function main() {
       }
     }
     if (diffs.length === 0) {
-      ok('7 角色的双条件可见集与单功能码可见集一致（MENU = max(绑定功能码)，页面码不额外挡人）')
+      ok('8 角色的双条件可见集与单功能码可见集一致（MENU = max(绑定功能码)，页面码不额外挡人）')
     } else {
       bad(`页面码与功能码判定不一致：${diffs.join('；')}`,
         'nav 的 functionCode 必须取自该页面在 MenuRegistry 的 functionCodes；不一致时 MENU 档位与 nav 判据会永久打架')
+    }
+  }
+
+  // A17（r24）：VENDOR_PM 的只读例外 —— 用例库是本角色唯一的 internalOnly 放行入口。
+  // 这是 r24 唯一放宽的页面准入：写能力仍由 test.action.case_edit 收口（AC-9/AC-10）。
+  if (visible('vpm1', '用例库')) {
+    ok('vpm1 可见 用例库（VENDOR_PM 只读例外：vendorPmAllowed，写入仍按 test.action.case_edit）')
+  } else {
+    bad('vpm1 看不到用例库',
+      'nav.ts 的 testcases 项应同时标 internalOnly + vendorPmAllowed；navVisible 的例外必须认 ctx.vendorPm')
+  }
+
+  // A18（r24）：例外的边界 —— VENDOR_PM 仍看不到任何 admin.* 后台入口。
+  // 「开一扇门」不等于「开一片门」；这里漏一项，窄例外就退化成厂商域全放行。
+  {
+    const vpmLeaked = ADMIN_GROUP_LABELS.filter((l) => visible('vpm1', l))
+    if (vpmLeaked.length === 0) {
+      ok(`vpm1 隐藏全部 ${ADMIN_GROUP_LABELS.length} 个 admin.* 后台入口（例外只开用例库一扇门）`)
+    } else {
+      bad(`vpm1 仍可见后台入口: ${vpmLeaked.join('、')}`,
+        'vendorPmAllowed 只允许标在 testcases 上；后台入口必须继续被 admin.* 功能码挡住')
+    }
+  }
+
+  // A19（r24）：vendor1 深链 /testcases 仍 403 —— 例外只认角色码，不认 vendorId。
+  // 路由守卫的同一判定作用在 testcases 的 meta 上：vendorScoped + 非 VENDOR_PM ⇒ 拒绝。
+  {
+    const meta = parseRouteMeta().get('testcases')
+    const guardDeny = (vendorScoped, roleCodes) => Boolean(
+      meta?.internalOnly && vendorScoped && !(meta?.vendorPmAllowed && roleCodes.includes('VENDOR_PM')),
+    )
+    const vendor1Denied = guardDeny(true, ['VENDOR'])
+    const vpm1Denied = guardDeny(true, ['VENDOR_PM'])
+    if (meta?.internalOnly && meta?.vendorPmAllowed && vendor1Denied && !vpm1Denied) {
+      ok('vendor1 深链 /testcases 仍 403、vpm1 放行（例外只认 VENDOR_PM 角色码，不认 vendorId）')
+    } else {
+      bad(`深链例外判定不对：vendor1 拒绝=${vendor1Denied}（应 true）、vpm1 拒绝=${vpm1Denied}（应 false）、` +
+        `meta.internalOnly=${meta?.internalOnly}、meta.vendorPmAllowed=${meta?.vendorPmAllowed}`,
+        'deliver.routes.ts 的 testcases meta 必须 internalOnly+vendorPmAllowed；守卫写 `auth.isVendorPm` 而非 vendorId')
     }
   }
 
@@ -300,7 +345,7 @@ async function main() {
     for (const f of failures) console.error(`  - ${f}`)
     process.exit(1)
   }
-  console.log(`\n  ok a4-nav-visibility: ${pass}/${total} 项通过（7 角色菜单可见集与矩阵一致）`)
+  console.log(`\n  ok a4-nav-visibility: ${pass}/${total} 项通过（${ROLES.length} 角色菜单可见集与矩阵一致）`)
 }
 
 main().catch((e) => {

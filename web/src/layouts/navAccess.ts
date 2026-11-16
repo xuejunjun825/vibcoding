@@ -25,6 +25,13 @@ export interface NavGuard {
   /** 仅内部账号可见（厂商账号不渲染，深链由路由守卫拦） */
   internalOnly?: boolean
   /**
+   * `internalOnly` 的**窄例外**：仅该角色（当前只有 VENDOR_PM/用例库）可进。
+   *
+   * 不等于「厂商账号一律放行」——`vendorScoped` 仍为真，只是判到这一项时
+   * 由 `ctx.vendorPm`（角色码）决定，而不是由 `vendorId` 决定（TECHNICAL §3.4）。
+   */
+  vendorPmAllowed?: boolean
+  /**
    * 页面码（MENU 层，36 个之一）。空串/缺省 = 该条目不受页面保护（如通知中心），
    * 退化为「登录即可见」。页面码与 `MenuRegistry`、`sys_menu` 三处同源。
    */
@@ -36,6 +43,8 @@ export interface NavContext {
   canAny(codes: string[]): boolean
   /** 当前登录账号是否厂商账号（`user.vendorId != null`） */
   vendorScoped: boolean
+  /** 当前账号是否厂商项目经理（`roles` 含 `VENDOR_PM`），`internalOnly` 窄例外的唯一依据 */
+  vendorPm: boolean
   /**
    * 页面码判定（MENU 层）。
    *
@@ -47,7 +56,7 @@ export interface NavContext {
 
 export function navVisible(item: NavGuard, ctx: NavContext): boolean {
   if (item.routeName && !ctx.hasRoute(item.routeName)) return false
-  if (item.internalOnly && ctx.vendorScoped) return false
+  if (item.internalOnly && ctx.vendorScoped && !(item.vendorPmAllowed && ctx.vendorPm)) return false
   const pageCode = item.pageCode?.trim() ?? ''
   if (pageCode && ctx.hasMenu && !ctx.hasMenu(pageCode)) return false
   const codes = Array.isArray(item.functionCode) ? item.functionCode : [item.functionCode]

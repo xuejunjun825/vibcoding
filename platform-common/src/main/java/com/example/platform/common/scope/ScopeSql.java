@@ -45,6 +45,25 @@ public final class ScopeSql {
 
     private static final Map<String, TableSpec> TABLES = tables();
 
+    /**
+     * Tables that carry no vendor column but are still vendor-restricted, expressed as a derived
+     * {@code EXISTS} over the object that does carry the assignment.
+     *
+     * <p>{@code release} is the case: a release has no vendor of its own — it is visible to a
+     * vendor iff at least one requirement inside it is the vendor's (owner or assignee). The
+     * {@code {a}} placeholder is replaced with the alias prefix ({@code ""} or {@code "r."}) so the
+     * same text serves the list query and the detail probe in {@code ReleaseService}. Keeping it
+     * here (one predicate, one parameter) is what stops the two paths from drifting apart.</p>
+     */
+    private static final Map<String, String> DERIVED_VENDOR = Map.of(
+            "release",
+            "EXISTS (SELECT 1 FROM release_requirement __rr "
+                    + "JOIN `requirement` __rq ON __rq.id = __rr.requirement_id "
+                    + "                       AND __rq.tenant_id = __rr.tenant_id "
+                    + "WHERE __rr.tenant_id = {a}tenant_id AND __rr.release_id = {a}id "
+                    + "  AND (__rq.owner_vendor_id = :" + VENDOR_PARAM
+                    + " OR __rq.assignee_vendor_id = :" + VENDOR_PARAM + "))");
+
     private ScopeSql() {
     }
 
@@ -192,8 +211,16 @@ public final class ScopeSql {
             } else if (spec.vendorColumn() != null) {
                 clauses.add(prefix + spec.vendorColumn() + " = :" + VENDOR_PARAM);
                 params.put(VENDOR_PARAM, scope.vendorId());
+            } else {
+                // no vendor column on this table: for a derived dimension (release) restrict
+                // through the object that owns the assignment; otherwise tenant (+ domain) is all
+                // that can be applied, which is today's behaviour and stays unchanged.
+                String derived = DERIVED_VENDOR.get(normalized);
+                if (derived != null) {
+                    clauses.add(derived.replace("{a}", prefix));
+                    params.put(VENDOR_PARAM, scope.vendorId());
+                }
             }
-            // no vendor column on this table: tenant (+ domain when present) already applies
         }
 
         return new SqlPredicate(String.join(" AND ", clauses), params);

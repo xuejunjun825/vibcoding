@@ -8,19 +8,22 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import com.example.platform.contract.ActionRegistry;
 import com.example.platform.contract.MenuRegistry;
 import com.example.platform.contract.PermissionMatrix;
 import com.example.platform.contract.PermissionMatrix.Access;
+import com.example.req.seed.RbacSeeder;
 import org.junit.jupiter.api.Test;
 
 /**
- * AC-3 as executable evidence: the 1680 seeded rows per tenant are not hand-written, they are
+ * AC-3 as executable evidence: the 1848 seeded rows per tenant are not hand-written, they are
  * derived — {@code FUNCTION = the matrix cell}, {@code MENU = max(function codes the page binds)},
- * {@code ACTION = max(function codes the action needs)}. If the derivation ever drifts from the
- * matrix, upgrading quietly changes who can do what, so the equality is asserted per cell and
- * summarised as one canonical hash the database-side check (s2) recomputes from real rows.
+ * {@code ACTION = max(function codes the action needs) unless the role carries an explicit
+ * override}. If the derivation ever drifts from the matrix, upgrading quietly changes who can do
+ * what, so the equality is asserted per cell and summarised as one canonical hash the database-side
+ * check (s2) recomputes from real rows.
  */
 class RbacSeedEquivalenceTest {
 
@@ -36,14 +39,57 @@ class RbacSeedEquivalenceTest {
     }
 
     @Test
-    void seedMatchesFunctionMaxForActions() {
+    void seedMatchesActionAccessFor() {
         for (String role : PermissionMatrix.roles()) {
+            Set<String> overrides = RbacSeeder.actionDenyOverrides(role);
             for (ActionRegistry.ActionDef action : ActionRegistry.actions()) {
-                Access expected = max(role, action.functionCodes());
-                Access actual = PermissionMatrix.accessForAny(role, action.functionCodes());
+                Access expected = overrides.contains(action.code())
+                        ? Access.DENY : max(role, action.functionCodes());
+                Access actual = RbacSeeder.actionAccessFor(role, action);
                 assertEquals(expected, actual, "action " + action.code() + " for role " + role);
             }
         }
+    }
+
+    /**
+     * r24: the 11 overrides must be real overrides, not no-ops. Each one derives ALLOW from its
+     * page-admission function code, so an override that silently stopped applying (a typo in the
+     * code, a role mismatch) would hand VENDOR_PM a write capability and this test is the one place
+     * that notices before the seeded rows do.
+     */
+    @Test
+    void vendorPmCarriesElevenRealActionOverrides() {
+        Set<String> expected = Set.of(
+                "release.action.create", "release.action.update",
+                "release.action.approve", "release.action.close",
+                "task.action.create", "task.action.assign",
+                "task.action.update", "task.action.close",
+                "sprint.action.create", "sprint.action.close",
+                "test.action.case_edit");
+        assertEquals(expected, RbacSeeder.actionDenyOverrides("VENDOR_PM"));
+        for (String code : expected) {
+            ActionRegistry.ActionDef action = ActionRegistry.actions().stream()
+                    .filter(candidate -> candidate.code().equals(code)).findFirst().orElseThrow();
+            assertEquals(Access.ALLOW, max("VENDOR_PM", action.functionCodes()),
+                    code + " must derive ALLOW from its function codes, or the override is a no-op");
+            assertEquals(Access.DENY, RbacSeeder.actionAccessFor("VENDOR_PM", action),
+                    code + " must be DENY for VENDOR_PM");
+        }
+        // Nobody else carries overrides: the 10 pre-existing rows keep the pure max derivation.
+        for (String role : PermissionMatrix.roles()) {
+            if ("VENDOR_PM".equals(role)) {
+                continue;
+            }
+            for (ActionRegistry.ActionDef action : ActionRegistry.actions()) {
+                assertEquals(max(role, action.functionCodes()),
+                        RbacSeeder.actionAccessFor(role, action),
+                        "role " + role + " must stay on the max derivation");
+            }
+        }
+        long allowed = ActionRegistry.actions().stream()
+                .filter(action -> RbacSeeder.actionAccessFor("VENDOR_PM", action) == Access.ALLOW)
+                .count();
+        assertEquals(7L, allowed, "VENDOR_PM keeps 7 actions (72 − 11 overrides − 54 derived DENY)");
     }
 
     /** A page that binds no function code is not narrowed by the function layer. */
@@ -70,9 +116,9 @@ class RbacSeedEquivalenceTest {
     }
 
     @Test
-    void totalRowsAreSixteenEighty() {
-        assertEquals(1680L, rowCount(),
-                "10 roles × (60 functions + 36 pages + 72 actions) seeded rows per tenant");
+    void totalRowsAreEighteenFortyEight() {
+        assertEquals(1848L, rowCount(),
+                "11 roles × (60 functions + 36 pages + 72 actions) seeded rows per tenant");
     }
 
     private static long rowCount() {
@@ -95,7 +141,7 @@ class RbacSeedEquivalenceTest {
             }
             for (ActionRegistry.ActionDef action : ActionRegistry.actions()) {
                 lines.add(role + "|ACTION|" + action.code() + "|"
-                        + PermissionMatrix.accessForAny(role, action.functionCodes()).name());
+                        + RbacSeeder.actionAccessFor(role, action).name());
             }
         }
         lines.sort(String::compareTo);

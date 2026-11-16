@@ -115,6 +115,14 @@ export const useAuthStore = defineStore('auth', () => {
   const displayName = computed(() => user.value?.name ?? user.value?.roles?.[0] ?? '未登录')
   const initials = computed(() => displayName.value.slice(-2))
   const homeRoute = computed(() => defaultRoute.value || FALLBACK_ROUTE)
+  /**
+   * 厂商项目经理（VENDOR_PM）：**只**用于 `internalOnly` 页面的窄例外，
+   * 不作为任何写按钮的判据（写能力一律由 `canAction` 决定，TECHNICAL §5.1）。
+   *
+   * 刻意只认角色码、不认 `vendorId`：后者对所有厂商账号都为真，
+   * 用它放行会把「用例库只对 VENDOR_PM 例外」放大成「厂商账号一律可进」。
+   */
+  const isVendorPm = computed(() => (user.value?.roles ?? []).includes('VENDOR_PM'))
 
   /** 服务端权限是唯一事实源；无 functionCode 的入口视为公共 */
   function can(code?: string | null): boolean {
@@ -333,6 +341,7 @@ export const useAuthStore = defineStore('auth', () => {
     displayName,
     initials,
     homeRoute,
+    isVendorPm,
     workspaceLabel,
     tenantLabel,
     can,

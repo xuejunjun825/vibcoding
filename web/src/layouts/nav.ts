@@ -143,13 +143,15 @@ export const NAV_GROUPS: NavGroup[] = [
         pageCode: 'defect.list',
       },
       {
-        // 厂商不作用例：内部账号才渲染；厂商深链由路由守卫 403（meta.internalOnly）
+        // 厂商不作用例：内部账号才渲染；厂商深链由路由守卫 403（meta.internalOnly）。
+        // 唯一例外：VENDOR_PM 可只读进入（vendorPmAllowed），写能力仍由 test.action.case_edit 收口。
         label: '用例库',
         to: '/testcases',
         icon: 'library',
         routeName: 'testcases',
         functionCode: 'case:manage',
         internalOnly: true,
+        vendorPmAllowed: true,
         pageCode: 'test.cases',
       },
       {

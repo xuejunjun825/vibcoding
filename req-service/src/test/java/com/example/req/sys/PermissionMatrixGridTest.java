@@ -17,21 +17,21 @@ import org.junit.jupiter.api.Test;
 /**
  * AC-5: the matrix is asserted cell by cell, not spot-checked.
  *
- * <p>Every one of the 10 roles × 60 functions is covered, so a silently changed cell (the usual
+ * <p>Every one of the 11 roles × 60 functions is covered, so a silently changed cell (the usual
  * way a permission bug ships) fails here instead of in production. The 26 r2 codes are asserted
  * exactly as before; M6 appended 15 quality codes (grid 260 → 410), M7 appended
- * {@code integration:manage} (420), M8 appended 14 collaboration/code/test codes (560), and M9
- * appended 4 analytics/portal codes (PORTAL_VIEW / PORTAL_CONFIG / REPORT_VIEW / REPORT_SHARE),
- * which is why the expected grid size is 600.</p>
+ * {@code integration:manage} (420), M8 appended 14 collaboration/code/test codes (560), M9
+ * appended 4 analytics/portal codes (PORTAL_VIEW / PORTAL_CONFIG / REPORT_VIEW / REPORT_SHARE)
+ * (600), and r24 appended the eleventh role {@code VENDOR_PM} (660).</p>
  */
 class PermissionMatrixGridTest {
 
     @Test
-    @DisplayName("10 roles × 60 functions: every cell exists and is defined exactly once")
+    @DisplayName("11 roles × 60 functions: every cell exists and is defined exactly once")
     void everyCellIsDefined() {
         List<PermissionMatrix.Cell> cells = PermissionMatrix.cells();
         int expected = PermissionMatrix.roles().size() * PermissionMatrix.functions().size();
-        assertEquals(600, expected, "the matrix is 10 roles × 60 functions");
+        assertEquals(660, expected, "the matrix is 11 roles × 60 functions");
         assertEquals(expected, cells.size(), "cells() must enumerate the whole grid");
         Set<String> seen = new HashSet<>();
         for (PermissionMatrix.Cell cell : cells) {
@@ -42,6 +42,51 @@ class PermissionMatrixGridTest {
                     "accessFor disagrees with cells() at " + cell.role() + " × " + cell.function());
         }
         assertEquals(expected, seen.size(), "grid has holes");
+    }
+
+    @Test
+    @DisplayName("r24: VENDOR_PM is 12 ALLOW + 1 RESTRICTED + 47 DENY, and the old 10 rows did not move")
+    void vendorPmRow() {
+        // The whole point of appending the role instead of editing the ten existing rows: the
+        // upgrade must not change a single pre-existing cell. Assert the 12 allowed codes by name
+        // so a code that silently appears/vanishes (e.g. WIKI_VIEW dropped by a later M8 edit)
+        // fails here rather than in the seeded grid.
+        Set<String> allowed = new java.util.LinkedHashSet<>();
+        Set<String> restricted = new java.util.LinkedHashSet<>();
+        int denied = 0;
+        for (String function : PermissionMatrix.functions()) {
+            switch (PermissionMatrix.accessFor("VENDOR_PM", function)) {
+                case ALLOW -> allowed.add(function);
+                case RESTRICTED -> restricted.add(function);
+                case DENY -> denied++;
+            }
+        }
+        assertEquals(Set.of("release:plan", "task:manage", "case:manage", "plan:manage",
+                        "defect:handle", "defect:board", "qualitymetric:view", "WIKI_VIEW",
+                        "GANTT_VIEW", "PORTAL_VIEW", "REPORT_VIEW", "notification:read"),
+                allowed, "VENDOR_PM must ALLOW exactly these 12 codes");
+        assertEquals(Set.of("trace:view"), restricted,
+                "trace:view is the only RESTRICTED cell (page visible, rows still narrowed)");
+        assertEquals(12, allowed.size(), "12 ALLOW");
+        assertEquals(1, restricted.size(), "1 RESTRICTED");
+        assertEquals(47, denied, "47 DENY cells (60 − 12 ALLOW − 1 RESTRICTED)");
+
+        // The four page-admission keys are what keeps 版本/迭代/用例/测试计划 pages visible: a DENY
+        // here hides the page entirely, and no ACTION override can bring it back.
+        for (String gate : List.of("release:plan", "task:manage", "case:manage", "plan:manage")) {
+            assertEquals(Access.ALLOW, PermissionMatrix.accessFor("VENDOR_PM", gate), gate);
+        }
+        // Write capabilities that must NOT come from the function layer.
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("VENDOR_PM", "req:review"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("VENDOR_PM", "tenant:manage"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("VENDOR_PM", "org:manage"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("VENDOR_PM", "audit:view"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("VENDOR_PM", "req:assign-vendor"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("VENDOR_PM", "FLOW_VIEW"));
+        assertEquals(Access.DENY, PermissionMatrix.accessFor("VENDOR_PM", "CCODE_POLICY_VIEW"));
+        // A union with another role still resolves by max: the role does not lower anyone else.
+        assertEquals(Access.ALLOW,
+                PermissionMatrix.accessOf("tenant:manage", List.of("VENDOR_PM", "PLATFORM_ADMIN")));
     }
 
     @Test

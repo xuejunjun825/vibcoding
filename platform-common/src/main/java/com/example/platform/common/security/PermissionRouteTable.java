@@ -242,7 +242,12 @@ public final class PermissionRouteTable {
         rules.add(rule("POST", "^/releases$", action("req.release", "release.action.create")));
         rules.add(rule("POST", "^/releases/\\d+/approval$",
                 action("req.release", "release.action.approve")));
-        rules.add(rule("POST", "^/releases/\\d+/reviews", page("req.release")));
+        // Creating a review round is a write on the release, not a read of its page: guarding it by
+        // page code alone let any role that can *see* the release open a round (VENDOR_PM is the
+        // first such role). release.action.update is derived from release:plan for the other roles,
+        // so their admission is unchanged — only a read-only vendor loses this write.
+        rules.add(rule("POST", "^/releases/\\d+/reviews$",
+                action("req.release", "release.action.update")));
         rules.add(rule("POST", "^/releases/\\d+/reviews/\\d+/confirm$",
                 action("req.release", "release.action.approve")));
         rules.add(rule("PATCH", "^/releases/\\d+/quality-settings$",

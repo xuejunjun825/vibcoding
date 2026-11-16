@@ -172,12 +172,13 @@ public class SeedService {
                 row("tenant_id", tenantId, "code", "VEN-C"),
                 row("name", "丙方信息", "contact", "vendor-c@example.com", "status", "ACTIVE"));
 
-        // 10 个内置角色（PRD §6.1）
+        // 11 个内置角色（PRD §6.1；r24 追加厂商项目经理）
         String[][] roleDefs = {
                 {"BUSINESS", "业务部门"}, {"SUB_BUSINESS", "二级企业业务"},
                 {"SUB_BUSINESS_LEADER", "二级企业负责人"}, {"PRODUCT", "产品经理"},
                 {"PMO", "项目·域(PMO)"}, {"DEV", "研发工程师"}, {"QA", "测试工程师"},
-                {"OPS", "运维工程师"}, {"MGMT", "管理层"}, {"PLATFORM_ADMIN", "平台管理员"}};
+                {"OPS", "运维工程师"}, {"MGMT", "管理层"}, {"PLATFORM_ADMIN", "平台管理员"},
+                {"VENDOR_PM", "厂商项目经理"}};
         Map<String, Long> roles = new LinkedHashMap<>();
         for (String[] r : roleDefs) {
             roles.put(r[0], ensure("sys_role",
@@ -185,9 +186,11 @@ public class SeedService {
                     row("name", r[1], "builtin", 1)));
         }
 
-        // 13 个账号：厂商隔离靠账号的 vendor_id（不是独立厂商角色）
+        // 14 个账号：厂商隔离靠账号的 vendor_id（不是独立厂商角色）
         // biz1/suite1 是 20261110-r7 补的角色样本（业务部门 / 二级企业业务）——域授权不必单独写，
         // 下面循环里的 link("sys_user_domain", …) 会把每个账号绑到全部 7 域，与 po1 天然同源。
+        // vpm1 是 r24 的验收入口：VENDOR_PM 必须带厂商（VEN-A），否则建号校验（400）与验收现场都会
+        // 缺一个能证明「本厂商可见、跨厂商不可见」的账号。
         String[][] userDefs = {
                 {"admin", "平台管理员", "PLATFORM_ADMIN", null},
                 {"pm", "产品经理-张", "PRODUCT", null},
@@ -201,6 +204,7 @@ public class SeedService {
                 {"qa2", "测试-周", "QA", null},
                 {"vendor1", "厂商管理员-钱", "PMO", "VEN-A"},
                 {"vendor2", "厂商研发-郑", "DEV", "VEN-B"},
+                {"vpm1", "厂商项目经理-演示", "VENDOR_PM", "VEN-A"},
                 // mgr1 是 20261110-r9 补的 MGMT 样本：/portal 的「管理层」模板与 /dashboard 的
                 // 治理视角都由 MGMT 角色渲染，没有账号就演示不了（兜底模板只是无角色时的退路）。
                 {"mgr1", "管理层-演示", "MGMT", null}};
