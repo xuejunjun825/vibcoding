@@ -97,6 +97,12 @@ public final class RequirementErrors {
         return new ApiException(403, FORBIDDEN, message, Map.of());
     }
 
+    /** 提报时选了调用者无权使用的业务域（403 OUT_OF_SCOPE，detail 带 field 与越权 id）。 */
+    public static ApiException domainOutOfScope(List<Long> domainIds) {
+        return new ApiException(403, OUT_OF_SCOPE, "无权在这些业务域下提报",
+                Map.of("field", "domainIds", "domainIds", domainIds == null ? List.of() : domainIds));
+    }
+
     /**
      * 动作级拒绝（r17）：detail 带 action 与「此刻仍可执行的动作」，前端据此就地刷新按钮，
      * 负向脚本据此断言 403 确实来自动作矩阵而不是别的分支。

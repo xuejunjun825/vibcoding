@@ -21,6 +21,19 @@ const { userName } = usePlatformDict()
 
 const children = computed<RequirementRow[]>(() => props.detail.children ?? [])
 const rollup = computed(() => childInfo(props.detail))
+/**
+ * 拆解前置门（r23）：两处入口共用这一份判定，任何一处都不能绕过。
+ * 服务端始终返回 decomposeGate；缺失时按 allowed!==true 处理（fail-closed）。
+ */
+const gate = computed(() => props.detail.decomposeGate ?? null)
+const gateReason = computed(() => gate.value?.reason || (gate.value ? '' : '拆解前置条件缺失，暂时不能拆解'))
+const canSplit = computed(() => can('req:split'))
+/** 权限 ∧ 服务端前置门：唯一的拆解可用性判据 */
+const canDecompose = computed(() => canSplit.value && gate.value?.allowed === true)
+function onDecompose(): void {
+  if (!canDecompose.value) return
+  emit('decompose')
+}
 const percent = computed(() =>
   rollup.value.childCount ? Math.round((rollup.value.doneCount / rollup.value.childCount) * 100) : 0,
 )
@@ -51,18 +64,26 @@ function openRow(row: RequirementRow): void {
         <strong>{{ formatDays(actualTotal) }}</strong>
       </span>
       <span class="filter-bar__spacer" />
-      <el-button v-if="can('req:split')" size="small" @click="emit('decompose')">拆解子需求</el-button>
+      <el-button v-if="canSplit" size="small" :disabled="!canDecompose" :title="gateReason" @click="onDecompose">
+        拆解子需求
+      </el-button>
     </div>
+
+    <p v-if="canSplit && !canDecompose && gateReason" class="children__gate" role="note">{{ gateReason }}</p>
 
     <EmptyState
       v-if="children.length === 0"
       title="还没有子需求"
       description="把这条需求拆成可独立交付的子项，父需求的人天与完成率会自动汇总。"
-      action-text="拆解子需求"
       icon="file"
       compact
-      @action="emit('decompose')"
-    />
+    >
+      <template v-if="canSplit" #action>
+        <el-button type="primary" :disabled="!canDecompose" :title="gateReason" @click="onDecompose">
+          拆解子需求
+        </el-button>
+      </template>
+    </EmptyState>
 
     <el-table v-else :data="children" row-key="id" class="children__table" @row-click="openRow">
       <el-table-column prop="code" label="编号" width="130">
@@ -126,6 +147,11 @@ function openRow(row: RequirementRow): void {
 }
 .children__sep {
   color: var(--border-strong);
+}
+.children__gate {
+  margin: 0 0 0 4px;
+  font-size: 12px;
+  color: var(--color-warning);
 }
 .children__table {
   cursor: pointer;

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # platform-test-negative.sh — TECHNICAL §8.3 的 16 段负向用例（r17 起含动作级授权）。
+# r23 增 4b) 段：流转前置门（拆解/直建/改父共用一道门）+ 提报 domainIds 必填，含正向回归。
 # 每条都断言两件事：被拒绝（4xx + 错误码），且**没有落库**（表计数不变）。
 # 绿色 = 非法路径确实走不通；不是"接口返回 200 但界面拦住了"。
 set -uo pipefail
@@ -88,8 +89,9 @@ API_TOKEN="$ADMIN_TOKEN"
 
 # ---------------------------------------------------------------- 3
 section "3) PATCH 带 status → 400；4) RD 跳步 → 409"
-PDR_ID="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TID} AND type='PDR' ORDER BY id LIMIT 1")"
-[[ -n "$PDR_ID" ]] || { err "种子里没有 PDR，RD 无法挂父：make platform-seed"; exit 1; }
+# r23 前置门：RD 只能挂 SCHEDULED/IN_DEV 的 PDR，取父必须按状态过滤（PDR-0001=SCHEDULED）。
+PDR_ID="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TID} AND type='PDR' AND status IN ('SCHEDULED','IN_DEV') ORDER BY id LIMIT 1")"
+[[ -n "$PDR_ID" ]] || { err "种子里没有 SCHEDULED/IN_DEV 的 PDR，RD 无法挂父：make platform-seed"; exit 1; }
 api_call POST /api/req/requirements "{\"type\":\"RD\",\"title\":\"neg-sm-${RUN_TAG}\",\"parentId\":${PDR_ID},\"domainIds\":[$DOMAIN1],\"priority\":\"P2\",\"expectedDeliveryDate\":\"2026-12-31\"}"
 RD_ID="$(jget_ "$HTTP_BODY" '.id')"
 [[ -n "$RD_ID" && "$RD_ID" != "null" ]] || { err "创建负向夹具 RD 失败: $(printf '%s' "$HTTP_BODY" | head -c 200)"; exit 1; }
@@ -100,6 +102,79 @@ deny "RD TODO --finish--> 409（跳步）" 409 "ILLEGAL_TRANSITION" "状态表�
 api_call POST "/api/req/requirements/${RD_ID}/actions" '{"action":"start_dev"}'
 api_call POST "/api/req/requirements/${RD_ID}/actions" '{"action":"test_pass"}'
 deny "RD IN_DEV --test_pass--> 409（未提交测试不可通过）" 409 "ILLEGAL_TRANSITION"
+
+# ---------------------------------------------------------------- 4b
+section "4b) 流转前置门（r23）：拆解/直建/改父共用同一道门；提报 domainIds 必填"
+allow() { # desc want_code needle fix —— 正向回归断言，与 deny 同构
+    if [[ "$HTTP_CODE" == "$2" ]] && { [[ -z "${3:-}" ]] || grep -qF -- "$3" <<<"$HTTP_BODY"; }; then
+        pass "$1"
+    else
+        fail "$1 (期望 ${2}${3:+/含 '$3'}，实际 ${HTTP_CODE}: $(printf '%s' "$HTTP_BODY" | head -c 200))" "${4:-$HINT}"
+    fi
+}
+
+# 门必须在写入之前拒绝：每条拒绝都配 requirement 计数或 parent_id 未变的断言。
+# 1) 正向回归：只有已入池（POOLED）的 BUS 能拆出 PDR（AC-5）。
+SEED_POOLED_BUS="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TID} AND type='BUS' AND status='POOLED' ORDER BY id LIMIT 1")"
+[[ -n "$SEED_POOLED_BUS" ]] || { err "种子里没有 POOLED 的 BUS，前置门正向回归无法执行：make platform-seed"; exit 1; }
+api_call POST "/api/req/requirements/${SEED_POOLED_BUS}/decompose" "{\"title\":\"neg-gate-pdr-${RUN_TAG}\",\"domainIds\":[$DOMAIN1]}"
+allow "已入池 BUS 拆解 → 201（正向回归 AC-5）" 201 ""
+GATE_PDR="$(jget_ "$HTTP_BODY" '.id')"
+[[ -n "$GATE_PDR" && "$GATE_PDR" != "null" ]] || { err "拆解入池 BUS 未返回子需求 id，后续前置门用例无法执行"; exit 1; }
+
+# 2) 未入池 BUS（新建停在 SUBMITTED）不可拆解出 PDR。
+api_call POST /api/req/requirements "{\"type\":\"BUS\",\"title\":\"neg-gate-bus-${RUN_TAG}\",\"domainIds\":[$DOMAIN1]}"
+SUBMITTED_BUS="$(jget_ "$HTTP_BODY" '.id')"
+[[ -n "$SUBMITTED_BUS" && "$SUBMITTED_BUS" != "null" ]] || { err "创建未入池 BUS 夹具失败：$(printf '%s' "$HTTP_BODY" | head -c 200)"; exit 1; }
+BEFORE_GATE="$(db_count requirement "tenant_id=${TID}")"
+api_call POST "/api/req/requirements/${SUBMITTED_BUS}/decompose" "{\"title\":\"neg-gate-pdr2-${RUN_TAG}\",\"domainIds\":[$DOMAIN1]}"
+deny "未入池 BUS 拆解 → 409 PARENT_NOT_POOLED" 409 "PARENT_NOT_POOLED"
+deny "409 detail 指明父状态要求 POOLED" 409 '"required":"POOLED"'
+same_count "未入池 BUS 拆解未落库" requirement "tenant_id=${TID}" "$BEFORE_GATE"
+
+# 3) 直建入口与拆解同源：未入池 BUS 下直建 PDR 同样 409。
+api_call POST /api/req/requirements "{\"type\":\"PDR\",\"title\":\"neg-gate-pdr3-${RUN_TAG}\",\"parentId\":${SUBMITTED_BUS},\"domainIds\":[$DOMAIN1]}"
+deny "未入池 BUS 下直建 PDR → 409 PARENT_NOT_POOLED" 409 "PARENT_NOT_POOLED"
+same_count "直建 PDR 被拒未落库" requirement "tenant_id=${TID}" "$BEFORE_GATE"
+
+# 4) 未排期 PDR（上一步产物停在 PENDING_ANALYSIS）不可拆解：RD 只能由 SCHEDULED/IN_DEV 的 PDR 产出。
+api_call POST "/api/req/requirements/${GATE_PDR}/decompose" "{\"title\":\"neg-gate-rd0-${RUN_TAG}\",\"domainIds\":[$DOMAIN1]}"
+deny "未排期 PDR 拆解 → 409 PARENT_NOT_SCHEDULED" 409 "PARENT_NOT_SCHEDULED"
+deny "409 detail 给出允许的父状态 SCHEDULED/IN_DEV" 409 '"allowed":["SCHEDULED","IN_DEV"]'
+same_count "未排期 PDR 拆解未落库" requirement "tenant_id=${TID}" "$BEFORE_GATE"
+
+# 5) 未排期 PDR 下直建 RD 同样 409（三条写入口同码同结构）。
+api_call POST /api/req/requirements "{\"type\":\"RD\",\"title\":\"neg-gate-rd1-${RUN_TAG}\",\"parentId\":${GATE_PDR},\"domainIds\":[$DOMAIN1]}"
+deny "未排期 PDR 下直建 RD → 409 PARENT_NOT_SCHEDULED" 409 "PARENT_NOT_SCHEDULED"
+same_count "直建 RD 被拒未落库" requirement "tenant_id=${TID}" "$BEFORE_GATE"
+
+# 6) PUT 改父复用同一道门：把已有 RD 改挂到未排期 PDR 必须 409，且 parent_id 不变。
+PARENT_BEFORE="$(db_q "SELECT parent_id FROM requirement WHERE id=${RD_ID}")"
+api_call PUT "/api/req/requirements/${RD_ID}" "{\"parentId\":${GATE_PDR}}"
+deny "RD 改挂未排期 PDR → 409 PARENT_NOT_SCHEDULED" 409 "PARENT_NOT_SCHEDULED"
+PARENT_AFTER="$(db_q "SELECT parent_id FROM requirement WHERE id=${RD_ID}")"
+if [[ -n "$PARENT_BEFORE" && "$PARENT_AFTER" == "$PARENT_BEFORE" ]]; then
+    pass "改父被拒后 parent_id 未变（${PARENT_AFTER}）"
+else
+    fail "改父被拒但 parent_id ${PARENT_BEFORE}→${PARENT_AFTER}" "门必须在写入之前拒绝"
+fi
+
+# 7) 提报必填：直建入口缺 domainIds → 400 且 detail 指向字段，不落库。
+api_call POST /api/req/requirements "{\"type\":\"BUS\",\"title\":\"neg-gate-nodomain-${RUN_TAG}\"}"
+deny "提报缺 domainIds → 400 VALIDATION_FAILED" 400 "VALIDATION_FAILED"
+deny "400 detail 指向 domainIds 字段" 400 '"field":"domainIds"'
+same_count "缺 domainIds 提报未落库" requirement "tenant_id=${TID}" "$BEFORE_GATE"
+
+# 8) 正向回归：合法父直建 RD 201，改挂到另一合法 PDR 与改回原父都 200（门不误伤合法写）。
+LEGAL_PDR="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TID} AND type='PDR' AND status IN ('SCHEDULED','IN_DEV') AND id<>${PDR_ID} ORDER BY id LIMIT 1")"
+[[ -n "$LEGAL_PDR" ]] || { err "种子里没有第二个可用的 PDR 父（SCHEDULED/IN_DEV）：make platform-seed"; exit 1; }
+api_call POST /api/req/requirements "{\"type\":\"RD\",\"title\":\"neg-gate-rd-ok-${RUN_TAG}\",\"parentId\":${PDR_ID},\"domainIds\":[$DOMAIN1]}"
+allow "合法父 PDR 下直建 RD → 201（正向回归）" 201 ""
+GATE_RD="$(jget_ "$HTTP_BODY" '.id')"
+api_call PUT "/api/req/requirements/${GATE_RD}" "{\"parentId\":${LEGAL_PDR}}"
+allow "RD 改挂另一合法 PDR → 200" 200 ""
+api_call PUT "/api/req/requirements/${GATE_RD}" "{\"parentId\":${PDR_ID}}"
+allow "RD 改回原父 → 200（合法写不被误伤）" 200 ""
 
 # ---------------------------------------------------------------- 5/6
 section "5) 无审批人发布 → 400；6) 编辑已发布流程 → 409"

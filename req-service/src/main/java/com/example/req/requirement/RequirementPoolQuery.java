@@ -212,6 +212,6 @@ public class RequirementPoolQuery {
                 Rows.toDate(Rows.object(row, "plan_end_date")),
                 Rows.toDateTime(Rows.object(row, "closed_at")),
                 Rows.toDateTime(Rows.object(row, "updated_at")),
-                rollup, stateMachine.allowedActions(type, status).stream().toList(), Map.of());
+                rollup, stateMachine.allowedActions(type, status).stream().toList(), Map.of(), null);
     }
 }

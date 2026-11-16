@@ -179,9 +179,16 @@ BUS_ID="$(jget "$HTTP_BODY" '.id')"
 BUS_CODE="$(jget "$HTTP_BODY" '.code')"
 expect_num "BUS 编号形如 BUS-####" "$(grep -cE '^BUS-[0-9]{4,}$' <<<"$BUS_CODE")" eq 1 "CodeGenerator 前缀/补零不对"
 
-create_req PDR "验证-产品需求-${RUN_TAG}" "$BUS_ID"
-expect "创建 PDR（父=BUS）201" 201
+# r23 前置门：拆解/直建 PDR 要求父 BUS 已入池（POOLED）。新建的 BUS_ID 只用于类型/状态断言，
+# PDR 改挂种子 POOLED BUS（BUS-0001）并立刻排期，后续 RD 创建才不会被 409 PARENT_NOT_SCHEDULED 拦住。
+SEED_POOLED_BUS="$(db_q "SELECT id FROM requirement WHERE tenant_id=$(tenant_id)
+                         AND type='BUS' AND status='POOLED' ORDER BY id LIMIT 1")"
+[[ -n "$SEED_POOLED_BUS" ]] || SEED_POOLED_BUS="$BUS_ID"      # 兜底：让下一条断言红并带提示
+create_req PDR "验证-产品需求-${RUN_TAG}" "$SEED_POOLED_BUS"
+expect "创建 PDR（父=BUS[POOLED]）201" 201
 PDR_ID="$(jget "$HTTP_BODY" '.id')"
+api_call POST "/api/req/requirements/${PDR_ID}/actions" '{"action":"schedule"}'
+[[ "$HTTP_CODE" == "200" ]] || warn "PDR 排期失败（HTTP ${HTTP_CODE}）：后续 RD 创建会 409 PARENT_NOT_SCHEDULED，确认已 make platform-seed（BUS-0001 POOLED）"
 
 create_req RD "验证-研发需求-${RUN_TAG}" "$BUS_ID"
 expect "RD 直接挂 BUS 下 → 400（层级必须 BUS→PDR→RD）" 400
@@ -804,6 +811,9 @@ API_TENANT="${SAVED_TENANT:-$API_TENANT}"
 create_req PDR "验证-准入正向PDR-${RUN_TAG}" "$D9_BUS" ""
 expect "准入正向链 PDR 201" 201
 D9_PDR="$(jget "$HTTP_BODY" '.id')"
+# r23 前置门：RD 只能挂在 SCHEDULED/IN_DEV 的 PDR 下，新 PDR 先排期（失败只 warn，断言数不变）。
+api_call POST "/api/req/requirements/${D9_PDR}/actions" '{"action":"schedule"}'
+[[ "$HTTP_CODE" == "200" ]] || warn "准入正向 PDR 排期失败（HTTP ${HTTP_CODE}）：后续 RD 会 409 PARENT_NOT_SCHEDULED"
 create_req RD "验证-准入正向RD-${RUN_TAG}" "$D9_PDR" "2"
 expect "准入正向链 RD 201" 201
 D9_RD="$(jget "$HTTP_BODY" '.id')"

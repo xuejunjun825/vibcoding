@@ -68,7 +68,8 @@ printf '\033[1;34m性能基线（AC-20）：%d 轮/场景 · 租户 %s\033[0m\n'
 
 if [[ "$PERF_SEED" == "1" ]]; then
     printf '  补种子：%d 条需求（甘特视图）+ %d 个 Wiki 页面…\n' "$GANTT_ROWS" "$WIKI_PAGES"
-    PDR="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TENANT_ID} AND type='PDR' ORDER BY id LIMIT 1")"
+    # r23 前置门：RD 只能挂 SCHEDULED/IN_DEV 的 PDR（首个 PDR 可能已终态）。
+    PDR="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TENANT_ID} AND type='PDR' AND status IN ('SCHEDULED','IN_DEV') ORDER BY id LIMIT 1")"
     REL="$(q_create_release "${PERF_TAG}-release")" || true
     for (( i = 1; i <= GANTT_ROWS; i++ )); do
         api_call POST /api/req/requirements "$(jq -cn --arg t "${PERF_TAG}-需求-${i}" \
