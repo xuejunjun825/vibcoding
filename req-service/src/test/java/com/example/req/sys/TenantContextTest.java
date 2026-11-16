@@ -45,8 +45,6 @@ class TenantContextTest {
         assertEquals("dev1", TenantContext.username());
         assertEquals("t1", TenantContext.tenantCode());
         assertNotNull(TenantContext.principal());
-        assertTrue(TenantContext.can("req:deliver"));
-        assertFalse(TenantContext.can("tenant:manage"));
 
         TenantContext.clear();
         assertThrows(IllegalStateException.class, TenantContext::require);

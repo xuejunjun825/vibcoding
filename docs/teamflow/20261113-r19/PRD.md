@@ -1,6 +1,6 @@
 <!-- meta: summary="收口 r18 三层授权（功能码/页面/动作）：补齐编译、V12 迁移与 1680 行种子、角色与授权两页及导航接入、写端点动作声明，让 rbac-verify s0–s9 与既有 8 条门禁全绿，并留下验收证据。" -->
 基线依赖：docs/teamflow/20261113-r18-rbac-role-permission/（其 AC-1…AC-22 是本轮交付对象；r17 的动作级授权/自服务谓词/silentForbidden 与 r2 起形成的 RESTRICTED/DataScope 语义不得回归）
-基线订正（r20 实测，2026-11-14）：门禁真实基线为 `platform-verify` **167**、`platform-test-negative` **28**、`access` **152**、`rbac` 101（r20 起含 `s2r` 收尾段为 109）、`lint` 22、`verify` 14、`analytics` 74（以上本轮复跑实测）；`platform-unit` 306、`collab` 263 沿用上轮全绿记录、本轮未复跑。本文 AC-16 写的 168/30 高于实测（文档漂移），278/148 是当时的下限（现已被实测超过）。只订正数字，本文 AC 文本一字未改。
+基线订正（r20 实测，2026-11-14）：门禁真实基线为 `platform-verify` **167**、`platform-test-negative` **28**、`access` **152**、`rbac` 101（r20 起含 `s2r` 收尾段为 111，r21 实测订正：`s2r` 10 条）、`lint` 22、`verify` 14、`analytics` 74（以上本轮复跑实测）；`platform-unit` 306、`collab` 263 沿用上轮全绿记录、本轮未复跑。本文 AC-16 写的 168/30 高于实测（文档漂移），278/148 是当时的下限（现已被实测超过）。只订正数字，本文 AC 文本一字未改。
 
 # PRD：r18 RBAC 收尾 —— 三层授权落地与门禁全绿
 

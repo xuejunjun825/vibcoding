@@ -3,7 +3,7 @@
 > 基线：[docs/teamflow/20261113-r18-rbac-role-permission/](../20261113-r18-rbac-role-permission/)
 > 设计输入：[DESIGN.md](DESIGN.md)（几何/交互以设计为准，本文只写实现与契约）
 > 分支：`feat/rbac-admin`（继续使用，不切、不 rebase、不重写 `5b7ba9d`）
-> 基线订正（r20 实测，2026-11-14）：§6.3 的 `platform-verify 168` / `platform-test-negative 30` 高于实测，真实基线 **167** / **28**；`access 148` 是当时下限（实测 **152**）；`platform-unit 278` 同为下限（上轮记录 306，本轮未复跑）；`rbac` 101（r20 加 `s2r` 收尾段后 109）。只订正数字，契约与 AC 文本不变。
+> 基线订正（r20 实测，2026-11-14）：§6.3 的 `platform-verify 168` / `platform-test-negative 30` 高于实测，真实基线 **167** / **28**；`access 148` 是当时下限（实测 **152**）；`platform-unit 278` 同为下限（上轮记录 306，本轮未复跑）；`rbac` 101（r20 加 `s2r` 收尾段后 **111**，r21 实测订正：`s2r` 10 条）。只订正数字，契约与 AC 文本不变。
 
 ## 1. 结论先行
 

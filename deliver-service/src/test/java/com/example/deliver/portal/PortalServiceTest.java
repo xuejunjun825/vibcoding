@@ -22,6 +22,7 @@ import com.example.deliver.analytics.AnalyticsRequest;
 import com.example.deliver.analytics.AnalyticsViews;
 import com.example.deliver.reports.ReportLookup;
 import com.example.platform.common.audit.AuditService;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
 
@@ -34,6 +35,7 @@ class PortalServiceTest {
     private PortalCardConfigRepository configs;
     private ReportLookup reports;
     private AuditService audit;
+    private PermissionService permissions;
     private PortalService service;
 
     @BeforeEach
@@ -49,6 +51,7 @@ class PortalServiceTest {
                 .thenReturn(List.of());
         reports = mock(ReportLookup.class);
         audit = mock(AuditService.class);
+        permissions = mock(PermissionService.class);
 
         List<PortalSectionProvider> providers = new ArrayList<>();
         providers.add(new OkProvider("todo", 1));
@@ -56,7 +59,7 @@ class PortalServiceTest {
         providers.add(new FailingProvider("metrics", 3));
         providers.add(new OkProvider("list", 4));
         providers.add(new OkProvider("messages", 5));
-        service = new PortalService(providers, configs, reports, audit);
+        service = new PortalService(providers, configs, reports, audit, permissions);
     }
 
     @AfterEach

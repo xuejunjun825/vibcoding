@@ -2,6 +2,7 @@ package com.example.req.collab.gantt;
 
 import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.error.ApiException;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.tenant.TenantContext;
 
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -30,15 +31,18 @@ public class GanttRescheduleService {
     private final GanttConfirmTokens tokens;
     private final AuditService auditService;
     private final JdbcTemplate jdbc;
+    private final PermissionService permissions;
 
     public GanttRescheduleService(GanttQuery query,
                                   GanttConfirmTokens tokens,
                                   AuditService auditService,
-                                  JdbcTemplate jdbc) {
+                                  JdbcTemplate jdbc,
+                                  PermissionService permissions) {
         this.query = query;
         this.tokens = tokens;
         this.auditService = auditService;
         this.jdbc = jdbc;
+        this.permissions = permissions;
     }
 
     @Transactional
@@ -47,7 +51,7 @@ public class GanttRescheduleService {
         if (rowType == null) {
             throw notFound("未知的甘特行类型：" + type);
         }
-        if (!TenantContext.can(FUNCTION)) {
+        if (!permissions.allows("collab.gantt", "gantt.action.edit")) {
             throw new ApiException(403, "FORBIDDEN", "无甘特改期权限", Map.of());
         }
 

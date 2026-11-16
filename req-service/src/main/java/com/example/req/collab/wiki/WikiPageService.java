@@ -17,6 +17,7 @@ import java.util.Map;
 import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.scope.ScopedJdbc;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
 import com.example.req.attachment.AttachmentService;
@@ -51,19 +52,22 @@ public class WikiPageService {
     private final WikiSpaceService spaceService;
     private final AuditService audit;
     private final AttachmentService attachments;
+    private final PermissionService permissions;
 
     public WikiPageService(NamedParameterJdbcTemplate jdbc,
                            ScopedJdbc scoped,
                            WikiVisibility visibility,
                            WikiSpaceService spaceService,
                            AuditService audit,
-                           AttachmentService attachments) {
+                           AttachmentService attachments,
+                           PermissionService permissions) {
         this.jdbc = jdbc;
         this.scoped = scoped;
         this.visibility = visibility;
         this.spaceService = spaceService;
         this.audit = audit;
         this.attachments = attachments;
+        this.permissions = permissions;
     }
 
     @Transactional
@@ -339,7 +343,7 @@ public class WikiPageService {
 
     @Transactional
     public void purge(long pageId) {
-        if (!TenantContext.can("WIKI_ADMIN")) {
+        if (!permissions.allows("collab.wiki", "wiki.action.admin")) {
             throw new ApiException(403, "WIKI_FORBIDDEN", "需要 Wiki 管理员权限");
         }
         visibility.assertVisiblePageIncludingDeleted(pageId);

@@ -6,6 +6,7 @@ import java.util.Map;
 import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.scope.ScopedJdbc;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
 import com.example.req.requirement.Rows;
@@ -31,15 +32,18 @@ public class WikiSpaceService {
     private final ScopedJdbc scoped;
     private final AuditService audit;
     private final WikiVisibility visibility;
+    private final PermissionService permissions;
 
     public WikiSpaceService(NamedParameterJdbcTemplate jdbc,
                             ScopedJdbc scoped,
                             AuditService audit,
-                            WikiVisibility visibility) {
+                            WikiVisibility visibility,
+                            PermissionService permissions) {
         this.jdbc = jdbc;
         this.scoped = scoped;
         this.audit = audit;
         this.visibility = visibility;
+        this.permissions = permissions;
     }
 
     public List<WikiViews.SpaceView> list() {
@@ -79,10 +83,10 @@ public class WikiSpaceService {
     }
 
     public boolean canEdit(Map<String, Object> space) {
-        if (TenantContext.can("WIKI_ADMIN")) {
+        if (permissions.allows("collab.wiki", "wiki.action.admin")) {
             return true;
         }
-        if (!TenantContext.can("WIKI_EDIT")) {
+        if (!permissions.allows("collab.wiki", "wiki.action.edit")) {
             return false;
         }
         return !"ADMIN_ONLY".equals(Rows.toStr(space.get("editor_policy")));
@@ -129,7 +133,7 @@ public class WikiSpaceService {
 
     @Transactional
     public WikiViews.SpaceView update(long id, WikiViews.SpaceCmd cmd) {
-        if (!TenantContext.can("WIKI_ADMIN")) {
+        if (!permissions.allows("collab.wiki", "wiki.action.admin")) {
             throw new ApiException(403, "WIKI_FORBIDDEN", "需要 Wiki 管理员权限");
         }
         Map<String, Object> current = requireVisible(id);

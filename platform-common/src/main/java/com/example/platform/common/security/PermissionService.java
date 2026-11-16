@@ -21,7 +21,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * The single authorization decision point (r18) — three layers, one merge rule, one cache.
  *
  * <p>Before r18 the decision was {@code PermissionMatrix.accessOf(function, roles)} evaluated at
- * each call site: the frontend, the interceptor and {@code TenantContext.can} each re-derived it,
+ * each call site: the frontend, the interceptor and the service-layer guards each re-derived it,
  * and the matrix was compile-time. r18 makes the grants data (a tenant can narrow a built-in role),
  * so the derivation has to live in exactly one class or the button and the 403 start to disagree.</p>
  *

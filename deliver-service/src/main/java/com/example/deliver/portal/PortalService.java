@@ -21,6 +21,7 @@ import com.example.deliver.analytics.AnalyticsRequest;
 import com.example.deliver.reports.ReportLookup;
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.audit.AuditService;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.tenant.TenantContext;
 
 /**
@@ -40,13 +41,15 @@ public class PortalService {
     private final PortalCardConfigRepository configs;
     private final ReportLookup reports;
     private final AuditService audit;
+    private final PermissionService permissions;
 
     public PortalService(List<PortalSectionProvider> providers, PortalCardConfigRepository configs,
-                         ReportLookup reports, AuditService audit) {
+                         ReportLookup reports, AuditService audit, PermissionService permissions) {
         this.providers = providers.stream().sorted(Comparator.comparingInt(PortalSectionProvider::order)).toList();
         this.configs = configs;
         this.reports = reports;
         this.audit = audit;
+        this.permissions = permissions;
     }
 
     /** Build the whole workbench: five sections in fixed order, one stamp for the envelope. */
@@ -82,7 +85,7 @@ public class PortalService {
     /** The role's visible cards. Omitted {@code roleCode} means "mine". */
     public PortalViews.Config config(String roleCode) {
         String code = resolveConfigRole(roleCode);
-        if (!code.equals(roleCode()) && !TenantContext.can("PORTAL_CONFIG")) {
+        if (!code.equals(roleCode()) && !permissions.allows("ana.portal", "portal.action.config")) {
             throw AnalyticsErrors.forbidden("PORTAL_CONFIG", "GET", "/portal/config");
         }
         PortalTemplates.Role role = PortalTemplates.of(code);
@@ -103,7 +106,7 @@ public class PortalService {
             throw unknownRole(null);
         }
         String code = resolveConfigRole(cmd.roleCode());
-        if (!code.equals(roleCode()) && !TenantContext.can("PORTAL_CONFIG")) {
+        if (!code.equals(roleCode()) && !permissions.allows("ana.portal", "portal.action.config")) {
             throw AnalyticsErrors.forbidden("PORTAL_CONFIG", "PUT", "/portal/config");
         }
         PortalTemplates.Role role = PortalTemplates.of(code);
