@@ -35,6 +35,7 @@ import com.example.deliver.support.WatermarkCsv;
 import com.example.deliver.support.WatermarkSheet;
 import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.error.ApiException;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.security.UserScopeResolver;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
@@ -77,10 +78,12 @@ public class ReportService {
     private final AnalyticsDirectory directory;
     private final UserScopeResolver users;
     private final AuditService audit;
+    private final PermissionService permissions;
 
     public ReportService(ReportDefinitionRepository reports, ReportDefinitionCodec codec,
                          AnalyticsQueryService analytics, AnalyticsCache cache,
-                         AnalyticsDirectory directory, UserScopeResolver users, AuditService audit) {
+                         AnalyticsDirectory directory, UserScopeResolver users, AuditService audit,
+                         PermissionService permissions) {
         this.reports = reports;
         this.codec = codec;
         this.analytics = analytics;
@@ -88,6 +91,7 @@ public class ReportService {
         this.directory = directory;
         this.users = users;
         this.audit = audit;
+        this.permissions = permissions;
     }
 
     /** One downloadable artefact: complete bytes, the download name, and what it is. */
@@ -398,7 +402,7 @@ public class ReportService {
                                             Map<Long, String> names) {
         ReportViews.ReportDefinitionDto definition = codec.read(entity.getDefinitionJson());
         boolean owner = entity.getOwnerId() == viewer.userId();
-        boolean canShare = owner && TenantContext.can("REPORT_SHARE");
+        boolean canShare = owner && permissions.allows("ana.reports", "report.action.share");
         return new ReportViews.ReportDetail(entity.getId(), entity.getName(), entity.getDataset(),
                 datasetLabel(entity.getDataset()), entity.getScope(), refText(entity.getScopeRef()),
                 entity.getOwnerId(), ownerName(entity.getOwnerId(), names),

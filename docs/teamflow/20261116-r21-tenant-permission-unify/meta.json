@@ -1,0 +1,7 @@
+{
+  "reqId": "req-21",
+  "runId": "tf-mwiju0jk-9g728z",
+  "title": "把 r20 之后遗留的两项 P3 处理掉：1）deliver-service 里 7 处 TenantContext.access/can 直连 Permiss",
+  "mode": "tech",
+  "createdAt": 1794790349277
+}

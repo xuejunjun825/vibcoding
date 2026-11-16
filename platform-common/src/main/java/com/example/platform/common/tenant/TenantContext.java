@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Set;
 
 import com.example.platform.contract.DataScope;
-import com.example.platform.contract.PermissionMatrix;
 
 /**
  * Per-request data scope holder.
@@ -100,15 +99,6 @@ public final class TenantContext {
     public static String tenantName() {
         Principal principal = PRINCIPAL.get();
         return principal == null ? null : principal.tenantName();
-    }
-
-    /** Effective access of the current caller, union of every role it holds. */
-    public static PermissionMatrix.Access access(String function) {
-        return PermissionMatrix.accessOf(function, roles());
-    }
-
-    public static boolean can(String function) {
-        return access(function) != PermissionMatrix.Access.DENY;
     }
 
     public static void clear() {

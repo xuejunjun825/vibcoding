@@ -12,8 +12,9 @@
  *   a5-b 静态 5 条：调用点标记 / 非管理页逐点审计（scanned≥1 防空扫）/ client.ts 403 分支 /
  *                   页面里 /integration/configs 字面量归零 / 豁免台账每条带理由
  *   a5-c 自检 3 条：内存夹具证明「缺标记必红」「带标记必绿」「同文件别处出现关键字仍红」
- *   a5-d 单点真相 3 条（r17）：actOnRequirement 的 403 降级标记 / 详情页 403 就地处理且无本地
- *                   二次过滤 / 路由表已让出动作端点且动作矩阵存在（授权只认服务端一张矩阵）
+ *   a5-d 单点真相 3 条（r17；r21 放宽 D3）：actOnRequirement 的 403 降级标记 / 详情页 403 就地处理
+ *                   且无本地二次过滤 / 动作码来自请求体（bodyAction 或 @RequiresActionFromBody）
+ *                   且动作矩阵存在（授权只认服务端一张矩阵；红只等于端点级固定单码）
  *
  * 计数经环境变量 ACCESS_COUNTS 交给 scripts/access-verify.sh（格式 `a5 <pass> <total>`）。
  * 栈未起时 exit 1 且**不写计数行**——「0 条断言也算过」正是本段要防的假绿。
@@ -176,6 +177,80 @@ export function auditCapabilityCalls(sources) {
   return { scanned, offenders }
 }
 
+/**
+ * D3 判据（纯函数，导出供自检）：`POST /requirements/{id}/actions` 的动作码是否来自请求体。
+ *
+ * 背景：r17 的缺陷是「端点级一个固定码」把 16 个动作压成 1 个，越权与误判 403 都出在这里。
+ * r18 起该端点由一个端点服务 N 个动作码，两条等价机制都算合法（拦截器里注解优先于路由表）：
+ *   1) 路由表规则用 `bodyAction(page, prefix)` 声明；
+ *   2) 处理器方法上有 `@RequiresActionFromBody`。
+ * 唯一判红：端点级固定单码 `action(page, code)`。
+ * r21 收窄红条件：「没有该端点规则 / 只有页面规则」不再判红——那是 r17 的减法形态，
+ * 此时端点准入由处理器注解或服务层守卫兜底；断言文案仍会显式写出形态，不让它静默变绿。
+ *
+ * @param {string} ruleText 路由表里匹配 `^/requirements/…/actions` 的规则本体；没有则 ''
+ * @param {boolean} handlerDeclaresFromBody 该端点处理器是否声明 @RequiresActionFromBody
+ * @returns {{ verdict: 'body-derived'|'fixed-single-code'|'no-action-rule', why: string }}
+ */
+export function classifyActionsEndpoint(ruleText, handlerDeclaresFromBody = false) {
+  const rule = blankComments(ruleText || '')
+  if (handlerDeclaresFromBody) {
+    return { verdict: 'body-derived', why: '处理器 @RequiresActionFromBody 从请求体派生动作码' }
+  }
+  if (/bodyAction\s*\(/.test(rule)) {
+    return { verdict: 'body-derived', why: '路由表 bodyAction(...) 从请求体派生动作码' }
+  }
+  if (/\baction\s*\(/.test(rule)) {
+    return { verdict: 'fixed-single-code', why: '路由表 action(page, code) 是端点级固定单码' }
+  }
+  return { verdict: 'no-action-rule', why: '该端点没有动作级规则（非固定单码）' }
+}
+
+/** 取 `[start,end)` 这行注解上下紧邻的注解块（支持跨行注解）；遇到非注解行即停 */
+function annotationNeighbourhood(text, start, end) {
+  const up = []
+  let depth = 0
+  const above = text.slice(0, start).split('\n')
+  for (let i = above.length - 1; i >= 0; i--) {
+    const line = above[i]
+    const trimmed = line.trim()
+    const open = (line.match(/\(/g) || []).length
+    const close = (line.match(/\)/g) || []).length
+    if (!trimmed) {
+      if (!up.length && depth === 0) continue
+      break
+    }
+    if (depth === 0 && !trimmed.startsWith('@') && close <= open) break
+    up.unshift(line)
+    depth = Math.max(0, depth + open - close)
+  }
+  const down = []
+  depth = 0
+  // 丢掉映射注解这一行的剩余部分（`end` 落在 `)` 之后），只从下一行起收集
+  for (const line of text.slice(end).split('\n').slice(1)) {
+    const trimmed = line.trim()
+    const open = (line.match(/\(/g) || []).length
+    const close = (line.match(/\)/g) || []).length
+    if (depth === 0 && (!trimmed || !trimmed.startsWith('@'))) break
+    down.push(line)
+    depth = Math.max(0, depth + open - close)
+  }
+  return [...up, text.slice(start, end), ...down].join('\n')
+}
+
+/**
+ * 该控制器里 `POST/PUT/PATCH …/actions` 的处理器是否声明了 `@RequiresActionFromBody`（纯函数）。
+ * 只认**紧邻该映射注解的注解块**（写在映射注解前或后、允许跨行）：文件里别处出现这个注解
+ * 不算，否则「某个端点用了 body 派生」会给另一个固定单码端点洗绿。
+ */
+export function declaresFromBodyOnActionsHandler(src) {
+  const text = blankComments(src || '')
+  const map = /@(?:Post|Put|Patch)Mapping\s*\(\s*"[^"]*\/actions"\s*\)/.exec(text)
+  if (!map) return false
+  const block = annotationNeighbourhood(text, map.index, map.index + map[0].length)
+  return /@RequiresActionFromBody\b/.test(block)
+}
+
 /* ================================================================ 静态夹具事实 */
 
 /**
@@ -195,6 +270,8 @@ const ROUTE_TABLE_TS =
   'platform-common/src/main/java/com/example/platform/common/security/PermissionRouteTable.java'
 const MATRIX_TS =
   'platform-contract/src/main/java/com/example/platform/contract/RequirementActionMatrix.java'
+const REQ_CONTROLLER_TS =
+  'req-service/src/main/java/com/example/req/requirement/RequirementController.java'
 
 /* ================================================================ 运行时矩阵（TECHNICAL §8.1） */
 
@@ -489,26 +566,52 @@ async function main() {
     )
   }
 
-  // D3：路由表已让出这个端点（减法），且动作矩阵确实存在并登记了 submit 与 req:review
+  // D3（r21 放宽）：该端点的动作码来自请求体——规则 bodyAction(...) 或处理器
+  // @RequiresActionFromBody。红只等于端点级固定单码 action(page, code)：那会把 N 个动作
+  // 压成 1 个码、重现 r17 的 403。判据是导出的纯函数，自证夹具放在**同一条断言**里
+  // （access 计数不变），否则「放宽判据」就退化成「删一条断言」。
   const routeSrc = readFileSync(path.join(ROOT, ROUTE_TABLE_TS), 'utf8')
   const routeBlank = blankComments(routeSrc)
   // 匹配「^/requirements/…/actions」形态的规则本体（不是缺陷域的 ^/defects/…/actions），
   // 也不匹配删规则后留在注释里的说明文字（注释已被 blankComments 抹平）。
-  //
-  // r18 起这条端点由 bodyAction 规则声明：动作码从请求体里的 action 派生（一个端点 N 个码），
-  // 而不是 r17 所抵制的「端点级一个码」。所以「残留」只指**非 bodyAction** 的 actions 规则：
-  // 那才会把 16 个动作压成一个码、重现 r17 的 403。矩阵仍须存在并登记 submit/req:review。
   const actionsRule = routeBlank.match(/\^\/requirements\/[^\s"]*\/actions[^;]*;/)
-  const staleRule = Boolean(actionsRule) && !/bodyAction\s*\(/.test(actionsRule[0])
+  const controllerSrc = fileExists(REQ_CONTROLLER_TS)
+    ? readFileSync(path.join(ROOT, REQ_CONTROLLER_TS), 'utf8')
+    : ''
+  const handlerFromBody = declaresFromBodyOnActionsHandler(controllerSrc)
+  const endpoint = classifyActionsEndpoint(actionsRule ? actionsRule[0] : '', handlerFromBody)
+
+  // 内存自证（不落盘）：bodyAction 样例必须绿、固定单码样例必须红；处理器注解能把
+  // 「形态像固定单码」的规则救回 body-derived；注解写在别处不许洗绿这个端点。
+  const sampleRule = (tail) =>
+    `rules.add(rule("POST", "^/requirements/\\d+/actions$",\n        ${tail})));`
+  const sampleBodyAction = sampleRule('bodyAction("req.pool", "req.action.")')
+  const sampleFixed = sampleRule('action("req.pool", "req.action.act")')
+  const sampleHandler = `    @RequiresActionFromBody(module = "req")\n    @PostMapping("/{id}/actions")\n    public Z action() {}`
+  const sampleFarawayHandler =
+    `    @RequiresActionFromBody(module = "req")\n    @PostMapping("/{id}/reviews")\n    public X y() {}\n` +
+    `    @PostMapping("/{id}/actions")\n    public Z action() {}`
+  const sampleOk =
+    classifyActionsEndpoint(sampleBodyAction).verdict === 'body-derived' &&
+    classifyActionsEndpoint(sampleFixed).verdict === 'fixed-single-code' &&
+    classifyActionsEndpoint(sampleFixed, true).verdict === 'body-derived' &&
+    declaresFromBodyOnActionsHandler(sampleHandler) &&
+    !declaresFromBodyOnActionsHandler(sampleFarawayHandler)
   const matrixSrc = fileExists(MATRIX_TS) ? readFileSync(path.join(ROOT, MATRIX_TS), 'utf8') : ''
   const matrixRows = /\bsubmit\b/.test(matrixSrc) && matrixSrc.includes('req:review')
-  if (!staleRule && matrixSrc && matrixRows) {
-    ok(`D3 ${ROUTE_TABLE_TS} 已无动作端点规则，${MATRIX_TS} 存在且同时登记 submit 与 req:review`)
+  if (endpoint.verdict !== 'fixed-single-code' && sampleOk && matrixSrc && matrixRows) {
+    ok(
+      `D3 动作码来自请求体（${endpoint.why}）且判据自证两向准确，` +
+        `${MATRIX_TS} 存在且同时登记 submit 与 req:review`,
+    )
   } else {
     bad(
-      `D3 路由表残留动作规则${staleRule ? '（/actions$）' : '无'}、矩阵文件${matrixSrc ? '存在' : '缺失'}、` +
-        `submit+req:review ${matrixRows ? '齐备' : '缺失'}`,
-      '端点级码只能表达「一个端点一个码」，会重现 r17 的 403；授权的唯一真相是 RequirementActionMatrix',
+      `D3 /requirements/…/actions 端点：${endpoint.why}；判据自证${sampleOk ? '通过' : '未通过'}` +
+        `（要求 bodyAction→body-derived、固定单码→fixed-single-code）；` +
+        `矩阵文件${matrixSrc ? '存在' : '缺失'}、submit+req:review ${matrixRows ? '齐备' : '缺失'}`,
+      '端点级 action(page, code) 只能表达「一个端点一个码」，会重现 r17 的 403；' +
+        '动作码必须来自请求体（bodyAction 或 @RequiresActionFromBody），' +
+        '授权的唯一真相是 RequirementActionMatrix',
     )
   }
 

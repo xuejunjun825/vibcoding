@@ -15,6 +15,7 @@ import com.example.deliver.support.Rows;
 import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.scope.ScopedJdbc;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -42,12 +43,14 @@ public class TestExecutorService {
     private final ScopedJdbc jdbcRead;
     private final NamedParameterJdbcTemplate jdbc;
     private final AuditService audit;
+    private final PermissionService permissions;
 
     public TestExecutorService(ScopedJdbc jdbcRead, NamedParameterJdbcTemplate jdbc,
-                               AuditService audit) {
+                               AuditService audit, PermissionService permissions) {
         this.jdbcRead = jdbcRead;
         this.jdbc = jdbc;
         this.audit = audit;
+        this.permissions = permissions;
     }
 
     /** Wire shape; field names are the frontend contract (web/src/api/deliver.ts). */
@@ -361,8 +364,8 @@ public class TestExecutorService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private static void requireManage() {
-        if (!TenantContext.can("TEST_EXECUTOR_MANAGE")) {
+    private void requireManage() {
+        if (!permissions.canFunction("TEST_EXECUTOR_MANAGE")) {
             throw new ApiException(403, "FORBIDDEN", "无权管理执行器",
                     Map.of("function", "TEST_EXECUTOR_MANAGE"));
         }

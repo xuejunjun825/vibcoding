@@ -11,6 +11,7 @@ import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.scope.PageResponse;
 import com.example.platform.common.scope.ScopedJdbc;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -50,12 +51,14 @@ public class CaseReviewService {
     private final ScopedJdbc jdbcRead;
     private final NamedParameterJdbcTemplate jdbc;
     private final AuditService audit;
+    private final PermissionService permissions;
 
     public CaseReviewService(ScopedJdbc jdbcRead, NamedParameterJdbcTemplate jdbc,
-                             AuditService audit) {
+                             AuditService audit, PermissionService permissions) {
         this.jdbcRead = jdbcRead;
         this.jdbc = jdbc;
         this.audit = audit;
+        this.permissions = permissions;
     }
 
     /** Wire shape; field names are the frontend contract (web/src/api/deliver.ts). */
@@ -156,7 +159,7 @@ public class CaseReviewService {
     @Transactional
     public ReviewRow decide(long reviewId, DecideCmd cmd) {
         DataScope scope = TenantContext.require();
-        requireFunction("CASE_REVIEW_DECIDE", "下用例评审结论");
+        requireMenuAction("test.cases", "test.action.case_review", "CASE_REVIEW_DECIDE", "下用例评审结论");
         if (cmd == null) {
             throw new ApiException(400, "VALIDATION_FAILED", "请求体不能为空", Map.of());
         }
@@ -379,9 +382,20 @@ public class CaseReviewService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private static void requireFunction(String code, String what) {
-        if (!TenantContext.can(code)) {
+    private void requireFunction(String code, String what) {
+        if (!permissions.canFunction(code)) {
             throw new ApiException(403, "FORBIDDEN", "无权" + what, Map.of("function", code));
+        }
+    }
+
+    /**
+     * Guard for endpoints whose access is registered as an ACTION: the decision goes through the
+     * same {@code allows(page, action)} the route table uses, while the 403 detail keeps the legacy
+     * function code so the frontend's existing error classification does not change.
+     */
+    private void requireMenuAction(String page, String action, String legacyFunction, String what) {
+        if (!permissions.allows(page, action)) {
+            throw new ApiException(403, "FORBIDDEN", "无权" + what, Map.of("function", legacyFunction));
         }
     }
 

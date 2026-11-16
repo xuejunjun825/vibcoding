@@ -19,6 +19,7 @@ import com.example.deliver.testcase.TestCaseViews;
 import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.scope.ScopedJdbc;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -49,6 +50,7 @@ public class TestPlanService {
     private final ScopedJdbc jdbc;
     private final NamedParameterJdbcTemplate writeJdbc;
     private final AuditService audit;
+    private final PermissionService permissions;
 
     public TestPlanService(TestPlanRepository plans,
                            TestPlanCaseRepository planCases,
@@ -59,7 +61,8 @@ public class TestPlanService {
                            ReqReadModel requirements,
                            ScopedJdbc jdbc,
                            NamedParameterJdbcTemplate writeJdbc,
-                           AuditService audit) {
+                           AuditService audit,
+                           PermissionService permissions) {
         this.plans = plans;
         this.planCases = planCases;
         this.executions = executions;
@@ -70,6 +73,7 @@ public class TestPlanService {
         this.jdbc = jdbc;
         this.writeJdbc = writeJdbc;
         this.audit = audit;
+        this.permissions = permissions;
     }
 
     // ------------------------------------------------------------------ plans
@@ -415,10 +419,11 @@ public class TestPlanService {
         return out;
     }
 
-    private static void requireNoteEditor(TestPlanEntity plan, long userId) {
+    private void requireNoteEditor(TestPlanEntity plan, long userId) {
         boolean owner = plan.getOwnerId() != null && plan.getOwnerId() == userId;
-        boolean tester = TenantContext.can("plan:edit") || TenantContext.can("plan:manage")
-                || TenantContext.can("plan:execute");
+        boolean tester = permissions.allows("test.plans", "test.action.plan_create")
+                || permissions.canFunction("plan:manage")
+                || permissions.allows("test.plans", "test.action.execute");
         if (!owner && !tester) {
             throw new ApiException(403, "FORBIDDEN", "只有计划负责人或测试角色可以编辑测试数据说明",
                     Map.of("planId", plan.getId()));

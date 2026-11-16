@@ -26,9 +26,9 @@ import com.example.platform.common.code.CodeGenerator;
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.notify.NotificationWriter;
 import com.example.platform.common.scope.ScopedJdbc;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
-import com.example.platform.contract.PermissionMatrix;
 import com.example.platform.contract.ScopeTier;
 import com.example.platform.contract.StateTables;
 import org.springframework.stereotype.Service;
@@ -62,6 +62,7 @@ public class DefectService {
     private final AuditService audit;
     private final NotificationWriter notifications;
     private final ScopedJdbc jdbc;
+    private final PermissionService permissions;
 
     public DefectService(DefectRepository defects,
                          DefectHistoryRepository history,
@@ -70,7 +71,8 @@ public class DefectService {
                          CodeGenerator codeGenerator,
                          AuditService audit,
                          NotificationWriter notifications,
-                         ScopedJdbc jdbc) {
+                         ScopedJdbc jdbc,
+                         PermissionService permissions) {
         this.defects = defects;
         this.history = history;
         this.readModel = readModel;
@@ -79,6 +81,7 @@ public class DefectService {
         this.audit = audit;
         this.notifications = notifications;
         this.jdbc = jdbc;
+        this.permissions = permissions;
     }
 
     @Transactional
@@ -97,7 +100,7 @@ public class DefectService {
         RequirementSnapshot requirement = requireRequirement(cmd.requirementId());
         Long releaseId = cmd.releaseId() != null ? cmd.releaseId() : requirement.releaseId();
         if (SOURCE_PROD.equals(source)) {
-            requireProdDefectPermission(scope);
+            requireProdDefectPermission();
             // 生产缺陷必须显式指明版本：需求上的版本只说明"在哪个版本做"，发布观察窗
             // 只能按缺陷自己声明的版本算——回退需求版本会把窗口算到别的发布上。
             if (cmd.releaseId() == null || releaseId == null) {
@@ -442,9 +445,8 @@ public class DefectService {
         }
     }
 
-    private static void requireProdDefectPermission(DataScope scope) {
-        PermissionMatrix.Access access = PermissionMatrix.accessOf(PROD_DEFECT_FUNCTION, TenantContext.roles());
-        if (access == PermissionMatrix.Access.DENY) {
+    private void requireProdDefectPermission() {
+        if (!permissions.canFunction(PROD_DEFECT_FUNCTION)) {
             throw new ApiException(403, "SCOPE_DENIED", "你没有生产缺陷提报权限",
                     Map.of("function", PROD_DEFECT_FUNCTION));
         }
