@@ -44,15 +44,18 @@ public class RequirementController {
     private final RequirementPoolQuery poolQuery;
     private final RequirementExport export;
     private final AuditService auditService;
+    private final RequirementDomainValidator domainValidator;
 
     public RequirementController(RequirementService requirementService,
                                  RequirementPoolQuery poolQuery,
                                  RequirementExport export,
-                                 AuditService auditService) {
+                                 AuditService auditService,
+                                 RequirementDomainValidator domainValidator) {
         this.requirementService = requirementService;
         this.poolQuery = poolQuery;
         this.export = export;
         this.auditService = auditService;
+        this.domainValidator = domainValidator;
     }
 
     @GetMapping
@@ -97,8 +100,11 @@ public class RequirementController {
     @PostMapping
     public ResponseEntity<Created> create(@RequestBody CreateRequest request) {
         rejectStatus(request.extra());
+        // 提报必填：domainIds 缺失/非法 400、不存在 400、越权 403。只拦直建入口，
+        // 拆解（POST /{id}/decompose）的空域语义是「继承父域」，不会被误伤。
+        List<Long> domainIds = domainValidator.requireForCreate(TenantContext.require(), request.domainIds);
         Created created = requirementService.create(new CreateCommand(request.type, request.title,
-                request.description, request.domainIds, request.priority, request.expectedDeliveryDate,
+                request.description, domainIds, request.priority, request.expectedDeliveryDate,
                 request.parentId, request.ownerUserId, request.estimateDays, request.actualDays));
         return ResponseEntity.status(201).body(created);
     }

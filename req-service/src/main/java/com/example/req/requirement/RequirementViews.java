@@ -22,6 +22,19 @@ public final class RequirementViews {
                         Long ownerUserId, BigDecimal estimateDays, BigDecimal actualDays) {
     }
 
+    /**
+     * 详情里的「能否拆解」前置信息：只描述类型/状态，不含权限（权限由前端 can('req:split') 另判）。
+     * {@link #from} 是 409 与详情共用的唯一映射点，保证 reason 与错误 message 逐字一致。
+     */
+    public record DecomposeGate(boolean allowed, String reason, String parentStatus, Object required) {
+        public static DecomposeGate from(RequirementRules.ParentGate gate, String parentStatus) {
+            if (gate == null) {
+                return new DecomposeGate(false, null, parentStatus, null);
+            }
+            return new DecomposeGate(gate.allowed(), gate.message(), parentStatus, gate.required());
+        }
+    }
+
     /** 列表/详情共用的主档字段。 */
     public record View(Long id, String code, String type, String status, String priority, String title,
                        String description, Long parentId, String parentCode, Long domainId,
@@ -29,7 +42,8 @@ public final class RequirementViews {
                        Long releaseId, BigDecimal estimateDays, BigDecimal actualDays, String mrUrl,
                        LocalDate expectedDeliveryDate, LocalDate planStartDate, LocalDate planEndDate,
                        LocalDateTime closedAt, LocalDateTime updatedAt,
-                       Rollup rollup, List<String> allowedActions, Map<String, Boolean> permissions) {
+                       Rollup rollup, List<String> allowedActions, Map<String, Boolean> permissions,
+                       DecomposeGate decomposeGate) {
     }
 
     public record Detail(View view, List<Child> children, List<String> allowedActions,

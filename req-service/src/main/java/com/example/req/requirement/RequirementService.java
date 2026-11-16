@@ -35,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -106,6 +107,7 @@ public class RequirementService {
             parent = requireVisible(cmd.parentId());
             applyRule(RequirementRules.checkParentCombination(type, parent.getType()));
             applyRule(RequirementRules.checkAncestorCycle(null, parent.getId(), this::parentOf));
+            requireParentGate(parent);                       // ← 唯一状态门调用点
         } else {
             applyRule(RequirementRules.checkParentCombination(type, null));
         }
@@ -204,7 +206,42 @@ public class RequirementService {
         applyRule(RequirementRules.checkParentCombination(entity.getType(),
                 parent == null ? null : parent.getType()));
         applyRule(RequirementRules.checkAncestorCycle(entity.getId(), parentId, this::parentOf));
+        if (parent != null) {
+            requireParentGate(parent);                       // 父未变时上面已早退，不会走到这里
+        }
         entity.setParentId(parentId);
+    }
+
+    /**
+     * 父状态门的唯一服务端调用点：decompose 经 create 自动同源，PUT 改父复用同一判定。
+     * applyRule 对 null（门通过）无操作。
+     */
+    private void requireParentGate(RequirementEntity parent) {
+        RequirementRules.ParentGate gate =
+                RequirementRules.parentGate(parent.getType(), parent.getStatus());
+        applyRule(RequirementRules.parentGateViolation(parent.getId(), parent.getStatus(), gate));
+    }
+
+    /**
+     * 提报校验用：当前租户下真实存在的业务域 id。
+     *
+     * <p>必须按 tenant 全量读、不能按调用者的域过滤：越权域要落到 403，被过滤掉就变成
+     * 「不存在」400 了。放在这里而不是校验器里，是因为 L9（读路径单点）只给本类开了
+     * JdbcTemplate 白名单。</p>
+     */
+    public List<Long> knownDomainIds(long tenantId, List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
+        Object[] args = new Object[ids.size() + 1];
+        args[0] = tenantId;
+        for (int i = 0; i < ids.size(); i++) {
+            args[i + 1] = ids.get(i);
+        }
+        return jdbcTemplate.queryForList(
+                "SELECT id FROM biz_domain WHERE tenant_id = ? AND id IN (" + placeholders + ")",
+                Long.class, args);
     }
 
     /**
@@ -667,7 +704,10 @@ public class RequirementService {
                 entity.getEstimateDays(), entity.getActualDays(), entity.getMrUrl(),
                 entity.getExpectedDeliveryDate(), entity.getPlanStartDate(), entity.getPlanEndDate(),
                 entity.getClosedAt(), entity.getUpdatedAt(), rollup,
-                allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId()), Map.of());
+                allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId()), Map.of(),
+                RequirementViews.DecomposeGate.from(
+                        RequirementRules.decomposeGate(entity.getType(), entity.getStatus()),
+                        entity.getStatus()));
     }
 
     private void rejectStatusInBody(Map<String, Object> extra) {

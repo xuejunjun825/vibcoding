@@ -173,6 +173,18 @@ export interface RequirementRollup {
   actualDays: number
 }
 
+/**
+ * 详情 `view.decomposeGate`：拆解前置门的**服务端唯一事实源**（r23）。
+ * 只描述类型/状态前置，不含权限——权限仍由 `can('req:split')` + 403 决定。
+ * `allowed=true` 时 `reason=null`；`required` 为所需状态（或状态列表），信息性。
+ */
+export interface RequirementDecomposeGate {
+  allowed: boolean
+  reason: string | null
+  parentStatus: string
+  required: string | string[] | null
+}
+
 export interface RequirementDelivery {
   mrUrl?: string | null
   estimateDays?: number | null
@@ -196,6 +208,8 @@ export interface RequirementDetail extends RequirementRow {
   allowedActions: string[]
   permissions?: { fields?: string[] }
   attachments?: AttachmentRow[]
+  /** 拆解前置门（r23）；仅详情返回，列表行为 null/缺失 */
+  decomposeGate?: RequirementDecomposeGate
 }
 
 /**

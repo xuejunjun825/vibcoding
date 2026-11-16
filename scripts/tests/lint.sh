@@ -135,7 +135,12 @@ platform_routes_preserve_demo() {
 # ---- L9 读路径单点：ScopedJdbc / SeedService 之外禁止 JdbcTemplate ----
 # 白名单（每条例外都必须写明为什么不能走 ScopedJdbc；新增条目要在这里解释，而不是放宽 grep）：
 #   requirement/RequirementService.java      quickTest 用 GeneratedKeyHolder 写 test_execution(MANUAL)；
-#                                            originOrgId 在建租户上下文后补查根组织（无子树时的回退）
+#                                            originOrgId 在建租户上下文后补查根组织（无子树时的回退）；
+#                                            knownDomainIds 是 r23 提报域校验的「存在性」查询：必须按 tenant
+#                                            全量读 biz_domain，不能按调用者的域裁剪——越权域被裁掉就从
+#                                            403 退化成「不存在」400。ScopedJdbc 的每个入口都按 DataScope
+#                                            过滤，没有「按 tenant 全量读」这一档，故 SQL 落在本类，校验器
+#                                            （RequirementDomainValidator）自己不碰 JDBC
 #   openapi/ApiClientStore.java              验签发生在租户上下文建立之前，只能按全局唯一 app_key 读
 #   openapi/ApiClientAdminController.java    api_client 管理写（创建/轮换/停用），ScopedJdbc 只读
 #   gate/GateController.java                 内部门禁端点只凭 X-Internal-Token 调用，请求里没有租户；
@@ -175,6 +180,19 @@ scoped_jdbc_single_source() {
     if [[ -n "$hits" ]]; then
         echo "JdbcTemplate 只允许出现在 ScopedJdbc（platform-common）、SeedService 与上面注释里的白名单，实际:"
         printf '%s\n' "$hits"
+        return 1
+    fi
+    # 自检：判据必须命中修复前的真实写法，否则白名单被放宽也无人发现。
+    # 探针取自 r23 的真实越界点——提报域校验器曾直接注入 JdbcTemplate（lint 实红）。
+    # 它现在不在白名单里，若哪天有人把 requirement/ 整包放进 allow_re，这里先红。
+    local probe_bad="req-service/src/main/java/com/example/req/requirement/RequirementDomainValidator.java"
+    local probe_ok="req-service/src/main/java/com/example/req/requirement/RequirementService.java"
+    if ! printf '%s\n' "$probe_bad" | grep -v '/seed/' | grep -Ev "$allow_re" | grep -q .; then
+        echo "L9 自检失效：白名单已放宽到 requirement/ 包（新增校验器里的 JdbcTemplate 会被静默放行）"
+        return 1
+    fi
+    if printf '%s\n' "$probe_ok" | grep -v '/seed/' | grep -Ev "$allow_re" | grep -q .; then
+        echo "L9 自检失效：已登记的白名单条目判不出来（过滤器坏了）"
         return 1
     fi
     local scope="$ROOT/platform-common/src/main/java/com/example/platform/common/scope/ScopedJdbc.java"

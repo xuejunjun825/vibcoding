@@ -175,8 +175,12 @@ i_cfg_store_state() { # i_cfg_store_state <system> → DB 里该配置的 system
 
 i_rd() { # i_rd <title> → RD 需求 id（RD 必须有 PDR 父，状态机 merge 只允许 TEST_PASSED→MERGED）
     local title="$1" pdr
-    pdr="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TENANT_ID} AND type='PDR' ORDER BY id LIMIT 1")"
-    [[ -n "$pdr" ]] || pdr="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TENANT_ID} ORDER BY id LIMIT 1")"
+    # r23 前置门：RD 只能挂 SCHEDULED/IN_DEV 的 PDR；没有可用父就显式失败（不再兜底取任意需求）。
+    pdr="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TENANT_ID} AND type='PDR' AND status IN ('SCHEDULED','IN_DEV') ORDER BY id LIMIT 1")"
+    if [[ -z "$pdr" ]]; then
+        err "没有 SCHEDULED/IN_DEV 的 PDR 可作 RD 父需求：先 make platform-seed"
+        return 1
+    fi
     api_call POST /api/req/requirements "$(jq -cn --arg t "$title" --argjson p "${pdr:-0}" \
         --argjson d "$(q_domain)" '{type:"RD",title:$t,parentId:$p,domainIds:[$d],priority:"P2",
           expectedDeliveryDate:"2026-12-31",description:"M7 集成对接夹具"}')"
