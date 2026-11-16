@@ -71,13 +71,19 @@ public final class ActionRegistry {
             action("req.action.accept", "req.pool", "验收", "req:review"),
             action("req.action.close", "req.pool", "关闭需求", "req:review"),
             action("req.action.schedule", "req.pool", "排期", "release:plan"),
-            action("req.action.start_dev", "req.pool", "开始开发", "req:split"),
+            // r22 校正：「开始开发」原来沿用 req:split，而 PRODUCT 对 req:split 是 RESTRICTED、
+            // 对 req:deliver 是 DENY。判定改由本动作的 ACTION 格承担后，沿用旧码会把「不能
+            // 开始开发」静默变成「可以」——那是扩权，所以这里必须写 req:deliver（产品经理/研发
+            // 可开始开发，PRODUCT 仍被别的行挡住）。
+            action("req.action.start_dev", "req.pool", "开始开发", "req:deliver"),
             action("req.action.decompose", "req.pool", "分解需求", "req:split"),
             action("req.action.assign_vendor", "req.pool", "指派厂商", "req:assign-vendor"),
             action("req.action.deliver", "req.pool", "提交交付", "req:deliver"),
             action("req.action.merge", "req.pool", "合并", "req:deliver"),
             action("req.action.finish", "req.pool", "完成", "req:deliver"),
-            action("req.action.submit_test", "req.pool", "提测", "req:deliver"),
+            // r22 校正：QA 对 req:deliver 是 DENY，沿用旧码会让提测人自己提不了测；「提测」
+            // 的语义归属是 test:quick，与下面的 test_pass 同一档位。
+            action("req.action.submit_test", "req.pool", "提测", "test:quick"),
             action("req.action.test_pass", "req.pool", "测试通过", "test:quick"),
 
             // ---- 迭代 req.iteration ----

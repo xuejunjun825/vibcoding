@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.example.platform.common.tenant.TenantContext;
+import com.example.platform.contract.ActionPermissionResolver;
 import com.example.platform.contract.ActionRegistry;
 import com.example.platform.contract.MenuRegistry;
 import com.example.platform.contract.PermissionMatrix;
@@ -46,7 +47,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * {@link Access#max} the only ordering.</p>
  */
 @Service
-public class PermissionService {
+public class PermissionService implements ActionPermissionResolver {
 
     /** The three grant layers, in decision order. */
     public enum Layer {
@@ -87,7 +88,14 @@ public class PermissionService {
     /**
      * Page-then-action decision. A null/blank action means "page only" (the page admission alone).
      * Returns DENY / RESTRICTED / ALLOW; RESTRICTED is a pass for callers that only want a boolean.
+     *
+     * <p>r22: also the single implementation of {@link ActionPermissionResolver}, so requirement
+     * actions ask the same three-step decision as the interceptor instead of a compiled matrix.
+     * <b>Only {@code implements} was added</b> — the body is byte-for-byte the pre-r22 logic on
+     * purpose: rewriting it here would re-open the three-step rule that r18 proved cell-by-cell
+     * equivalent, and the requirement matrix must not fork a second copy of it.</p>
      */
+    @Override
     public Access decide(String menuCode, String actionCode) {
         Access menu = menuCode == null || menuCode.isBlank()
                 ? Access.ALLOW

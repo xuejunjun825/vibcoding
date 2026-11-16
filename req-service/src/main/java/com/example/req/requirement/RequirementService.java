@@ -6,6 +6,7 @@ import com.example.platform.common.code.CodeGenerator;
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.notify.NotificationWriter;
 import com.example.platform.common.tenant.TenantContext;
+import com.example.platform.contract.ActionPermissionResolver;
 import com.example.platform.contract.DataScope;
 import com.example.platform.contract.GateDecision;
 import com.example.platform.contract.GatePort;
@@ -59,6 +60,14 @@ public class RequirementService {
     private final ObjectProvider<GatePort> gatePort;
     private final ObjectProvider<RequirementApprovalStarter> approvalStarter;
     private final JdbcTemplate jdbcTemplate;
+    /**
+     * 动作档位的运行期查询端口（r22）：唯一实现是 {@code PermissionService}。
+     *
+     * <p>一次注入、两处复用（{@code authorize} 与 {@code allowedActions}）：实现内部按请求做
+     * ThreadLocal memo，每次 new 或每个动作新建实例都会退化成多次快照查询，还会让「按钮列表」
+     * 与「执行判定」读到不同版本——那正是 r17 之前「按钮能点、接口 403」的来源。</p>
+     */
+    private final ActionPermissionResolver actionPermissions;
 
     public RequirementService(RequirementRepository repository,
                               RequirementDomainRelRepository domainRelRepository,
@@ -68,7 +77,8 @@ public class RequirementService {
                               NotificationWriter notificationWriter,
                               ObjectProvider<GatePort> gatePort,
                               ObjectProvider<RequirementApprovalStarter> approvalStarter,
-                              JdbcTemplate jdbcTemplate) {
+                              JdbcTemplate jdbcTemplate,
+                              ActionPermissionResolver actionPermissions) {
         this.repository = repository;
         this.domainRelRepository = domainRelRepository;
         this.stateMachine = stateMachine;
@@ -78,6 +88,7 @@ public class RequirementService {
         this.gatePort = gatePort;
         this.approvalStarter = approvalStarter;
         this.jdbcTemplate = jdbcTemplate;
+        this.actionPermissions = actionPermissions;
     }
 
     // ---------------------------------------------------------------- create
@@ -618,7 +629,8 @@ public class RequirementService {
             return;
         }
         RequirementActionMatrix.Caller caller = callerOf(scope);
-        if (RequirementActionMatrix.can(action, entity.getReporterId(), caller)) {
+        if (RequirementActionMatrix.can(action, entity.getReporterId(), caller,
+                actionPermissions)) {
             return;
         }
         List<String> allowed = allowedActions(entity.getType(), entity.getStatus(),
@@ -638,7 +650,7 @@ public class RequirementService {
     /** allowedActions 的唯一来源：状态机的合法集合 ∩ 调用者被授权的动作（与执行共用同一谓词）。 */
     List<String> allowedActions(String type, String status, Long reporterId) {
         return RequirementActionMatrix.filter(type, status, reporterId,
-                callerOf(TenantContext.require()));
+                callerOf(TenantContext.require()), actionPermissions);
     }
 
     View toView(RequirementEntity entity, Rollup rollup) {
