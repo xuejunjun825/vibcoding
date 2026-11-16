@@ -11,6 +11,9 @@
 #      库/API 现实」——它不拥有表清单，也不维护第二套保留判断（PRE_CLIENTS 前后快照已整体删除）。
 #   5. r16：report_definition 从「清空后为 0」改为「清空后回填 2 张演示报表」，因此三处断言从
 #      0 改成 2 + 名称集合，并在末尾用真实登录 run/export 自证两张表开箱可用（AC-1/AC-3/AC-5）。
+#   6. r25：厂商视角不能是空页。VEN-A 承接链（DEMO-R-09/10/11）已进 DEMO-REL-1，本节末尾新增
+#      5 条**真实登录 + 调 API** 的断言（vpm1 版本 / vpm1 用例 / vendor1 版本 / admin 版本 / admin 用例）：
+#      查库只能证明数据在，ScopeSql 放不放行只有真登录才证得了；空值一律判失败，不许退化成永真。
 #
 # 不进 make test / platform-up / platform-seed（AC-14）：重置会删掉业务实例数据，
 # 只能由人（或演示前的一次手工动作）触发。
@@ -26,9 +29,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 FAIL=0
 CASE=0
-# 本脚本固定 57 项断言（AC-9 的「57/57」口径）。断言只增：新增/删除断言时同步改这里，
-# 末尾会校验实际执行数 == 声明数，漂移直接红——否则「57/57」会变成一句没人维护的祝福。
-TOTAL_CHECKS=61
+# 本脚本固定 66 项断言（r25 起，原 61 项 + 厂商视角 5 项）。断言只增：新增/删除断言时同步改这里，
+# 末尾会校验实际执行数 == 声明数，漂移直接红——否则「66/66」会变成一句没人维护的祝福。
+TOTAL_CHECKS=66
 FAIL_TRANSPORT=0
 FAIL_API=0
 FAIL_ASSERT=0
@@ -474,6 +477,69 @@ check_visible vendor2 0
 # r24：vpm1 与 vendor1 同厂商不同角色 —— 隔离按厂商，所以需求可见数与 vendor1 相同（3）。
 # 这条登录本身也是断言：VENDOR_PM 必须能进系统，否则授权表再对也没人能用。
 check_visible vpm1 3
+
+# ---------------------------------------------------------------- r25 厂商视角非空
+# 演示夹具让 VEN-A 承接链进 DEMO-REL-1 之后，「厂商登录后版本计划/用例库是空页」必须被断言挡住。
+# 三条纪律：
+#   * 一律真登录 + 调 API：查库只证数据在，证不了 ScopeSql 对 test_case.vendor_id /
+#     release_requirement→requirement 的谓词放行；
+#   * 空值（total 缺失 / 非数字）判失败，不写成 `[[ -z || ... ]]` 退化成永真；
+#   * admin 的口令与普通演示账号不同（Admin@12345），由 check_total 内部映射，调用点不重复写死。
+
+check_total() { # check_total <user> <path> <eq|ge> <expected> <label>
+    local user="$1" path="$2" cmp="$3" expected="$4" label="$5" total
+    local pwd='Passw0rd!'
+    [[ "${user}" == "admin" ]] && pwd='Admin@12345'
+    login_or_stop "${user}" "${pwd}" "${user}" || return 0
+    api_call GET "${path}"
+    [[ "${HTTP_CODE}" == "200" ]] || {
+        fail_http "${label}：${user} 调 ${path} 返回 ${HTTP_CODE}" \
+            "接口应 200；403 说明厂商谓词把自家数据也挡了，000/502/503 先修栈"
+        return 0
+    }
+    total="$(jget "${HTTP_BODY}" '.total')"
+    if [[ ! "${total:-}" =~ ^[0-9]+$ ]]; then
+        fail "${label}：total 非数字（${total:-<缺失>}）" \
+            "空值不能当通过：列表接口必须返回 {items,total}"
+        return 0
+    fi
+    if { [[ "${cmp}" == "eq" && "${total}" -eq "${expected}" ]]; } \
+        || { [[ "${cmp}" == "ge" && "${total}" -ge "${expected}" ]]; }; then
+        pass "${label}：${user} 可见 ${total} 条（期望 ${cmp} ${expected}）"
+    else
+        fail "${label}：${user} 可见 ${total} 条，期望 ${cmp} ${expected}" \
+            "厂商可见性由 ScopeSql 派生：需求 vendor_id + release_requirement→requirement"
+    fi
+}
+
+# 第 1 条是三件事一起断：总数为正（列表没被清空）、列表里真有 DEMO-REL-1（ScopeSql 放行）、
+# 库里 release_requirement = 11（R-01..R-08 原有 8 条 + VEN-A 承接链 3 条，release_id 与关系行同源）。
+# 只查库会漏掉「可见性没通」，只查 API 会漏掉「关系行缺失但需求被别处带出来」。
+check_vendor_release_chain() {
+    local total codes rr
+    login_or_stop vpm1 'Passw0rd!' vpm1 || return 0
+    api_call GET "/api/req/releases?page=1&size=50"
+    [[ "${HTTP_CODE}" == "200" ]] || {
+        fail_http "vpm1 版本列表返回 ${HTTP_CODE}" "厂商视角不能 403/500；先修栈或 ScopeSql"
+        return 0
+    }
+    total="$(jget "${HTTP_BODY}" '.total')"
+    codes="$(printf '%s' "${HTTP_BODY}" | jq -r '[.items[]?.code] | join(",")' 2>/dev/null || echo '')"
+    rr="$(db_count release_requirement "tenant_id = ${TENANT_ID} AND release_id IN (SELECT id FROM \`release\` WHERE tenant_id = ${TENANT_ID} AND code = 'DEMO-REL-1')")"
+    if [[ "${total:-}" =~ ^[0-9]+$ ]] && [[ "${total}" -ge 1 ]] \
+        && [[ "${codes}" == *DEMO-REL-1* ]] && [[ "${rr}" == "11" ]]; then
+        pass "vpm1 版本列表 ${total} 个且含 DEMO-REL-1（该版本 ${rr} 条需求，含 VEN-A 承接链）"
+    else
+        fail "vpm1 版本链异常：total=${total:-<缺失>} codes=${codes:-<缺失>} release_requirement=${rr:-<缺失>}" \
+            "R-09/10/11 必须进 DEMO-REL-1：DemoFixture 的 inRelease=1 同时写 release_id 与 release_requirement"
+    fi
+}
+
+check_vendor_release_chain
+check_total vpm1 "/api/deliver/testcases?page=1&size=50" ge 3 "vpm1 用例库非空（3 条 VEN-A 用例）"
+check_total vendor1 "/api/req/releases?page=1&size=50" ge 1 "vendor1 版本计划非空（同厂商 VEN-A）"
+check_total admin "/api/req/releases?page=1&size=50" eq 1 "admin 版本列表 = 1（重置只有 DEMO-REL-1）"
+check_total admin "/api/deliver/testcases?page=1&size=50" eq 12 "admin 用例库 = 12（未新增行）"
 API_TOKEN=""
 API_TENANT=""
 

@@ -1,0 +1,7 @@
+{
+  "reqId": "req-25",
+  "runId": "tf-mwj1da26-p6dimw",
+  "title": "修两个演示层面的残留问题：第一，VENDOR_PM 账号（vpm1）在需求池能看到「提报需求」按钮，点下去却落到全局「无权访问该单据」403 页——没有权限的按",
+  "mode": "medium",
+  "createdAt": 1794819801538
+}

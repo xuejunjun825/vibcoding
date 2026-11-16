@@ -38,7 +38,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-const { canAny } = usePermission()
+const { can, canAny } = usePermission()
 const platform = usePlatformDict()
 const { domains, vendors, ensure: ensureDict, domainName, vendorName, userName } = platform
 
@@ -135,6 +135,32 @@ const scopeChip = computed(() => {
   if (scope.type === 'DOMAIN' && scope.domainIds?.length) return `范围：${scope.domainIds.length} 个域`
   return ''
 })
+
+/**
+ * 写入口准入（r25 AC-1）：没有 req:report:bus / req:report:dev 时入口仍然渲染，
+ * 但 `disabled` + `title` 说明原因；真正的闸门是路由守卫与服务端 403。
+ * 两条新建需求的路由字面量分别留在 goCreate / goCreateFromEmpty 内（a6 计数 === 2），
+ * 模板里不得内联 router.push。
+ */
+const reportCodes = ['req:report:bus', 'req:report:dev'] as const
+const canReport = computed(() => can('req:report:bus') || can('req:report:dev'))
+const reportDenyTip = computed(() => (canReport.value ? '' : `需要权限：${reportCodes.join(' / ')}`))
+const deniedWriteChip = computed(() => (canReport.value ? '' : '1 个操作需要权限'))
+
+function goCreate(): void {
+  if (!canReport.value) return
+  router.push('/requirements/new')
+}
+
+function goCreateFromEmpty(): void {
+  // 筛选态的主动作是「清空筛选」，不受写权限限制（只有非筛选态受权限约束）
+  if (isFiltered.value) {
+    reset()
+    return
+  }
+  if (!canReport.value) return
+  router.push('/requirements/new')
+}
 
 const counts = reactive<Record<string, number>>({ all: 0, review: 0, pooled: 0, closed: 0 })
 
@@ -327,10 +353,23 @@ async function openRowMore(command: string, row: RequirementRow): Promise<void> 
         <h1 class="t-page-title">需求池</h1>
         <span class="count-badge">{{ total }}</span>
         <ScopeChip v-if="scopeChip" :label="scopeChip" />
+        <ScopeChip
+          v-if="deniedWriteChip"
+          :label="deniedWriteChip"
+          :scope="reportCodes.join(' / ')"
+          tone="info"
+        />
       </div>
       <div class="page-head__actions">
         <el-button :loading="exporting" @click="exportCsv">导出 CSV</el-button>
-        <el-button type="primary" @click="router.push('/requirements/new')">提报需求</el-button>
+        <el-button
+          :type="canReport ? 'primary' : 'default'"
+          :disabled="!canReport"
+          :title="reportDenyTip"
+          @click="goCreate"
+        >
+          提报需求
+        </el-button>
       </div>
     </header>
 
@@ -455,10 +494,21 @@ async function openRowMore(command: string, row: RequirementRow): Promise<void> 
             :description="
               isFiltered ? '清空筛选或换个类型再看。' : '从「提报需求」开始，业务、产品、研发三类需求都会进入这里。'
             "
-            :action-text="isFiltered ? '清空筛选' : '提报需求'"
             icon="inbox"
-            @action="isFiltered ? reset() : router.push('/requirements/new')"
-          />
+          >
+            <template #action>
+              <el-button v-if="isFiltered" type="primary" @click="reset()">清空筛选</el-button>
+              <el-button
+                v-else
+                :type="canReport ? 'primary' : 'default'"
+                :disabled="!canReport"
+                :title="reportDenyTip"
+                @click="goCreateFromEmpty"
+              >
+                提报需求
+              </el-button>
+            </template>
+          </EmptyState>
 
           <ul v-else class="req-cards">
             <li v-for="row in rows" :key="row.id">
