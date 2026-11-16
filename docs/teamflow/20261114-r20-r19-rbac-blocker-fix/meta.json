@@ -1,0 +1,7 @@
+{
+  "reqId": "req-20",
+  "runId": "tf-mwfso8sv-t4ipv0",
+  "title": "修复 r19 三层授权的三个阻断缺陷：BUG-1 授权页读写键集不一致导致「原样保存即把不可见的 30 个 FUNCTION 档位清零」，BUG-2 门禁套件非",
+  "mode": "medium",
+  "createdAt": 1794623797931
+}

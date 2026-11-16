@@ -17,12 +17,17 @@ const auth = useAuthStore()
 
 const keyword = ref('')
 
-/** 顶栏准入：与侧栏共用 navVisible（唯一判定）；原 admin 内联特判已删除 */
+/**
+ * 顶栏准入：与侧栏共用 navVisible（唯一判定）；原 admin 内联特判已删除。
+ * `hasMenu` 是 r18 双条件的开关（页面码 MENU 层）：顶栏与侧栏必须同源，
+ * 否则同一页面在两处可见性不一致，用户会以为链接坏了。
+ */
 const navItems = computed(() =>
   TOP_NAV.filter((item) => {
     const ctx: NavContext = {
       hasRoute: (name) => router.hasRoute(name),
       canAny: (codes) => auth.canAny(codes),
+      hasMenu: (code) => auth.canMenu(code),
       vendorScoped: auth.user?.vendorId != null,
     }
     return navVisible(item, ctx)

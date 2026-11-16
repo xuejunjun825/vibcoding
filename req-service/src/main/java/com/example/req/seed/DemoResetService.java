@@ -77,15 +77,18 @@ public class DemoResetService {
 
     private final SysDb db;
     private final NamedParameterJdbcTemplate namedJdbc;
+    private final RbacSeeder rbacSeeder;
     private final boolean enabled;
     private final String tenantCode;
 
     public DemoResetService(SysDb db,
                             NamedParameterJdbcTemplate namedJdbc,
+                            RbacSeeder rbacSeeder,
                             @Value("${platform.seed.enabled:false}") boolean enabled,
                             @Value("${platform.tenant:" + DemoFixture.TENANT_CODE + "}") String tenantCode) {
         this.db = db;
         this.namedJdbc = namedJdbc;
+        this.rbacSeeder = rbacSeeder;
         this.enabled = enabled;
         this.tenantCode = tenantCode == null || tenantCode.isBlank()
                 ? DemoFixture.TENANT_CODE : tenantCode.trim();
@@ -123,6 +126,8 @@ public class DemoResetService {
         // 字段也得回到种子基线（与 DELETE_ORDER 同属 DemoFixture 一处拥有）。
         db.update(DemoFixture.RESTORE_KEPT_EXECUTOR_BASELINE, tenantId);
 
+        restoreRoleGrants(tenantId);
+
         insertFixture(tenantId, refs);
 
         Map<String, Long> counts = counts();
@@ -135,6 +140,41 @@ public class DemoResetService {
         }
         log.info("demo-reset: tenant={} 重建完成 counts={}", tenantCode, counts);
         return counts;
+    }
+
+    /**
+     * 授权面回到预设：自定义角色连同其授权一起清掉，10 个内置角色重写 1680 行预设。
+     *
+     * <p>为什么不是「只清自定义角色」：演示里最常见的破坏是有人在授权页把某个内置角色的档位
+     * 调坏（例如把 {@code audit:view} 设成 DENY），下次演示就少了一整块功能，而它不会报错。
+     * 重置的口径因此是<b>回到预设</b>：先按租户删掉全部授权行，再用
+     * {@link RbacSeeder#preset} 这一处公式写回，于是「种子派生」只有一份实现。</p>
+     *
+     * <p>已是预设就<b>不写</b>：{@link RbacSeeder#driftCells} 逐格比对（同一公式），差异 0 且没有
+     * 自定义角色时直接返回。重置的语义是「回到预设」，本来就已在预设，再删 1680 行、插 1680 行
+     * 只是把主机写满——那两次整表重写正是 reset 偶发超时的写放大来源。跳过不影响计数与不变量，
+     * 所以连续两次 reset 的 counts 仍逐键相等（s8、platform-demo-reset.sh 的幂等判据不变）。</p>
+     */
+    private void restoreRoleGrants(long tenantId) {
+        long customRoles = db.count(
+                "SELECT COUNT(*) FROM sys_role WHERE tenant_id = ? AND builtin = 0", tenantId);
+        long drift = rbacSeeder.driftCells(tenantId);
+        if (customRoles == 0 && drift == 0) {
+            log.info("demo-reset: tenant={} 授权已是预设（差异 0 格、自定义角色 0 个），跳过重写",
+                    tenantCode);
+            return;
+        }
+        // 绑定先删：sys_user_role 的 role_id 指向即将消失的自定义角色，留着就是脏引用。
+        db.update("DELETE ur FROM sys_user_role ur JOIN sys_role r ON r.id = ur.role_id"
+                + " WHERE r.tenant_id = ? AND r.builtin = 0", tenantId);
+        // 授权按租户整表清，而不是「按现存角色 join 清」：sys_role_permission 自己有 tenant_id，
+        // 用 tenant_id 这一条谓词才等于「清空本租户授权」。join 版本会漏掉 role_id 已不存在的
+        // 孤儿行——那种行不报错，只让重置后的行数停在 1683，直到有人数行数才发现演示态不对。
+        long wiped = db.update("DELETE FROM sys_role_permission WHERE tenant_id = ?", tenantId);
+        db.update("DELETE FROM sys_role WHERE tenant_id = ? AND builtin = 0", tenantId);
+        int rewritten = rbacSeeder.seedTenant(tenantId);
+        log.info("demo-reset: tenant={} 授权回到预设（自定义角色 {} 个、差异 {} 格、旧授权 {} 行 → 重写 {} 行）",
+                tenantCode, customRoles, drift, wiped, rewritten);
     }
 
     /**
@@ -183,6 +223,12 @@ public class DemoResetService {
         counts.put("testEnvs", db.count(
                 "SELECT COUNT(*) FROM test_env WHERE tenant_id = ?", tenantId));
         counts.put("gateResidue", gateResidue(tenantId));
+        // r19：授权面两个键。rolePermission 是租户内授权行数（10 内置角色 × 168 = 1680），
+        // customRoles 是自定义角色数（重置后必须为 0）——平台脚本按同名键断言，缺键即视为没接进。
+        counts.put("rolePermission", db.count(
+                "SELECT COUNT(*) FROM sys_role_permission WHERE tenant_id = ?", tenantId));
+        counts.put("customRoles", db.count(
+                "SELECT COUNT(*) FROM sys_role WHERE tenant_id = ? AND builtin = 0", tenantId));
         return counts;
     }
 

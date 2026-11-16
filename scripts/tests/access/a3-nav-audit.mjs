@@ -6,7 +6,10 @@
  * 路由码」「字典三个请求都 silentForbidden」这类契约是**声明**，不是运行时行为——
  * 静态审计能把它变成可执行证据，a4 再用真实权限推导「角色实际看到什么」。
  *
- * 9 条规则（R1..R9），全绿才算通过；任一失败打印具体条目与修复方向。
+ * 10 条规则（R1..R10），全绿才算通过；任一失败打印具体条目与修复方向。
+ * R10 是 r18 新增：导航的 pageCode 必须与 platform-contract 的 MenuRegistry 逐字一致——
+ * 页面码是服务端授权的**主体**，nav 是它的第二使用方，两边漂移就会出现「菜单可见但
+ * 路由 403」或「页面授权了却永远点不到」。
  * 计数通过环境变量 ACCESS_COUNTS 交给 scripts/access-verify.sh 汇总。
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
@@ -18,9 +21,9 @@ export const ROOT = path.resolve(HERE, '../../..')
 const WEB = path.join(ROOT, 'web/src')
 
 // ---------------------------------------------------------------- 基线
-// R1 的条目数基线：r13（分析域四页）落盘后侧栏 33 → 36，顶栏 8 不变。
-// 这里收成常量，新增入口时只改这一处数字，规则本身不放松。
-const SIDEBAR_BASELINE = 36
+// R1 的条目数基线：r13（分析域四页）落盘后侧栏 33 → 36；r18 度增「角色与权限」
+// （admin.roles 页面）→ 37，顶栏 8 不变。新增入口时只改这一处数字，规则本身不放松。
+const SIDEBAR_BASELINE = 37
 const TOP_BASELINE = 8
 
 // ---------------------------------------------------------------- 通用解析
@@ -68,6 +71,12 @@ export function parseFunctionCode(text, { sentinel = false } = {}) {
   return null
 }
 
+/** 从对象文本里取 `pageCode`（r18）：`pageCode: 'req.pool'`，空串表示不参与页面授权 */
+export function parsePageCode(text) {
+  const one = stripCommentLines(text).match(/pageCode:\s*'([^']*)'/)
+  return one ? one[1] : null
+}
+
 function blockBetween(src, fromMarker, toMarker) {
   const start = src.indexOf(fromMarker)
   if (start < 0) return ''
@@ -90,6 +99,7 @@ export function parseNav() {
       label,
       routeName,
       codes: parseFunctionCode(obj.text, { sentinel: true }),
+      pageCode: parsePageCode(obj.text),
       internalOnly: /internalOnly:\s*true/.test(stripCommentLines(obj.text)),
     })
   }
@@ -140,6 +150,17 @@ export function parseMatrixCodes() {
   const end = tail.indexOf(');')
   const body = end < 0 ? tail : tail.slice(0, end)
   return new Set([...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]))
+}
+
+/** 解析 platform-contract 的 MenuRegistry：页面码全集（授权主体，36 个） */
+export function parseMenuPages() {
+  const src = readFileSync(
+    path.join(ROOT, 'platform-contract/src/main/java/com/example/platform/contract/MenuRegistry.java'),
+    'utf8',
+  )
+  const codes = []
+  for (const m of src.matchAll(/new MenuPage\(\s*"([^"]+)"/g)) codes.push(m[1])
+  return codes
 }
 
 const walk = (dir) => {
@@ -336,13 +357,38 @@ export function runAudit({ quiet = false } = {}) {
       '给该调用传 { silentForbidden: true }（见 api/admin.ts 的 listApiClients 第二参）；否则 403 会全局跳 /403')
   }
 
+  // R10（r18）：nav 的 pageCode 集合 == MenuRegistry 的 36 个页面码，逐字一致。
+  // 页面码是服务端授权的授权主体，nav 若少一个就永远点不到、多一个就点了 403；
+  // 唯一允许的空码是通知中心（它不是页面，只是登录即可访问的入口）。
+  {
+    const menuPages = parseMenuPages()
+    const menuSet = new Set(menuPages)
+    const navPageCodes = sidebar.map((it) => it.pageCode)
+    const blank = sidebar.filter((it) => !it.pageCode)
+    const declared = new Set(navPageCodes.filter(Boolean))
+    const missingInNav = menuPages.filter((c) => !declared.has(c))
+    const extraInNav = [...declared].filter((c) => !menuSet.has(c))
+    const dupes = [...declared].filter((c) => navPageCodes.filter((x) => x === c).length > 1)
+    const blankBad = blank.filter((it) => !it.label.includes('通知'))
+    if (menuPages.length !== 36) {
+      bad('R10', `MenuRegistry 应有 36 个页面码，实际 ${menuPages.length}`,
+        '页面码是授权主体（TECHNICAL §4.1）：增删页面必须同步 seed 与 s1 三向比对')
+    } else if (missingInNav.length === 0 && extraInNav.length === 0 && dupes.length === 0 && blankBad.length === 0) {
+      ok('R10', `nav 的 36 个 pageCode 与 MenuRegistry 逐字一致（空码仅「通知中心」${blank.length} 条）`)
+    } else {
+      bad('R10',
+        `页面码漂移：未进 nav=[${missingInNav.join(',')}] nav 多出=[${extraInNav.join(',')}] 重复=[${dupes.join(',')}] 意外空码=[${blankBad.map((it) => it.label).join(',')}]`,
+        '页面码三处同改（MenuRegistry / nav.ts / sys_menu 由种子推导）：nav 少一条 = 该页面永远点不到，多一条 = 点进去 403')
+    }
+  }
+
   return { pass, total, failures }
 }
 
 // 作为脚本直接运行时执行并给出退出码（被 a4 import 时只取解析函数）
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (invokedDirectly) {
-  console.log('\n---- a3 导航与字典静态审计（9 条规则）----')
+  console.log('\n---- a3 导航与字典静态审计（10 条规则）----')
   const result = runAudit()
   const countsFile = process.env.ACCESS_COUNTS
   if (countsFile) {

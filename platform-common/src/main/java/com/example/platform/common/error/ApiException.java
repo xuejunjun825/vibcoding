@@ -22,7 +22,26 @@ public class ApiException extends RuntimeException {
         super(message == null ? code : message);
         this.status = status;
         this.code = code == null ? "ERROR" : code;
-        this.detail = detail == null ? Map.of() : Map.copyOf(detail);
+        this.detail = copyWithoutNulls(detail);
+    }
+
+    /**
+     * Detail maps are diagnostic bodies, not contracts: a {@code null} entry means "this dimension
+     * does not apply" (e.g. a page-only decision has no action code). {@link Map#copyOf} rejects
+     * nulls, which used to turn a denied request into a 500 on the way out — the caller must see
+     * the 403 it earned. Null-valued entries are dropped rather than propagated.
+     */
+    private static Map<String, Object> copyWithoutNulls(Map<String, Object> detail) {
+        if (detail == null || detail.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> clean = new java.util.LinkedHashMap<>();
+        detail.forEach((key, value) -> {
+            if (key != null && value != null) {
+                clean.put(key, value);
+            }
+        });
+        return clean.isEmpty() ? Map.of() : Map.copyOf(clean);
     }
 
     public int status() {

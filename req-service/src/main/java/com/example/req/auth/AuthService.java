@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import com.example.platform.common.error.ApiException;
+import com.example.platform.common.security.PermissionService;
 import com.example.platform.common.security.UserIdentity;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
@@ -31,14 +32,17 @@ public class AuthService {
     private final SysDb db;
     private final PasswordService passwords;
     private final JwtCodec codec;
+    private final PermissionService permissionService;
     private final long ttlMinutes;
 
     public AuthService(SysDb db, PasswordService passwords,
+                       PermissionService permissionService,
                        @Value("${platform.jwt.secret:dev-only-jwt-secret-please-change-32bytes-min}")
                        String secret,
                        @Value("${platform.jwt.ttl-minutes:720}") long ttlMinutes) {
         this.db = db;
         this.passwords = passwords;
+        this.permissionService = permissionService;
         this.codec = new JwtCodec(secret);
         this.ttlMinutes = ttlMinutes;
     }
@@ -88,7 +92,7 @@ public class AuthService {
         return new AuthViews.LoginResponse(token, ttlMinutes * 60, sessionUser(userId,
                 SysDb.asString(user[1]), roles, domainIds, vendorId, tenantId,
                 SysDb.asString(tenant[2]), request.username().trim()),
-                permissions(roles), DEFAULT_ROUTE, tenantId, tenantCode);
+                permissions(tenantId, roles), DEFAULT_ROUTE, tenantId, tenantCode);
     }
 
     public AuthViews.MeResponse me() {
@@ -104,7 +108,7 @@ public class AuthService {
                 scope.tenantId(), principal.tenantName(), principal.username());
         List<Long> orgIds = new ArrayList<>(scope.orgSubtreeIds());
         orgIds.sort(Long::compareTo);
-        return new AuthViews.MeResponse(user, permissions(principal.roles()),
+        return new AuthViews.MeResponse(user, permissions(scope.tenantId(), principal.roles()),
                 new AuthViews.ScopeInfo(scope.tier().name(), domainIds, scope.vendorId(), orgIds,
                         label(scope)));
     }
@@ -120,15 +124,43 @@ public class AuthService {
         };
     }
 
-    public List<AuthViews.PermissionEntry> permissions(List<String> roles) {
+    /**
+     * The legacy flat list (function code + level) kept for {@code /auth/me}.
+     *
+     * <p>r18 does not remove it: historical pages still read {@code permissions[]} and decide from
+     * function codes. It now comes from the same {@link PermissionService} snapshot as the three
+     * layers, so the flat list and {@code /auth/me/permissions} can never disagree.</p>
+     */
+    public List<AuthViews.PermissionEntry> permissions(long tenantId, List<String> roles) {
         List<AuthViews.PermissionEntry> entries = new ArrayList<>();
-        for (String function : PermissionMatrix.functions()) {
-            PermissionMatrix.Access access = PermissionMatrix.accessOf(function, roles);
+        permissionService.effective(tenantId, roles).functions().forEach((code, access) -> {
             if (access != PermissionMatrix.Access.DENY) {
-                entries.add(new AuthViews.PermissionEntry(function, access.name()));
+                entries.add(new AuthViews.PermissionEntry(code, access.name()));
             }
-        }
+        });
         return entries;
+    }
+
+    /**
+     * The three layers plus their epoch — what the menu and the buttons decide from.
+     *
+     * <p>The epoch travels with the sets so the client can discard a slow response that arrives
+     * after a newer one: without it, saving a role and immediately navigating can paint the old
+     * menu from a response that was already in flight.</p>
+     */
+    public AuthViews.MyPermissions myPermissions() {
+        if (TenantContext.principal() == null) {
+            throw new ApiException(401, "UNAUTHENTICATED", "未登录", null);
+        }
+        PermissionService.Effective effective = permissionService.effective();
+        return new AuthViews.MyPermissions(effective.epoch(),
+                permissionService.granted(PermissionService.Layer.FUNCTION),
+                permissionService.granted(PermissionService.Layer.MENU),
+                permissionService.granted(PermissionService.Layer.ACTION),
+                new AuthViews.LayerSets(
+                        permissionService.restricted(PermissionService.Layer.FUNCTION),
+                        permissionService.restricted(PermissionService.Layer.MENU),
+                        permissionService.restricted(PermissionService.Layer.ACTION)));
     }
 
     private AuthViews.SessionUser sessionUser(long id, String name, List<String> roles,

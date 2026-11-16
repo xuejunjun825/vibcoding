@@ -1,0 +1,7 @@
+{
+  "reqId": "req-19",
+  "runId": "tf-mwencgru-xkthj3",
+  "title": "r18 RBAC 收尾：把组织/角色/人员三层授权（功能码 + 页面 + 动作码）做完并让全部门禁变绿。当前分支 feat/rbac-admin 上已有骨架（断",
+  "mode": "full",
+  "createdAt": 1794554384134
+}

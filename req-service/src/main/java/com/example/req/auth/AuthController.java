@@ -26,4 +26,10 @@ public class AuthController {
     public AuthViews.MeResponse me() {
         return authService.me();
     }
+
+    /** The three grant layers plus their epoch — menus and buttons read this, not the flat list. */
+    @GetMapping("/me/permissions")
+    public AuthViews.MyPermissions myPermissions() {
+        return authService.myPermissions();
+    }
 }

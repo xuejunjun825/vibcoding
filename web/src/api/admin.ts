@@ -6,9 +6,13 @@ import { http } from './client'
 import type {
   ApiClientRow,
   AuditRow,
+  GrantInput,
+  GrantSaveResult,
   MetricDefinition,
   PageResponse,
   PermissionMatrixResponse,
+  RoleGrantView,
+  RoleRow,
 } from './types'
 
 const ADMIN = '/api/req/admin'
@@ -112,6 +116,24 @@ export function saveOrg(payload: Partial<OrgRow>): Promise<OrgRow> {
   return payload.id
     ? http.put<OrgRow>(`${ADMIN}/orgs`, payload)
     : http.post<OrgRow>(`${ADMIN}/orgs`, payload)
+}
+
+/**
+ * 删除组织（r18 新增，AC-14）。
+ *
+ * 有子组织（409 ORG_HAS_CHILDREN）或有人员（409 ORG_HAS_USERS）时后端拒绝，
+ * detail 里带 counts —— 页面就该就地引导「去迁移」，绝不吞成 toast。
+ */
+export function deleteOrg(id: number): Promise<void> {
+  return http.del<void>(`${ADMIN}/orgs/${id}`)
+}
+
+/** 把人员迁到目标组织后再删源组织（同事务 + 审计） */
+export function moveOrgUsers(
+  id: number,
+  body: { userIds: number[]; targetOrgId: number },
+): Promise<{ moved: number }> {
+  return http.post<{ moved: number }>(`${ADMIN}/orgs/${id}/move-users`, body)
 }
 
 export function listDomains(): Promise<DomainRow[]> {
@@ -240,4 +262,51 @@ export function createMetricDefinition(payload: {
   caliberNote?: string
 }): Promise<MetricDefinition> {
   return http.post<MetricDefinition>(`${DELIVER_ADMIN}/metric-definitions`, payload)
+}
+
+/* ---------------- r18 RBAC：角色与三层授权（归属 req-service） ---------------- */
+
+export function listRoles(): Promise<RoleRow[]> {
+  return http.get<RoleRow[]>(`${ADMIN}/roles`)
+}
+
+export function createRole(body: {
+  code: string
+  name: string
+  description?: string
+}): Promise<RoleRow> {
+  return http.post<RoleRow>(`${ADMIN}/roles`, body)
+}
+
+export function updateRole(
+  id: number,
+  body: { name: string; description?: string },
+): Promise<RoleRow> {
+  return http.put<RoleRow>(`${ADMIN}/roles/${id}`, body)
+}
+
+/** 停用/启用：停用即时失权（后端在主体装配处过滤 status='ACTIVE'） */
+export function setRoleStatus(id: number, status: string): Promise<RoleRow> {
+  return http.patch<RoleRow>(`${ADMIN}/roles/${id}/status`, { status })
+}
+
+/** 内置角色不可删（409）；删除前页面必须二次确认 */
+export function deleteRole(id: number): Promise<void> {
+  return http.del<void>(`${ADMIN}/roles/${id}`)
+}
+
+/** 三级授权快照：模块 → 页面 → (功能码, 动作) 全量 1680 行 */
+export function getRoleGrants(id: number): Promise<RoleGrantView> {
+  return http.get<RoleGrantView>(`${ADMIN}/roles/${id}/permissions`)
+}
+
+/**
+ * 全量覆盖保存（一次 PUT 写满 1680 行 + 1 条审计）。
+ * 409 `ADMIN_LOCKOUT_RISK` / `HIGH_RISK_REQUIRES_CONFIRM` 由页面渲染，不要 toast。
+ */
+export function saveRoleGrants(
+  id: number,
+  body: { grants: GrantInput[]; confirmHighRisk?: boolean },
+): Promise<GrantSaveResult> {
+  return http.put<GrantSaveResult>(`${ADMIN}/roles/${id}/permissions`, body)
 }

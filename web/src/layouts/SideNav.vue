@@ -26,11 +26,16 @@ function pathOf(to: string): string {
   return to.split('?')[0] ?? to
 }
 
-/** 侧栏准入：与顶栏共用 navVisible（唯一判定，见 navAccess.ts） */
+/**
+ * 侧栏准入：与顶栏共用 navVisible（唯一判定，见 navAccess.ts）。
+ * `hasMenu` 是 r18 双条件的开关（页面码 MENU 层）：缺省时 pageCode 被跳过，
+ * 等于只判了一半条件 —— s1/a4 都按双条件断言。
+ */
 function permitted(item: NavItem): boolean {
   const ctx: NavContext = {
     hasRoute: (name) => router.hasRoute(name),
     canAny: (codes) => auth.canAny(codes),
+    hasMenu: (code) => auth.canMenu(code),
     vendorScoped: auth.user?.vendorId != null,
   }
   return navVisible(item, ctx)

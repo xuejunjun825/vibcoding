@@ -1,9 +1,13 @@
 /**
- * 导航准入的唯一判定（TECHNICAL §4.3）。
+ * 导航准入的唯一判定（TECHNICAL §4.3 / §8.4）。
  *
  * 侧栏（SideNav.vue）与顶栏（TopNav.vue）都必须调用 `navVisible`，不允许各自写
  * `canAny` —— 三套判定（省略=公共 / 有码=判定 / 顶栏 admin 特判）正是
  * 「菜单看得见、点开 403」的来源。抽成纯函数后，菜单与入口守卫同源。
+ *
+ * r18 起是**双条件**（AC-16）：页面码（MENU 层）已授 **且** 绑定的功能码
+ * （FUNCTION 层）非 DENY。只判功能码会让「功能码给同模块其它页共用」的页面
+ * 一起冒出来，只判页面码会让 RESTRICTED/DENY 的功能码失去意义。
  *
  * `AUTHENTICATED` 是「登录即可读」的哨兵值，不是权限码：
  * 服务端权限集合里永远没有它，所以必须在 `canAny` 之前处理，
@@ -20,6 +24,11 @@ export interface NavGuard {
   functionCode: FunctionCode
   /** 仅内部账号可见（厂商账号不渲染，深链由路由守卫拦） */
   internalOnly?: boolean
+  /**
+   * 页面码（MENU 层，36 个之一）。空串/缺省 = 该条目不受页面保护（如通知中心），
+   * 退化为「登录即可见」。页面码与 `MenuRegistry`、`sys_menu` 三处同源。
+   */
+  pageCode?: string
 }
 
 export interface NavContext {
@@ -27,11 +36,20 @@ export interface NavContext {
   canAny(codes: string[]): boolean
   /** 当前登录账号是否厂商账号（`user.vendorId != null`） */
   vendorScoped: boolean
+  /**
+   * 页面码判定（MENU 层）。
+   *
+   * 可选是为了让尚未接入 `auth.canMenu` 的调用方继续工作：缺省时页面码条件
+   * 被跳过，只判功能码（与 r17 行为一致）。接入后即生效，无需改动本函数。
+   */
+  hasMenu?(code: string): boolean
 }
 
 export function navVisible(item: NavGuard, ctx: NavContext): boolean {
   if (item.routeName && !ctx.hasRoute(item.routeName)) return false
   if (item.internalOnly && ctx.vendorScoped) return false
+  const pageCode = item.pageCode?.trim() ?? ''
+  if (pageCode && ctx.hasMenu && !ctx.hasMenu(pageCode)) return false
   const codes = Array.isArray(item.functionCode) ? item.functionCode : [item.functionCode]
   if (codes.length === 0) return false
   if (codes.includes(AUTHENTICATED)) return true
