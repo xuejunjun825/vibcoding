@@ -2,6 +2,7 @@
 # platform-test-negative.sh — TECHNICAL §8.3 的 17 段负向用例（r17 起含动作级授权）。
 # r23 增 4b) 段：流转前置门（拆解/直建/改父共用一道门）+ 提报 domainIds 必填，含正向回归。
 # r26 增 4c) 段：工时评估门（六态拦人、驳回后仍拦、改人天超 20% 派生 STALE、越权提交 403）。
+# r27 增 4d) 段：列表/搜索/详情四处 allowedActions 原始数组逐字符相等（R27_PARITY_MUTATE=order 变异自检）。
 # r24 增 17) 段：VENDOR_PM 的第 11 个角色边界（厂商隔离 / 12 条写口 DENY / 账号必须绑厂商）。
 # 每条都断言两件事：被拒绝（4xx + 错误码），且**没有落库**（表计数不变）。
 # 绿色 = 非法路径确实走不通；不是"接口返回 200 但界面拦住了"。
@@ -260,6 +261,149 @@ if login_as "vpm1" "Passw0rd!"; then
 else
     fail "vpm1 登录失败（评估越权用例）" "make platform-seed 必须创建 vpm1/Passw0rd!"
 fi
+
+# ---------------------------------------------------------------- 4d
+section "4d) 列表/搜索/详情同源（r27）：同一调用者、同一 id，四处 allowedActions 原始数组逐字符相等"
+# AC-1/AC-4/AC-5/AC-6/AC-7 的断言口径：只比较 jq -c 后的原始数组文本（含顺序），
+# 禁止 length/包含/sort 替代——「列表漏了门」正是靠字符串不等暴露的。
+# 四处 = 列表行（?keyword=）、搜索结果行（?q=）、详情根、详情 .view。
+# R27_PARITY_MUTATE=order 把列表侧数组翻转，用于自检这几条断言真的在比顺序。
+actions_of() { printf '%s' "$1" | jq -c '.allowedActions // []' 2>/dev/null || printf 'ERR'; }
+row_actions() { printf '%s' "$2" | jq -c --argjson id "$1" '(.items // [])[] | select(.id==$id) | .allowedActions' 2>/dev/null || printf 'ERR'; }
+parity() { # desc id keyword jq-cond
+    local desc="$1" id="$2" kw="$3" cond="$4" row srow droot dview
+    api_call GET "/api/req/requirements?keyword=${kw}&size=50"
+    row="$(row_actions "$id" "$HTTP_BODY")"
+    api_call GET "/api/req/requirements/search?q=${kw}&size=50"
+    srow="$(row_actions "$id" "$HTTP_BODY")"
+    api_call GET "/api/req/requirements/${id}"
+    droot="$(actions_of "$HTTP_BODY")"
+    dview="$(printf '%s' "$HTTP_BODY" | jq -c '.view.allowedActions // []' 2>/dev/null || printf 'ERR')"
+    [[ "${R27_PARITY_MUTATE:-}" == "order" ]] && row="$(printf '%s' "$row" | jq -c 'reverse' 2>/dev/null || printf 'ERR')"
+    if [[ -z "$row" || -z "$srow" || -z "$droot" || -z "$dview" ]]; then
+        fail "${desc}：四处里有一处没取到 allowedActions（列表='${row}' 搜索='${srow}' 详情='${droot}' view='${dview}'）" \
+            "keyword=标题 与 q=标题 都必须命中同一 id；列表行缺失说明池查询把该 id 过滤掉了"
+        return
+    fi
+    if [[ "$row" != "$srow" || "$row" != "$droot" || "$row" != "$dview" ]]; then
+        fail "${desc}：四处不同源（列表${row} 搜索${srow} 详情${droot} view${dview}）" \
+            "判定只能有 RequirementService 一处：池/搜索/导出/详情都必须调它（AC-2）"
+        return
+    fi
+    if ! printf '%s' "$row" | jq -e "$cond" >/dev/null 2>&1; then
+        fail "${desc}：四处一致但内容不符（${row} 不满足 ${cond}）" \
+            "权限矩阵 ∩ 状态机 ∩ r26 评估门，三者同时成立才算对"
+        return
+    fi
+    pass "${desc}（${row}）"
+}
+approve_est() { # req_id desc —— 产品经理初审通过一张 WBS_ESTIMATE 单
+    local rid="$1" desc="$2" saved="$API_TOKEN" task code body
+    if ! login_as "pm" "Passw0rd!"; then
+        fail "${desc}：pm 登录失败" "make platform-seed 必须创建 pm/Passw0rd!"
+        API_TOKEN="$saved"; return
+    fi
+    api_call GET /api/req/approvals/todo?page=1\&size=200
+    task="$(jget_ "$HTTP_BODY" "[.items[] | select(.bizId == ${rid} and .bizType == \"WBS_ESTIMATE\")][0].taskId")"
+    if [[ -z "$task" || "$task" == "null" ]]; then
+        fail "${desc}：审批待办里没有 WBS_ESTIMATE 单（bizId=${rid}）" "或签节点必须解析到域负责人/产品经理"
+        API_TOKEN="$saved"; return
+    fi
+    api_call POST "/api/req/approvals/tasks/${task}/actions" '{"action":"APPROVE","comment":"r27 4d 初审通过"}'
+    code="$HTTP_CODE"; body="$HTTP_BODY"
+    API_TOKEN="$saved"
+    if [[ "$code" == "200" ]]; then pass "${desc}（初审通过）"
+    else fail "${desc}：审批返回 ${code}" "$(printf '%s' "$body" | head -c 160)"; fi
+}
+
+# 4d.1 未评估 PDR：六态 NONE → schedule 被门摘掉，四处必须都是 []。
+R27_PDR_KW="$(db_q "SELECT title FROM requirement WHERE id=${GATE_PDR}")"
+parity "4d.1 未评估 PDR 四处一致且为 []" "$GATE_PDR" "$R27_PDR_KW" 'length == 0'
+
+# 4d.2 同一 PDR 过门后：四处都含 schedule（列表不能再停在状态机直出的旧值）。
+api_call POST "/api/req/requirements/${GATE_PDR}/estimate" '{"estimateDays":2,"note":"r27 4d：PDR 评估"}'
+allow "4d.2 提交 PDR 工时评估 → 201" 201 "" "POST /{id}/estimate 与 /{id}/deliver 同址同风格"
+approve_est "$GATE_PDR" "4d.2 PDR 评估初审"
+parity "4d.2 PDR 评估通过后四处一致且含 schedule" "$GATE_PDR" "$R27_PDR_KW" 'any(.[]; . == "schedule")'
+
+# 4d.3 已通过评估的 RD：start_dev 必须出现在四处（4c 的 GATE_RD 已进 IN_DEV，另造一张干净的）。
+api_call POST /api/req/requirements "{\"type\":\"RD\",\"title\":\"neg-r27-rd-${RUN_TAG}\",\"parentId\":${PDR_ID},\"domainIds\":[$DOMAIN1]}"
+allow "4d.3 造一张 TODO RD（父 PDR 已排期）→ 201" 201 "" "start_dev 只在 TODO 的 RD 上出现"
+R27_RD="$(jget_ "$HTTP_BODY" '.id')"
+if [[ -n "$R27_RD" && "$R27_RD" != "null" ]]; then
+    R27_RD_KW="$(db_q "SELECT title FROM requirement WHERE id=${R27_RD}")"
+    api_call POST "/api/req/requirements/${R27_RD}/estimate" '{"estimateDays":1.5,"note":"r27 4d：RD 评估"}'
+    allow "4d.3 RD 提交工时评估 → 201" 201 "" "评估单是六态的输入，无单即 NONE"
+    approve_est "$R27_RD" "4d.3 RD 评估初审"
+    parity "4d.3 已通过评估的 RD 四处一致且含 start_dev" "$R27_RD" "$R27_RD_KW" 'any(.[]; . == "start_dev")'
+else
+    fail "4d.3 造 RD 失败：$(printf '%s' "$HTTP_BODY" | head -c 160)" "父 PDR（PDR_ID=${PDR_ID}）必须是 SCHEDULED/IN_DEV"
+fi
+
+# 4d.4/4d.5/4d.6 用 biz1 自己的 BUS 串起来：SUBMITTED（自服务 submit）→ APPROVING（pm 看 approve）
+# → PENDING_REVIEW（审阅态只有 review_*，没有 approve）。
+if login_as "biz1" "Passw0rd!"; then
+    api_call POST /api/req/requirements "{\"type\":\"BUS\",\"title\":\"neg-r27-bus-${RUN_TAG}\",\"domainIds\":[$DOMAIN1]}"
+    allow "4d.4 biz1 自建 BUS → 201（SUBMITTED）" 201 "" "biz1 需 req:report:bus"
+    R27_BUS="$(jget_ "$HTTP_BODY" '.id')"
+    if [[ -n "$R27_BUS" && "$R27_BUS" != "null" ]]; then
+        R27_BUS_KW="$(db_q "SELECT title FROM requirement WHERE id=${R27_BUS}")"
+        parity "4d.4 biz1 自建 BUS 四处一致且含 submit" "$R27_BUS" "$R27_BUS_KW" 'any(.[]; . == "submit")'
+        api_call POST "/api/req/requirements/${R27_BUS}/actions" '{"action":"submit"}'
+        allow "4d.4 biz1 提交自己的 BUS → 200（SUBMITTED→APPROVING）" 200 "" "自服务动作按 reporter 判定，不看角色"
+        if login_as "pm" "Passw0rd!"; then
+            parity "4d.6 反假修复：pm 看同一 BUS 四处一致且含 approve" "$R27_BUS" "$R27_BUS_KW" 'any(.[]; . == "approve")'
+            api_call GET /api/req/approvals/todo?page=1\&size=200
+            R27_BUS_TASK="$(jget_ "$HTTP_BODY" "[.items[] | select(.bizId == ${R27_BUS} and .bizType == \"REQ_SUBMIT\")][0].taskId")"
+            if [[ -n "$R27_BUS_TASK" && "$R27_BUS_TASK" != "null" ]]; then
+                api_call POST "/api/req/approvals/tasks/${R27_BUS_TASK}/actions" '{"action":"APPROVE","comment":"r27 4d 审阅通过"}'
+                allow "4d.5 pm 审阅通过 BUS → 200（APPROVING→PENDING_REVIEW）" 200 "" "先有审阅态才有 4d.5 的现场"
+            else
+                fail "4d.5 审批待办里没有该 BUS 的 REQ_SUBMIT 待办（bizId=${R27_BUS}）" "或签节点必须解析到产品经理"
+            fi
+        else
+            fail "4d.6 pm 登录失败" "make platform-seed 必须创建 pm/Passw0rd!"
+        fi
+        if login_as "biz1" "Passw0rd!"; then
+            parity "4d.5 提交后 PENDING_REVIEW 四处一致且不含 approve/review_*" "$R27_BUS" "$R27_BUS_KW" \
+                'all(.[]; ((. == "approve") or startswith("review_")) | not)'
+        else
+            fail "4d.5 biz1 登录失败" "make platform-seed 必须创建 biz1/Passw0rd!"
+        fi
+    else
+        fail "4d.4 biz1 建 BUS 失败：$(printf '%s' "$HTTP_BODY" | head -c 160)" "biz1 需 req:report:bus"
+    fi
+else
+    fail "4d.4 biz1 登录失败" "make platform-seed 必须创建 biz1/Passw0rd!"
+fi
+API_TOKEN="$ADMIN_TOKEN"
+
+# 4d.7 整页逐行抽样：修头几行不算修好，前 5 行的列表值必须逐行等于它自己的详情。
+api_call GET "/api/req/requirements?page=1&size=50"
+R27_PAGE="$HTTP_BODY"; R27_PAGE_CODE="$HTTP_CODE"
+R27_IDS="$(printf '%s' "$R27_PAGE" | jq -r '(.items // [])[0:5][].id' 2>/dev/null)"
+R27_ROWS="$(printf '%s' "$R27_IDS" | grep -c . || true)"
+if [[ "$R27_PAGE_CODE" == "200" && "${R27_ROWS:-0}" -ge 5 ]]; then
+    R27_I=0
+    while read -r R27_ID; do
+        [[ -z "$R27_ID" ]] && continue
+        R27_I=$((R27_I+1))
+        R27_ROW="$(row_actions "$R27_ID" "$R27_PAGE")"
+        [[ "${R27_PARITY_MUTATE:-}" == "order" ]] && R27_ROW="$(printf '%s' "$R27_ROW" | jq -c 'reverse' 2>/dev/null || printf 'ERR')"
+        api_call GET "/api/req/requirements/${R27_ID}"
+        R27_DROOT="$(actions_of "$HTTP_BODY")"
+        R27_DVIEW="$(printf '%s' "$HTTP_BODY" | jq -c '.view.allowedActions // []' 2>/dev/null || printf 'ERR')"
+        if [[ -n "$R27_ROW" && "$R27_ROW" == "$R27_DROOT" && "$R27_ROW" == "$R27_DVIEW" ]]; then
+            pass "4d.7 第 ${R27_I} 行（id=${R27_ID}）列表=${R27_ROW} 与详情一致"
+        else
+            fail "4d.7 第 ${R27_I} 行（id=${R27_ID}）列表='${R27_ROW}' 详情='${R27_DROOT}' view='${R27_DVIEW}'" \
+                "整页每一行都必须与详情同源，不能只修头几行"
+        fi
+    done <<< "$R27_IDS"
+else
+    fail "4d.7 取整页失败或不足 5 行（HTTP ${R27_PAGE_CODE:-?}，行数 ${R27_ROWS:-0}）" "make platform-seed 必须造出足够的需求行"
+fi
+API_TOKEN="$ADMIN_TOKEN"
 
 # ---------------------------------------------------------------- 5/6
 section "5) 无审批人发布 → 400；6) 编辑已发布流程 → 409"

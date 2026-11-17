@@ -184,21 +184,106 @@ public class WbsEstimateService {
                 WbsEstimateViews.EstimateView.REQUIRED);
     }
 
+    /** 批量派生的入参（r27）：一页需求 id + 类型 + 当前人天，不含需求实体本身。 */
+    public record GateSubject(long requirementId, String type, BigDecimal estimateDays) {
+    }
+
     /** 六态之一：NONE|PENDING|APPROVED|REJECTED|SUPERSEDED|STALE。 */
     public String statusOf(RequirementEntity entity) {
         if (entity == null || entity.getId() == null) {
             return STATUS_NONE;
         }
         if (activeInstance(entity).isPresent()) {
-            return STATUS_PENDING;
+            return decide(true, null, entity.getEstimateDays(), null);
         }
         ApprovalInstance last = effectiveInstance(entity);
-        if (last == null) {
+        return decide(false, last, entity.getEstimateDays(), approvedDaysOf(last));
+    }
+
+    /**
+     * 批量派生（r27）：一页需求一条 IN 取单据、至多一条 IN 取已通过单的 SUBMIT 快照，
+     * 然后逐需求调用与 {@link #statusOf} 完全相同的 {@link #decide} 判定表。
+     *
+     * <p>只对受门类型（PDR/RD）取数：其余类型没有评估态，调用方拿到缺失即视为「无门」。
+     * 分组保持仓储的倒序，因此 active/最新/WITHDRAWN 回落的选取规则与单条查询一致。</p>
+     */
+    public Map<Long, String> statusesOf(List<GateSubject> subjects) {
+        if (subjects == null || subjects.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, GateSubject> wanted = new LinkedHashMap<>();
+        for (GateSubject subject : subjects) {
+            if (subject != null && subject.requirementId() > 0 && gatedType(subject.type())) {
+                wanted.putIfAbsent(subject.requirementId(), subject);
+            }
+        }
+        if (wanted.isEmpty()) {
+            return Map.of();
+        }
+
+        List<ApprovalInstance> instancesOfPage = instances
+                .findAllByTenantIdAndBizTypeAndBizIdInOrderByIdDesc(
+                        TenantContext.require().tenantId(), BIZ_TYPE, wanted.keySet());
+        Map<Long, List<ApprovalInstance>> grouped = new LinkedHashMap<>();
+        if (instancesOfPage != null) {
+            for (ApprovalInstance instance : instancesOfPage) {
+                if (instance == null || instance.getBizId() == null) {
+                    continue;
+                }
+                grouped.computeIfAbsent(instance.getBizId(), key -> new ArrayList<>()).add(instance);
+            }
+        }
+
+        Map<Long, ApprovalInstance> effectiveOfRow = new LinkedHashMap<>();
+        Map<Long, Boolean> activeOfRow = new LinkedHashMap<>();
+        List<Long> approvedIds = new ArrayList<>();
+        for (Long requirementId : wanted.keySet()) {
+            List<ApprovalInstance> ordered = grouped.getOrDefault(requirementId, List.of());
+            boolean active = ordered.stream()
+                    .anyMatch(instance -> ApprovalInstance.ACTIVE.equals(instance.getActiveFlag()));
+            ApprovalInstance effective = effectiveIn(ordered);
+            activeOfRow.put(requirementId, active);
+            effectiveOfRow.put(requirementId, effective);
+            if (!active && isApproved(effective)) {
+                approvedIds.add(effective.getId());
+            }
+        }
+
+        Map<Long, List<ApprovalHistory>> histories =
+                approvedIds.isEmpty() ? Map.of() : store.histories(approvedIds);
+
+        Map<Long, String> result = new LinkedHashMap<>();
+        wanted.forEach((requirementId, subject) -> {
+            ApprovalInstance effective = effectiveOfRow.get(requirementId);
+            BigDecimal approvedDays = isApproved(effective)
+                    ? EstimateSnapshot.days(EstimateSnapshot.document(
+                            histories.get(effective.getId()), json))
+                    : null;
+            result.put(requirementId, decide(activeOfRow.get(requirementId), effective,
+                    subject.estimateDays(), approvedDays));
+        });
+        return result;
+    }
+
+    /**
+     * 六态判定表（唯一一份，r27）：批量派生与详情取数都只调它。
+     *
+     * <p>{@code statusOf} 负责「怎么取数」，本方法负责「取到的数意味着什么」——两份实现分叉
+     * 正是列表与详情不一致（列表恒给 {@code schedule}）的根因。</p>
+     */
+    private static String decide(boolean active, ApprovalInstance effective,
+                                 BigDecimal estimateDays, BigDecimal approvedDays) {
+        if (active) {
+            return STATUS_PENDING;
+        }
+        if (effective == null) {
             return STATUS_NONE;
         }
-        String status = last.getStatus();
+        String status = effective.getStatus();
         if (ApprovalInstance.STATUS_APPROVED.equals(status)) {
-            return isStale(entity, last) ? STATUS_STALE : STATUS_APPROVED;
+            BigDecimal deviation = deviation(estimateDays, approvedDays);
+            return deviation == null || deviation.compareTo(STALE_THRESHOLD) > 0
+                    ? STATUS_STALE : STATUS_APPROVED;
         }
         if (ApprovalInstance.STATUS_REJECTED.equals(status)) {
             return STATUS_REJECTED;
@@ -207,6 +292,40 @@ public class WbsEstimateService {
             return STATUS_SUPERSEDED;
         }
         return STATUS_PENDING;
+    }
+
+    private static boolean isApproved(ApprovalInstance instance) {
+        return instance != null && ApprovalInstance.STATUS_APPROVED.equals(instance.getStatus())
+                && instance.getId() != null;
+    }
+
+    /** 与 {@link #effectiveInstance} 同规则，但作用在已批量取出的倒序单据列表上。 */
+    private static ApprovalInstance effectiveIn(List<ApprovalInstance> ordered) {
+        if (ordered == null || ordered.isEmpty()) {
+            return null;
+        }
+        for (ApprovalInstance instance : ordered) {
+            if (ApprovalInstance.ACTIVE.equals(instance.getActiveFlag())) {
+                return instance;
+            }
+        }
+        ApprovalInstance latest = ordered.get(0);
+        if (!ApprovalInstance.STATUS_WITHDRAWN.equals(latest.getStatus())) {
+            return latest;
+        }
+        for (ApprovalInstance instance : ordered) {
+            if (!ApprovalInstance.STATUS_WITHDRAWN.equals(instance.getStatus())) {
+                return instance;
+            }
+        }
+        return null;
+    }
+
+    private BigDecimal approvedDaysOf(ApprovalInstance instance) {
+        if (!isApproved(instance)) {
+            return null;
+        }
+        return EstimateSnapshot.days(EstimateSnapshot.document(store, json, instance.getId()));
     }
 
     // -------------------------------------------------------------------- 门
@@ -234,16 +353,28 @@ public class WbsEstimateService {
 
     /** 从 allowedActions 里摘掉被门挡住的受门动作（空白列表返回原集合语义）。 */
     public List<String> applyGate(RequirementEntity entity, List<String> actions) {
-        if (entity == null || actions == null || actions.isEmpty()
-                || !gatedType(entity.getType())) {
+        if (entity == null || actions == null || actions.isEmpty()) {
             return actions;
         }
-        if (STATUS_APPROVED.equals(statusOf(entity))) {
+        return applyGate(entity.getType(), statusOf(entity), actions);
+    }
+
+    /**
+     * 按「类型 + 已派生的评估态」过滤（r27）：批量路径的入口。
+     *
+     * <p>语义与 {@link #applyGate(RequirementEntity, List)} 完全一致，只是评估态由调用方
+     * 一次批量算出；顺序保持不变，空结果返回不可变空表。</p>
+     */
+    public List<String> applyGate(String type, String estimateStatus, List<String> actions) {
+        if (type == null || actions == null || actions.isEmpty() || !gatedType(type)) {
+            return actions;
+        }
+        if (STATUS_APPROVED.equals(estimateStatus)) {
             return actions;
         }
         List<String> filtered = new ArrayList<>(actions.size());
         for (String action : actions) {
-            if (!gated(entity.getType(), action)) {
+            if (!gated(type, action)) {
                 filtered.add(action);
             }
         }
@@ -263,13 +394,6 @@ public class WbsEstimateService {
         }
         return current.subtract(approved).abs()
                 .divide(approved, 4, RoundingMode.HALF_UP);
-    }
-
-    private boolean isStale(RequirementEntity entity, ApprovalInstance approved) {
-        BigDecimal approvedDays = EstimateSnapshot.days(
-                EstimateSnapshot.document(store, json, approved.getId()));
-        BigDecimal deviation = deviation(entity.getEstimateDays(), approvedDays);
-        return deviation == null || deviation.compareTo(STALE_THRESHOLD) > 0;
     }
 
     private String reasonOf(ApprovalInstance instance, String status, RequirementEntity entity,

@@ -85,6 +85,37 @@ assert_metric "req-list" 1.0 "需求池列表（10 万行，50/页）" "EXPLAIN 
 EXPLAIN="$(db_q "EXPLAIN SELECT id FROM requirement WHERE tenant_id=(SELECT id FROM sys_tenant WHERE code='t1') AND status='POOLED' ORDER BY id DESC LIMIT 50")"
 printf 'EXPLAIN|需求池列表|%s\n' "$(printf '%s' "$EXPLAIN" | tr '\n' ' ' | tr -s ' ')" >>"$TMP/results.txt"
 
+# ---------------------------------------------------------------- 1b
+# r27 AC-8：200 行整页是「列表 allowedActions 按页批量取数」唯一可能劣化的场景。
+# 绝对门槛 1s 之外，若把改前 p95 通过 PLATFORM_PERF_P95_BEFORE 传进来，再断言 ≤1.1×，
+# 防止「修复前已 600ms、2× 退化仍绿」的相对劣化。
+section "1b) 需求池 200 行整页 P95 ≤ 1s（10 万行，r27 AC-8）"
+ROWS200="$(curl -sS --max-time 30 "${GATEWAY_URL}/api/req/requirements?page=1&size=200&status=POOLED" "${AUTH[@]}" 2>/dev/null | jq -r '(.items // []) | length' 2>/dev/null || true)"
+if [[ "${ROWS200:-0}" == "200" ]]; then
+    pass "200 行整页确有 200 行（不是空列表上测性能）"
+else
+    fail "200 行整页只有 ${ROWS200:-0} 行，性能数字不可比" "确认 /internal/seed?scale=${SCALE_REQS} 已造出 ≥200 条 POOLED 需求"
+fi
+timed "req-list-200" 20 "${GATEWAY_URL}/api/req/requirements?page=1&size=200&status=POOLED" "${AUTH[@]}"
+assert_metric "req-list-200" 1.0 "需求池列表 200 行整页（10 万行）" "allowedActions 按页批量取数（实例 1 条 IN + 快照 ≤1 条 IN）；禁止逐行回查"
+if [[ -n "${PLATFORM_PERF_P95_BEFORE:-}" ]]; then
+    R_STATS="$(stat_of "$TMP/req-list-200.times")"
+    B_P50="$(awk '{print $1}' <<<"$R_STATS")"
+    B_P95="$(awk '{print $2}' <<<"$R_STATS")"
+    B_MAX="$(awk '{print $3}' <<<"$R_STATS")"
+    R_LIMIT="$(awk -v b="$PLATFORM_PERF_P95_BEFORE" 'BEGIN{printf "%.3f", b*1.1}')"
+    R_OK="$(awk -v a="$B_P95" -v l="$R_LIMIT" 'BEGIN{print (a<=l)?1:0}')"
+    printf 'RESULT|需求池 200 行整页（相对改前 %ss × 1.1）|%s|%s|%s|%s\n' \
+        "$PLATFORM_PERF_P95_BEFORE" "$B_P50" "$B_P95" "$B_MAX" "$R_LIMIT" >>"$TMP/results.txt"
+    if [[ "$R_OK" == "1" ]]; then
+        pass "200 行 p95 ${B_P95}s ≤ 改前 ${PLATFORM_PERF_P95_BEFORE}s × 1.1（${R_LIMIT}s）"
+    else
+        fail "200 行 p95 ${B_P95}s > 改前 ${PLATFORM_PERF_P95_BEFORE}s × 1.1（${R_LIMIT}s）" "列表动作判定必须整页批量：每页 2 条 IN，与行数无关"
+    fi
+else
+    warn "未设置 PLATFORM_PERF_P95_BEFORE，跳过 200 行相对门槛（仅断言 ≤1s）"
+fi
+
 # ---------------------------------------------------------------- 2
 section "2) 缺陷看板 P95 ≤ 2s"
 timed "defect-board" 10 "${GATEWAY_URL}/api/deliver/defects/board" "${AUTH[@]}"

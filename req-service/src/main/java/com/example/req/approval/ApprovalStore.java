@@ -1,6 +1,9 @@
 package com.example.req.approval;
 
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -44,6 +47,25 @@ public interface ApprovalStore {
     void appendHistory(ApprovalHistory history);
 
     List<ApprovalHistory> history(long instanceId);
+
+    /**
+     * 批量版本（r27）：一次取多个实例的流水，供需求池按页批量判定评估态。
+     *
+     * <p>默认逐条实现，保证既有实现与测试替身零改动；生产实现 {@link JpaApprovalStore}
+     * 覆写为一条 {@code IN} 查询，把「每行两次查询」降为「每页一条」。</p>
+     */
+    default Map<Long, List<ApprovalHistory>> histories(Collection<Long> instanceIds) {
+        if (instanceIds == null || instanceIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, List<ApprovalHistory>> result = new LinkedHashMap<>();
+        for (Long instanceId : instanceIds) {
+            if (instanceId != null) {
+                result.put(instanceId, history(instanceId));
+            }
+        }
+        return result;
+    }
 
     Optional<ApprovalHistory> lastAction(long instanceId, long taskId, String action);
 

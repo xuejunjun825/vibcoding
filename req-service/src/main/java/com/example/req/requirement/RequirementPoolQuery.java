@@ -28,7 +28,8 @@ public class RequirementPoolQuery {
             r.id AS id, r.code AS code, r.type AS type, r.status AS status, r.priority AS priority,
             r.title AS title, r.description AS description, r.parent_id AS parent_id,
             r.domain_id AS domain_id, r.origin_org_id AS origin_org_id,
-            r.owner_user_id AS owner_user_id, r.owner_vendor_id AS owner_vendor_id,
+            r.owner_user_id AS owner_user_id, r.reporter_id AS reporter_id,
+            r.owner_vendor_id AS owner_vendor_id,
             r.assignee_vendor_id AS assignee_vendor_id, r.release_id AS release_id,
             r.estimate_days AS estimate_days, r.actual_days AS actual_days, r.mr_url AS mr_url,
             r.expected_delivery_date AS expected_delivery_date, r.plan_start_date AS plan_start_date,
@@ -37,10 +38,17 @@ public class RequirementPoolQuery {
 
     private final ScopedJdbc jdbc;
     private final RequirementStateMachine stateMachine;
+    /**
+     * 动作判定的唯一入口（r27）：池/搜索/导出每页调一次 {@code allowedActionsByRow}，
+     * 与详情共用同一条链（状态机 ∩ 权限矩阵 → r26 评估门）。本类只负责取行列与拼视图。
+     */
+    private final RequirementService requirementService;
 
-    public RequirementPoolQuery(ScopedJdbc jdbc, RequirementStateMachine stateMachine) {
+    public RequirementPoolQuery(ScopedJdbc jdbc, RequirementStateMachine stateMachine,
+                                RequirementService requirementService) {
         this.jdbc = jdbc;
         this.stateMachine = stateMachine;
+        this.requirementService = requirementService;
     }
 
     public Page<View> page(PoolFilter filter) {
@@ -61,10 +69,11 @@ public class RequirementPoolQuery {
                 pageParams);
 
         Map<Long, Rollup> rollups = filter.aggregate() ? rollups(rows) : Map.of();
+        Map<Long, List<String>> actions = actionsByRow(rows);
         List<View> items = new ArrayList<>(rows.size());
         for (Map<String, Object> row : rows) {
             Long id = Rows.toLong(Rows.object(row, "id"));
-            items.add(toView(row, rollups.get(id)));
+            items.add(toView(row, rollups.get(id), actions.getOrDefault(id, List.of())));
         }
         return new Page<>(items, total, filter.page(), filter.size());
     }
@@ -109,11 +118,34 @@ public class RequirementPoolQuery {
                 "SELECT " + COLUMNS + " FROM requirement r WHERE " + where()
                         + " AND r.id > :afterId ORDER BY r.id LIMIT :limit",
                 params);
+        Map<Long, List<String>> actions = actionsByRow(rows);
         List<View> items = new ArrayList<>(rows.size());
         for (Map<String, Object> row : rows) {
-            items.add(toView(row, null));
+            Long id = Rows.toLong(Rows.object(row, "id"));
+            items.add(toView(row, null, actions.getOrDefault(id, List.of())));
         }
         return items;
+    }
+
+    /**
+     * 整页一次判定（r27）：把行里的「类型/状态/报告人/人天」交给
+     * {@link RequirementService#allowedActionsByRow}，本类不自行判定任何一个动作。
+     */
+    private Map<Long, List<String>> actionsByRow(List<Map<String, Object>> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return Map.of();
+        }
+        List<RequirementService.ActionRow> batch = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Long id = Rows.toLong(Rows.object(row, "id"));
+            if (id == null) {
+                continue;
+            }
+            batch.add(new RequirementService.ActionRow(id, Rows.str(row, "type"),
+                    Rows.str(row, "status"), Rows.toLong(Rows.object(row, "reporter_id")),
+                    Rows.toDecimal(Rows.object(row, "estimate_days"))));
+        }
+        return batch.isEmpty() ? Map.of() : requirementService.allowedActionsByRow(batch);
     }
 
     private Map<Long, Rollup> rollups(List<Map<String, Object>> rows) {
@@ -191,7 +223,7 @@ public class RequirementPoolQuery {
         return params;
     }
 
-    View toView(Map<String, Object> row, Rollup rollup) {
+    View toView(Map<String, Object> row, Rollup rollup, List<String> allowedActions) {
         Long id = Rows.toLong(Rows.object(row, "id"));
         String type = Rows.str(row, "type");
         String status = Rows.str(row, "status");
@@ -212,6 +244,6 @@ public class RequirementPoolQuery {
                 Rows.toDate(Rows.object(row, "plan_end_date")),
                 Rows.toDateTime(Rows.object(row, "closed_at")),
                 Rows.toDateTime(Rows.object(row, "updated_at")),
-                rollup, stateMachine.allowedActions(type, status).stream().toList(), Map.of(), null);
+                rollup, allowedActions, Map.of(), null);
     }
 }

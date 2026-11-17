@@ -35,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -769,6 +770,44 @@ public class RequirementService {
         // 必须新事务：外层 @Transactional 随后因 403 回滚，同事务的审计会一起消失。
         auditService.recordInNewTx("PERMISSION_DENIED", BIZ_TYPE, entity.getId(), detail);
         throw RequirementErrors.actionForbidden(action, allowed);
+    }
+
+    /** 池/导出批量判定的行快照（r27）：动作判定只读这五个字段。 */
+    record ActionRow(long id, String type, String status, Long reporterId, BigDecimal estimateDays) {
+    }
+
+    /**
+     * 一页需求的动作判定（r27）：状态机 ∩ 权限矩阵逐行算完，再叠 r26 评估门。
+     *
+     * <p>池/搜索/导出都只调这里，与 {@link #detail} / {@link #toView} 共用同一条判定链；
+     * 池查询里不再出现 {@code stateMachine.allowedActions}（那正是列表恒给
+     * {@code schedule} 的根因）。</p>
+     */
+    Map<Long, List<String>> allowedActionsByRow(List<ActionRow> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return Map.of();
+        }
+        List<WbsEstimateService.GateSubject> subjects = new ArrayList<>(rows.size());
+        for (ActionRow row : rows) {
+            subjects.add(new WbsEstimateService.GateSubject(row.id(), row.type(), row.estimateDays()));
+        }
+        WbsEstimateService gate = estimateGate();
+        Map<Long, String> estimateStatuses = gate == null ? Map.of() : gate.statusesOf(subjects);
+        Map<Long, List<String>> result = new LinkedHashMap<>();
+        for (ActionRow row : rows) {
+            List<String> actions = allowedActions(row.type(), row.status(), row.reporterId());
+            result.put(row.id(), gateFiltered(row.type(), estimateStatuses.get(row.id()), actions));
+        }
+        return result;
+    }
+
+    /** 批量路径的门过滤：评估态已由 {@link #allowedActionsByRow} 一次算出。 */
+    List<String> gateFiltered(String type, String estimateStatus, List<String> actions) {
+        WbsEstimateService gate = estimateGate();
+        if (gate == null || estimateStatus == null) {
+            return actions;
+        }
+        return gate.applyGate(type, estimateStatus, actions);
     }
 
     /** allowedActions 的唯一来源：状态机的合法集合 ∩ 调用者被授权的动作（与执行共用同一谓词）。 */

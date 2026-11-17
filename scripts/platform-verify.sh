@@ -286,6 +286,20 @@ api_call PUT "/api/req/requirements/${BUS_ID}" "{\"parentId\":${PDR_ID}}"
 expect "父子成环 → 400（类型分层/祖先链校验）" 400 "INVALID_PARENT"
 
 # =====================================================================
+section "AC-2 同源静态检查（r27）：池查询不得自建 allowedActions"
+# 判定只允许存在于 RequirementService 一处；池查询一旦回退到 stateMachine 直出
+# （r27 的缺陷形态），列表/搜索/导出与详情再次分叉——这条静态检查是长期护栏。
+POOL_SRC="${ROOT}/req-service/src/main/java/com/example/req/requirement/RequirementPoolQuery.java"
+if [[ ! -f "$POOL_SRC" ]]; then
+    fail "池查询源文件不存在：${POOL_SRC}" "模块/类改名后同步这条静态检查"
+elif grep -q "stateMachine\.allowedActions" "$POOL_SRC"; then
+    fail "池查询仍在直出 allowedActions（stateMachine.allowedActions）" \
+        "列表/搜索/导出必须走 RequirementService.allowedActionsByRow（AC-2）"
+else
+    pass "池查询的 allowedActions 只来自 RequirementService（AC-2）"
+fi
+
+# =====================================================================
 section "AC-3 状态机：合法流转 2xx、跳步 409、status 不可写、审计留痕"
 AUDIT_BEFORE="$(db_count audit_log "biz_type='requirement' AND biz_id=${RD_A} AND action='STATE_CHANGE'")"
 # r26：RD 开始开发前同样需要 APPROVED 评估单。

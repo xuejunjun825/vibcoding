@@ -6,6 +6,7 @@ import com.example.req.approval.WorkflowJson;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -25,10 +26,23 @@ final class EstimateSnapshot {
 
     /** 该实例 SUBMIT 流水里的单据快照；读不到时返回空 Map（绝不返回 null）。 */
     static Map<String, Object> document(ApprovalStore store, WorkflowJson json, long instanceId) {
-        if (store == null || json == null) {
+        if (store == null) {
             return Map.of();
         }
-        for (ApprovalHistory history : store.history(instanceId)) {
+        return document(store.history(instanceId), json);
+    }
+
+    /**
+     * 批量路径（r27）：给定已取出的流水列表解析同一份单据快照。
+     *
+     * <p>列表对 {@code estimateDays}/{@code approvedDays} 的取值规则必须与详情完全一致，
+     * 因此这里就是唯一解析器，单实例版本也只是把「取流水」换了个入口后调它。</p>
+     */
+    static Map<String, Object> document(List<ApprovalHistory> histories, WorkflowJson json) {
+        if (histories == null || json == null) {
+            return Map.of();
+        }
+        for (ApprovalHistory history : histories) {
             if (!ApprovalHistory.SUBMIT.equals(history.getAction())) {
                 continue;
             }

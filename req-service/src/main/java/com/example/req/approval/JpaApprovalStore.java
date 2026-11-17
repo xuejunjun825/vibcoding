@@ -5,7 +5,11 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -100,6 +104,34 @@ public class JpaApprovalStore implements ApprovalStore {
     @Override
     public List<ApprovalHistory> history(long instanceId) {
         return histories.findByInstanceIdOrderByIdAsc(instanceId);
+    }
+
+    /** 批量流水：一条 {@code IN} 查询替代 N 次单实例查询（列表页 200 行不再 200 次往返）。 */
+    @Override
+    public Map<Long, List<ApprovalHistory>> histories(Collection<Long> instanceIds) {
+        if (instanceIds == null || instanceIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> wanted = new ArrayList<>(instanceIds.size());
+        for (Long instanceId : instanceIds) {
+            if (instanceId != null && !wanted.contains(instanceId)) {
+                wanted.add(instanceId);
+            }
+        }
+        if (wanted.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, List<ApprovalHistory>> result = new LinkedHashMap<>();
+        for (Long instanceId : wanted) {
+            result.put(instanceId, new ArrayList<>());
+        }
+        for (ApprovalHistory history : histories.findByInstanceIdInOrderByInstanceIdAscIdAsc(wanted)) {
+            List<ApprovalHistory> bucket = result.get(history.getInstanceId());
+            if (bucket != null) {
+                bucket.add(history);
+            }
+        }
+        return result;
     }
 
     @Override
