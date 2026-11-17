@@ -173,6 +173,78 @@ create_req() { # type title parent_id estimate -> HTTP_CODE/HTTP_BODY
     api_call POST /api/req/requirements "$body"
 }
 
+# r26 工时评估门：PDR 排期 / RD 开始开发前必须先有 APPROVED 评估单，否则 409 ESTIMATE_NOT_APPROVED。
+# 这个 helper 把「提交 → 域负责人批准」压成一行：既有调用点（AC-2/AC-3 与 D9 准入链）在门前会失败，
+# 所以每个受门动作之前都要先解锁。批准人必须是引擎解析出的审批人（域负责人 pm），
+# 用 admin 代会 403——这里如实登录 pm，不给引擎加代批后门。
+approve_estimate() { # req_id days [note]
+    local rid="$1" days="$2" note="${3:-平台验证工时评估}"
+    local saved_token="$API_TOKEN" saved_tenant="$API_TENANT"
+    local task_id="" i="" status=""
+    api_call POST "/api/req/requirements/${rid}/estimate" \
+        "$(jq -cn --argjson d "$days" --arg n "$note" '{estimateDays:$d,note:$n}')"
+    if [[ "$HTTP_CODE" != "201" ]]; then
+        fail "提交工时评估单（需求 ${rid}）失败" "HTTP ${HTTP_CODE}: $(printf '%s' "$HTTP_BODY" | head -c 160)（评估单是排期/开发的前置）"
+        return 1
+    fi
+    api_call POST /api/req/auth/login \
+        "{\"tenantCode\":\"${T1_TENANT}\",\"username\":\"pm\",\"password\":\"Passw0rd!\"}"
+    if [[ "$HTTP_CODE" != "200" ]]; then
+        fail "评估审批人 pm 登录失败" "种子账号 pm/Passw0rd! 必须可登录（或签节点靠 DOMAIN_OWNER 解析到它）"
+        return 1
+    fi
+    API_TOKEN="$(jget "$HTTP_BODY" '.token')"
+    for i in 1 2 3 4 5; do
+        api_call GET "/api/req/approvals/todo?page=1&size=100"
+        task_id="$(jget "$HTTP_BODY" "[.items[] | select(.bizId == ${rid} and .bizType == \"WBS_ESTIMATE\")][0].taskId")"
+        [[ -z "$task_id" || "$task_id" == "null" ]] && break
+        api_call POST "/api/req/approvals/tasks/${task_id}/actions" '{"action":"APPROVE","comment":"工时评估初审通过"}'
+        [[ "$HTTP_CODE" == "200" ]] || break
+    done
+    API_TOKEN="$saved_token"
+    API_TENANT="$saved_tenant"
+    api_call GET "/api/req/requirements/${rid}"
+    status="$(jget "$HTTP_BODY" '.estimate.status')"
+    if [[ "$status" == "APPROVED" ]]; then
+        pass "工时评估单已通过（需求 ${rid}，${days} 人天）：评估门放行 schedule/start_dev"
+    else
+        fail "工时评估单未生效（需求 ${rid}，status=${status:-<缺失>}）" "评估通过后 detail.estimate.status 必须为 APPROVED，否则后续排期/开发全被 409 拦住"
+        return 1
+    fi
+}
+
+# 只批准「当前在途」的评估单（不新增提交）：AC-5 唯一性要验证「重提 → 通过」两步，
+# 而 approve_estimate 会顺带提交一张新单，会把 SUPERSEDED 的时机搅混。
+approve_pending_estimate() { # req_id
+    local rid="$1"
+    local saved_token="$API_TOKEN" saved_tenant="$API_TENANT"
+    local task_id="" i="" status=""
+    api_call POST /api/req/auth/login \
+        "{\"tenantCode\":\"${T1_TENANT}\",\"username\":\"pm\",\"password\":\"Passw0rd!\"}"
+    if [[ "$HTTP_CODE" != "200" ]]; then
+        fail "评估审批人 pm 登录失败" "种子账号 pm/Passw0rd! 必须可登录"
+        return 1
+    fi
+    API_TOKEN="$(jget "$HTTP_BODY" '.token')"
+    for i in 1 2 3 4 5; do
+        api_call GET "/api/req/approvals/todo?page=1&size=100"
+        task_id="$(jget "$HTTP_BODY" "[.items[] | select(.bizId == ${rid} and .bizType == \"WBS_ESTIMATE\")][0].taskId")"
+        [[ -z "$task_id" || "$task_id" == "null" ]] && break
+        api_call POST "/api/req/approvals/tasks/${task_id}/actions" '{"action":"APPROVE","comment":"工时评估初审通过"}'
+        [[ "$HTTP_CODE" == "200" ]] || break
+    done
+    API_TOKEN="$saved_token"
+    API_TENANT="$saved_tenant"
+    api_call GET "/api/req/requirements/${rid}"
+    status="$(jget "$HTTP_BODY" '.estimate.status')"
+    if [[ "$status" == "APPROVED" ]]; then
+        pass "在途评估单已通过（需求 ${rid}）"
+    else
+        fail "在途评估单未通过（需求 ${rid}，status=${status:-<缺失>}）" "重提后必须能被 pm 批准"
+        return 1
+    fi
+}
+
 create_req BUS "验证-业务需求-${RUN_TAG}" ""
 expect "创建 BUS 需求 201" 201
 BUS_ID="$(jget "$HTTP_BODY" '.id')"
@@ -187,6 +259,8 @@ SEED_POOLED_BUS="$(db_q "SELECT id FROM requirement WHERE tenant_id=$(tenant_id)
 create_req PDR "验证-产品需求-${RUN_TAG}" "$SEED_POOLED_BUS"
 expect "创建 PDR（父=BUS[POOLED]）201" 201
 PDR_ID="$(jget "$HTTP_BODY" '.id')"
+# r26：排期前先通过工时评估（新门），否则 schedule 恒 409 ESTIMATE_NOT_APPROVED。
+approve_estimate "$PDR_ID" 2 || warn "PDR 工时评估未就绪：后续 schedule 会被评估门拦住"
 api_call POST "/api/req/requirements/${PDR_ID}/actions" '{"action":"schedule"}'
 [[ "$HTTP_CODE" == "200" ]] || warn "PDR 排期失败（HTTP ${HTTP_CODE}）：后续 RD 创建会 409 PARENT_NOT_SCHEDULED，确认已 make platform-seed（BUS-0001 POOLED）"
 
@@ -212,8 +286,24 @@ api_call PUT "/api/req/requirements/${BUS_ID}" "{\"parentId\":${PDR_ID}}"
 expect "父子成环 → 400（类型分层/祖先链校验）" 400 "INVALID_PARENT"
 
 # =====================================================================
+section "AC-2 同源静态检查（r27）：池查询不得自建 allowedActions"
+# 判定只允许存在于 RequirementService 一处；池查询一旦回退到 stateMachine 直出
+# （r27 的缺陷形态），列表/搜索/导出与详情再次分叉——这条静态检查是长期护栏。
+POOL_SRC="${ROOT}/req-service/src/main/java/com/example/req/requirement/RequirementPoolQuery.java"
+if [[ ! -f "$POOL_SRC" ]]; then
+    fail "池查询源文件不存在：${POOL_SRC}" "模块/类改名后同步这条静态检查"
+elif grep -q "stateMachine\.allowedActions" "$POOL_SRC"; then
+    fail "池查询仍在直出 allowedActions（stateMachine.allowedActions）" \
+        "列表/搜索/导出必须走 RequirementService.allowedActionsByRow（AC-2）"
+else
+    pass "池查询的 allowedActions 只来自 RequirementService（AC-2）"
+fi
+
+# =====================================================================
 section "AC-3 状态机：合法流转 2xx、跳步 409、status 不可写、审计留痕"
 AUDIT_BEFORE="$(db_count audit_log "biz_type='requirement' AND biz_id=${RD_A} AND action='STATE_CHANGE'")"
+# r26：RD 开始开发前同样需要 APPROVED 评估单。
+approve_estimate "$RD_A" 1.5 || warn "RD A 工时评估未就绪：start_dev 会被评估门拦住"
 api_call POST "/api/req/requirements/${RD_A}/actions" '{"action":"start_dev"}'
 expect "RD TODO --start_dev--> IN_DEV" 200
 expect_jq "RD 状态为 IN_DEV" '.status' "IN_DEV"
@@ -231,6 +321,46 @@ expect "直接写 status → 400 STATUS_NOT_WRITABLE" 400 "STATUS_NOT_WRITABLE"
 expect_num "每次合法流转 audit_log +1（2 次）" \
     "$(db_count audit_log "biz_type='requirement' AND biz_id=${RD_A} AND action='STATE_CHANGE'")" eq "$((AUDIT_BEFORE + 2))" \
     "流转必须与审计同事务写入（AC-3）"
+
+# =====================================================================
+section "AC-5 唯一性与撤回回落（r26 D-02/D-03）：撤回不遮蔽旧有效单，新单通过后旧单 SUPERSEDED"
+create_req RD "验证-评估唯一性-${RUN_TAG}" "$PDR_ID" 2
+expect "创建评估唯一性 RD 201" 201
+UNIQ_RD="$(jget "$HTTP_BODY" '.id')"
+approve_estimate "$UNIQ_RD" 2 || warn "唯一性夹具评估未通过"
+OLD_INST="$(db_q "SELECT id FROM wf_instance WHERE tenant_id=$(tenant_id)
+                     AND biz_type='WBS_ESTIMATE' AND biz_id=${UNIQ_RD} AND status='APPROVED'
+                     ORDER BY id DESC LIMIT 1")"
+[[ -n "$OLD_INST" ]] && pass "基线：需求 ${UNIQ_RD} 有 1 张 APPROVED 单（instance ${OLD_INST}）" \
+    || fail "基线评估单缺失" "approve_estimate 应已写入 APPROVED 单"
+
+# D-02：撤回在途的重提单后，门必须回落到上一张有效 APPROVED，而不是整条需求判 NONE。
+api_call POST "/api/req/requirements/${UNIQ_RD}/estimate" '{"estimateDays":2.5,"note":"撤回回落验证"}'
+expect "重提超 20% 评估单 201（旧单保持 APPROVED）" 201
+NEW_INST="$(jget "$HTTP_BODY" '.instanceId')"
+api_call POST "/api/req/approvals/instances/${NEW_INST}/withdraw" '{"comment":"撤回回落验证"}'
+expect "撤回在途评估单 204" 204
+api_call GET "/api/req/requirements/${UNIQ_RD}"
+expect_jq "撤回后 estimate.status 回落 APPROVED（不得是 NONE）" '.estimate.status' "APPROVED" \
+    "WITHDRAWN 不是评估结论：最新单撤回时必须回落到上一张有效单（D-02）"
+expect_jq "撤回后 instanceId 指回旧 APPROVED 单" '.estimate.instanceId' "$OLD_INST" "门与卡片读同一张有效单"
+expect_jq "撤回后 approvedDays 仍是旧值 2" '.estimate.approvedDays' "2" "撤回不得清掉已通过的人天"
+
+# D-03：新单通过后旧 APPROVED 必须 SUPERSEDED（AC-5：任意时刻 APPROVED ≤ 1）。
+api_call POST "/api/req/requirements/${UNIQ_RD}/estimate" '{"estimateDays":3,"note":"二次通过验证"}'
+expect "重提第二张评估单 201" 201
+INST3="$(jget "$HTTP_BODY" '.instanceId')"
+approve_pending_estimate "$UNIQ_RD" || warn "第二张评估单未通过"
+api_call GET "/api/req/requirements/${UNIQ_RD}"
+expect_jq "新单通过后 detail.estimate.instanceId=新单" '.estimate.instanceId' "$INST3" "详情指向最新有效单"
+expect_num "该需求 APPROVED 单数 = 1（AC-5 唯一性）" \
+    "$(db_count wf_instance "tenant_id=$(tenant_id) AND biz_type='WBS_ESTIMATE' AND biz_id=${UNIQ_RD} AND status='APPROVED'")" eq 1 \
+    "新单通过时旧 APPROVED 必须落 SUPERSEDED（D-03）"
+expect_num "旧单状态已是 SUPERSEDED（不删，时间线仍可查）" \
+    "$(db_count wf_instance "id=${OLD_INST} AND status='SUPERSEDED'")" eq 1 \
+    "SUPERSEDED 是终态，历史单保留"
+api_call POST "/api/req/requirements/${UNIQ_RD}/actions" '{"action":"start_dev"}'
+expect "唯一有效评估生效后 start_dev 200（门放行）" 200
 
 # 转派厂商（AC-4 的夹具）：BUS 先走完审批到 POOLED 才能挂版本
 # vendorId 必须按租户解析：写死 1 会指向别的租户的厂商行，owner_vendor_id 就落在 scope 之外
@@ -822,6 +952,8 @@ create_req PDR "验证-准入正向PDR-${RUN_TAG}" "$D9_BUS" ""
 expect "准入正向链 PDR 201" 201
 D9_PDR="$(jget "$HTTP_BODY" '.id')"
 # r23 前置门：RD 只能挂在 SCHEDULED/IN_DEV 的 PDR 下，新 PDR 先排期（失败只 warn，断言数不变）。
+# r26：排期前先过工时评估门。
+approve_estimate "$D9_PDR" 2 || warn "准入正向 PDR 工时评估未就绪：schedule 会被评估门拦住"
 api_call POST "/api/req/requirements/${D9_PDR}/actions" '{"action":"schedule"}'
 [[ "$HTTP_CODE" == "200" ]] || warn "准入正向 PDR 排期失败（HTTP ${HTTP_CODE}）：后续 RD 会 409 PARENT_NOT_SCHEDULED"
 create_req RD "验证-准入正向RD-${RUN_TAG}" "$D9_PDR" "2"
@@ -848,6 +980,8 @@ api_call POST "/api/deliver/test-plans/${D9_PLAN}/approve" '{"comment":"准入�
 api_call POST "/api/deliver/test-plans/${D9_PLAN}/start" '{}'
 api_call POST "/api/deliver/test-plans/${D9_PLAN}/execute" "$(jq -cn --argjson c "$D9_CASE" '{caseId:$c,result:"PASS",note:"准入正向"}')"
 expect "准入正向执行 PASS 201" 201
+# r26：开始开发前通过工时评估（人天与 deliver 登记的 2 一致，不触发 STALE）。
+approve_estimate "$D9_RD" 2 || warn "准入正向 RD 工时评估未就绪：start_dev 会被评估门拦住"
 api_call POST "/api/req/requirements/${D9_RD}/actions" '{"action":"start_dev"}'
 api_call POST "/api/req/requirements/${D9_RD}/actions" '{"action":"submit_test"}'
 api_call POST "/api/req/requirements/${D9_RD}/actions" '{"action":"test_pass"}'

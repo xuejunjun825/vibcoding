@@ -56,6 +56,9 @@ const BIZ_LABELS: Record<string, string> = {
   DEPLOY_ORDER: '发布单',
   DEPLOY: '发布单',
   DEFECT: '缺陷',
+  // r26 第五类单据：工时评估初审（biz_type = WBS_ESTIMATE）
+  ESTIMATE: '工时评估',
+  WBS_ESTIMATE: '工时评估',
 }
 
 const route = useRoute()
@@ -81,7 +84,7 @@ function normalizeTab(value: unknown): Tab {
 }
 
 const tab = ref<Tab>(normalizeTab(route.query.tab))
-const bizType = ref<string>((route.query.bizType as string) || '')
+const bizType = ref<string>(normalizeBizFilter(route.query.bizType))
 const rows = ref<ApprovalTodoRow[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -112,10 +115,20 @@ function bizKey(row: ApprovalTodoRow): string {
 
 function bizKeyOf(rawType?: string): string {
   const raw = String(rawType ?? '').toUpperCase()
+  // 必须显式分支且排在 includes('REQ') 之前：WBS_ESTIMATE 不含 'REQ'，
+  // 不写这一行就既没有标签、筛选项也永远筛不到（AC-6）
+  if (raw === 'WBS_ESTIMATE' || raw === 'ESTIMATE') return 'ESTIMATE'
   if (raw.includes('DEPLOY')) return 'DEPLOY'
   if (raw.includes('RELEASE')) return 'RELEASE'
   if (raw.includes('DEFECT')) return 'DEFECT'
   if (raw.includes('REQ')) return 'REQUIREMENT'
+  return raw
+}
+
+/** 筛选值统一成 ESTIMATE：URL 里写 WBS_ESTIMATE 也能落到同一个选项。 */
+function normalizeBizFilter(value: unknown): string {
+  const raw = String(value ?? '').toUpperCase()
+  if (raw === 'WBS_ESTIMATE' || raw === 'ESTIMATE') return 'ESTIMATE'
   return raw
 }
 
@@ -543,6 +556,7 @@ function goRequirements(): void {
           <el-option label="版本" value="RELEASE" />
           <el-option label="发布单" value="DEPLOY" />
           <el-option label="缺陷" value="DEFECT" />
+          <el-option label="工时评估" value="ESTIMATE" />
         </el-select>
       </div>
     </header>

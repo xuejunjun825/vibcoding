@@ -92,6 +92,25 @@ public final class RequirementDtos {
     public record QuickTestRequest(String result, String note) {
     }
 
+    /**
+     * 提交工时评估（r26）。沿用既有 {@code @JsonAnySetter} 风格：未知字段可被显式 400，
+     * 而不是被 Jackson 静默忽略。
+     */
+    public static class SubmitEstimateRequest {
+        public BigDecimal estimateDays;
+        public String note;
+        private final Map<String, Object> extra = new LinkedHashMap<>();
+
+        @JsonAnySetter
+        public void any(String name, Object value) {
+            extra.put(name, value);
+        }
+
+        public Map<String, Object> extra() {
+            return extra;
+        }
+    }
+
     public record CreateCommand(String type, String title, String description, List<Long> domainIds,
                                 String priority, LocalDate expectedDeliveryDate, Long parentId,
                                 Long ownerUserId, BigDecimal estimateDays, BigDecimal actualDays) {

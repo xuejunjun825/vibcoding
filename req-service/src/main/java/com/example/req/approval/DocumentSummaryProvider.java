@@ -21,4 +21,14 @@ public interface DocumentSummaryProvider {
     Map<String, Object> attributes(long tenantId, long bizId);
 
     Map<String, Object> summary(long tenantId, long bizId, long viewerId);
+
+    /**
+     * 实例感知的摘要（r26 新增，默认退回三参版本，因此既有实现零改动）。
+     *
+     * <p>单据值会随业务对象变化（例如需求人天被改），审批中心要看的是<b>提交时</b>的快照，
+     * 只有拿到实例才能读 SUBMIT 流水里的 {@code document}。</p>
+     */
+    default Map<String, Object> summary(ApprovalInstance instance, long viewerId) {
+        return summary(instance.getTenantId(), instance.getBizId(), viewerId);
+    }
 }

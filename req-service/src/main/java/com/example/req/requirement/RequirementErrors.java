@@ -4,6 +4,7 @@ import com.example.platform.common.error.ApiException;
 import com.example.platform.contract.GateBlocker;
 import com.example.platform.contract.GateDecision;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -27,6 +28,9 @@ public final class RequirementErrors {
     public static final String REVIEW_APPROVAL_REQUIRED = "REVIEW_APPROVAL_REQUIRED";
     public static final String APPROVAL_UNAVAILABLE = "APPROVAL_UNAVAILABLE";
     public static final String FORBIDDEN = "FORBIDDEN";
+    /** 工时评估前置门（r26）。 */
+    public static final String ESTIMATE_NOT_APPROVED = "ESTIMATE_NOT_APPROVED";
+    public static final String ESTIMATE_ALREADY_APPROVED = "ESTIMATE_ALREADY_APPROVED";
 
     private RequirementErrors() {
     }
@@ -91,6 +95,27 @@ public final class RequirementErrors {
 
     public static ApiException approvalUnavailable() {
         return new ApiException(503, APPROVAL_UNAVAILABLE, "审批引擎不可用，无法发起评审", Map.of());
+    }
+
+    /**
+     * 工时评估门（r26）：detail 恰好三键 {@code requirementId / status / required}，status 取六态之一
+     * （缺省按 NONE）。{@code ApiException} 会丢弃 null 值并重建 map，故键集合是契约、顺序不是。
+     */
+    public static ApiException estimateNotApproved(long requirementId, String status) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("requirementId", requirementId);
+        detail.put("status", status == null ? "NONE" : status);
+        detail.put("required", WbsEstimateViews.EstimateView.REQUIRED);
+        return new ApiException(409, ESTIMATE_NOT_APPROVED,
+                "排期/开始开发前必须先通过工时评估", detail);
+    }
+
+    /** 已有生效的评估单（人天未变或变化仍在 ±20% 内），不重复建单。 */
+    public static ApiException estimateAlreadyApproved(long requirementId, Long instanceId) {
+        return new ApiException(409, ESTIMATE_ALREADY_APPROVED,
+                "该需求已有生效的工时评估单；若人天确有较大变化（超过 20%），请修改人天后重新提交",
+                instanceId == null ? Map.of("requirementId", requirementId)
+                        : Map.of("requirementId", requirementId, "instanceId", instanceId));
     }
 
     public static ApiException forbidden(String message) {

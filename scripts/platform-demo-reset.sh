@@ -14,6 +14,8 @@
 #   6. r25：厂商视角不能是空页。VEN-A 承接链（DEMO-R-09/10/11）已进 DEMO-REL-1，本节末尾新增
 #      5 条**真实登录 + 调 API** 的断言（vpm1 版本 / vpm1 用例 / vendor1 版本 / admin 版本 / admin 用例）：
 #      查库只能证明数据在，ScopeSql 放不放行只有真登录才证得了；空值一律判失败，不许退化成永真。
+#   7. r26：工时评估门不能把演示卡死。重置在 Tx2 走审批引擎给 11 条非 BUS 需求各建一张**已通过**的
+#      评估单（发起=需求负责人、审批=域负责人，不绕过引擎的 assignee 校验），本脚本复核 11 / 0 / 11。
 #
 # 不进 make test / platform-up / platform-seed（AC-14）：重置会删掉业务实例数据，
 # 只能由人（或演示前的一次手工动作）触发。
@@ -29,9 +31,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 FAIL=0
 CASE=0
-# 本脚本固定 66 项断言（r25 起，原 61 项 + 厂商视角 5 项）。断言只增：新增/删除断言时同步改这里，
-# 末尾会校验实际执行数 == 声明数，漂移直接红——否则「66/66」会变成一句没人维护的祝福。
-TOTAL_CHECKS=66
+# 本脚本固定 69 项断言（r26 起，原 66 项 + 工时评估单 3 项）。断言只增：新增/删除断言时同步改这里，
+# 末尾会校验实际执行数 == 声明数，漂移直接红——否则「69/69」会变成一句没人维护的祝福。
+TOTAL_CHECKS=69
 FAIL_TRANSPORT=0
 FAIL_API=0
 FAIL_ASSERT=0
@@ -218,6 +220,12 @@ check_count probeReports   0 "报表探针残留 = 0（诊断信号）"
 # 键名与 DemoFixture 的常量一一对应，期望值仍只有服务端一处拥有（这里只做跨进程搬运）。
 check_count testStrategies 0 "测试策略（派生自 release，重置后为 0）"
 check_count gateResidue    0 "门禁 RUN_TAG 残留（wf_definition/test_module/test_env 合计）= 0"
+
+# r26：工时评估单（第五类审批单据）必须开箱即通——11 条非 BUS 需求各一张已通过的单、在途 0。
+# 演示不能卡在新门上：没有这三项，「概览卡片全是未评估 / 动作行全禁用」这种回退只能靠人眼发现。
+check_count estimateApproved     11 "已通过工时评估单 = 11（4 PDR + 7 RD）"
+check_count estimatePending       0 "在途工时评估单 = 0（演示里的门全部放行）"
+check_count estimateRequirements 11 "有生效评估单的需求 = 11（不重复建单）"
 
 NOTIFY="$(printf '%s' "${C1}" | jq -r '.notifications // empty')"
 [[ -n "${NOTIFY}" && "${NOTIFY}" -eq 4 ]] \

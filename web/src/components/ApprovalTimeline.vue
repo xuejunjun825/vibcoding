@@ -16,8 +16,10 @@ const props = withDefaults(
     active?: boolean
     pendingLabel?: string
     dense?: boolean
+    /** 额外的动作文案（如需求动态里的 ESTIMATE_* 事件）；命中优先于词典 */
+    labels?: Record<string, string>
   }>(),
-  { active: false, pendingLabel: '等待后续审批节点', dense: false },
+  { active: false, pendingLabel: '等待后续审批节点', dense: false, labels: () => ({}) },
 )
 
 const expanded = ref<Set<number>>(new Set())
@@ -33,9 +35,9 @@ const rows = computed(() => props.events ?? [])
 
 const dict = useDictStore()
 
-/** 动作优先用中文词典；未收录的动作原样显示，避免“看不懂的英文”和“猜错的中文”两头踩 */
+/** 动作优先用中文词典；调用方传入的 labels（需求动态的评估事件）优先于词典 */
 function actionText(event: ApprovalTimelineEvent): string {
-  return dict.actionLabel(event.action) || event.action
+  return props.labels[event.action] || dict.actionLabel(event.action) || event.action
 }
 
 function nodeState(index: number): 'done' | 'current' {

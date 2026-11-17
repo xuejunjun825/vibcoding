@@ -25,7 +25,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 演示数据重置：把租户的业务实例数据清空，重建一条「12 需求小链路」。
@@ -37,8 +39,11 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>四个设计约束（PRD AC-13 / AC-14）：</p>
  * <ol>
- *   <li><b>单事务</b>：{@link #reset()} 上 {@code @Transactional}，任何一步失败（含不变量违反）都整体
- *       回滚——半重置的演示数据比没重置更难排查。</li>
+ *   <li><b>两段事务</b>：{@link #reset()} 只是编排入口，Tx1 {@link #resetBusiness()} 用 JDBC 重建业务
+ *       实例数据，Tx2 {@link DemoEstimateFixture#seedDemo()} 走审批引擎（JPA）建 11 张已通过的工时
+ *       评估单。为什么不能同事务：引擎写入在同一事务里尚未 flush，Tx1 末尾的 {@code counts()} 查
+ *       {@code wf_instance} 会看不到行，自检就把「刚建好的评估单」判成缺失。两段各自失败各自回滚，
+ *       任何一步失败（含不变量违反）都不会留下半套演示数据。</li>
  *   <li><b>只删行</b>：绝不 {@code TRUNCATE}/{@code DROP}，逐表 {@code DELETE ... WHERE tenant_id = ?}；
  *       账号/角色/域/厂商/组织/指标定义/字典/集成配置一律保留；{@code test_module}/{@code wf_definition}/
  *       {@code test_env} 的<b>种子行</b>也保留，只清门禁按 RUN_TAG 命名的探针行
@@ -78,17 +83,23 @@ public class DemoResetService {
     private final SysDb db;
     private final NamedParameterJdbcTemplate namedJdbc;
     private final RbacSeeder rbacSeeder;
+    private final DemoEstimateFixture estimates;
+    private final TransactionTemplate transactions;
     private final boolean enabled;
     private final String tenantCode;
 
     public DemoResetService(SysDb db,
                             NamedParameterJdbcTemplate namedJdbc,
                             RbacSeeder rbacSeeder,
+                            DemoEstimateFixture estimates,
+                            PlatformTransactionManager transactionManager,
                             @Value("${platform.seed.enabled:false}") boolean enabled,
                             @Value("${platform.tenant:" + DemoFixture.TENANT_CODE + "}") String tenantCode) {
         this.db = db;
         this.namedJdbc = namedJdbc;
         this.rbacSeeder = rbacSeeder;
+        this.estimates = estimates;
+        this.transactions = new TransactionTemplate(transactionManager);
         this.enabled = enabled;
         this.tenantCode = tenantCode == null || tenantCode.isBlank()
                 ? DemoFixture.TENANT_CODE : tenantCode.trim();
@@ -108,13 +119,38 @@ public class DemoResetService {
     }
 
     /**
-     * 清空并重建演示数据，返回计数表（表名 → 行数 + 不变量实测值）。
+     * 清空并重建演示数据（两段事务编排），返回计数表（表名 → 行数 + 不变量实测值）。
      *
-     * @throws ApiException 409 {@code DEMO_RESET_INVARIANT}——不变量不满足，事务整体回滚
+     * @throws ApiException 409 {@code DEMO_RESET_INVARIANT}——不变量不满足，当前段整体回滚
      * @throws ApiException 409 {@code DEMO_RESET_TENANT}——租户或种子数据缺失（先跑 platform-seed）
      */
-    @Transactional
     public Map<String, Long> reset() {
+        // Tx1：业务实例数据（JDBC）。放在 TransactionTemplate 里而不是直接调 @Transactional 方法，
+        // 是为了避免自调用绕过代理——那样 Tx1 根本没有事务，删除会逐条自动提交。
+        Map<String, Long> counts = transactions.execute(status -> resetBusiness());
+        Map<String, Long> merged = new LinkedHashMap<>(counts == null ? Map.of() : counts);
+
+        // Tx2：工时评估单（JPA/审批引擎）。必须独立成段：引擎的写入在同一事务里尚未 flush，
+        // 混进 Tx1 会让下面这次 counts() 读到 0 张单，自检直接误报。
+        Integer seeded = transactions.execute(status -> estimates.seedDemo());
+        merged.putAll(estimateCounts());
+        List<String> violations = estimateViolations(merged);
+        if (!violations.isEmpty()) {
+            throw new ApiException(409, "DEMO_RESET_INVARIANT",
+                    "工时评估夹具不变量不满足（业务数据已重建，评估单已回滚）："
+                            + String.join("；", violations), Map.of());
+        }
+        log.info("demo-reset: tenant={} 重建完成，评估单 {} 张 counts={}", tenantCode, seeded, merged);
+        return merged;
+    }
+
+    /**
+     * Tx1：清空并重建业务实例数据（需求 → 关联 → 用例 → 计划 → 缺陷 → 任务 → 通知 → 报表）。
+     *
+     * <p>自带业务侧不变量自检；评估单的 3 条不变量由 {@link #reset()} 在 Tx2 之后核对。</p>
+     */
+    @Transactional
+    public Map<String, Long> resetBusiness() {
         long tenantId = tenantId();
         Map<String, Long> refs = references(tenantId);
 
@@ -138,8 +174,28 @@ public class DemoResetService {
             throw new ApiException(409, "DEMO_RESET_INVARIANT",
                     "演示数据不变量不满足（已整体回滚）：" + String.join("；", violations), Map.of());
         }
-        log.info("demo-reset: tenant={} 重建完成 counts={}", tenantCode, counts);
+        log.info("demo-reset: tenant={} 业务数据重建完成 counts={}", tenantCode, counts);
         return counts;
+    }
+
+    /** 评估单计数（键名与 {@link DemoEstimateFixture#counts()} 一致，Long 化供计数表合并）。 */
+    private Map<String, Long> estimateCounts() {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        estimates.counts().forEach((key, value) -> counts.put(key,
+                value instanceof Number number ? number.longValue() : 0L));
+        return counts;
+    }
+
+    /** r26：评估单三条不变量——11 张已通过 / 在途 0 / 覆盖 11 条需求（不重复建单）。 */
+    private List<String> estimateViolations(Map<String, Long> counts) {
+        List<String> violations = new ArrayList<>();
+        expect(violations, "已通过工时评估单", counts.get("estimateApproved"),
+                DemoFixture.ESTIMATE_APPROVED_COUNT);
+        expect(violations, "在途工时评估单", counts.get("estimatePending"),
+                DemoFixture.ESTIMATE_PENDING_COUNT);
+        expect(violations, "有生效评估单的需求", counts.get("estimateRequirements"),
+                DemoFixture.ESTIMATE_REQUIREMENT_COUNT);
+        return violations;
     }
 
     /**

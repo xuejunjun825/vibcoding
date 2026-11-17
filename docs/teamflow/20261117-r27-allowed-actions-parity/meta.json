@@ -1,0 +1,7 @@
+{
+  "reqId": "req-27",
+  "runId": "tf-mwk3086h-ojufgx",
+  "title": "修三件事：①需求池列表接口 /api/req/requirements 返回的 allowedActions 没有按调用者权限与工时评估门过滤（列表给 [\"sc",
+  "mode": "lite",
+  "createdAt": 1794883017869
+}

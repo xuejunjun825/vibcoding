@@ -189,29 +189,34 @@ public class ApprovalEngine {
         ApprovalTask task = store.lockTask(taskId);
         assertPending(instance, task);
         assertAssignee(task, actor);
+        // AC-4：驳回必须带原因。校验在任何写入（含关闭待办）之前，越权/已处理仍先按 403/409 返回，
+        // 与减签同一口径（REASON_REQUIRED，400），否则实例会被静默驳回、需求侧拿不到「为什么」。
+        if (comment == null || comment.isBlank()) {
+            throw ApprovalException.badRequest(ApprovalException.REASON_REQUIRED, "驳回必须填写原因");
+        }
+        String reason = comment.strip();
 
         LocalDateTime now = LocalDateTime.now(clock);
         task.setStatus(ApprovalTask.STATUS_REJECTED);
         task.setResult(ApprovalTask.RESULT_REJECT);
-        task.setComment(comment);
+        task.setComment(reason);
         task.setHandledAt(now);
         task.setUpdatedAt(now);
         task.setUpdatedBy(actor.userId());
         store.saveTask(task);
-        history(instance, task, ApprovalHistory.REJECT, actor.userId(), comment, null);
+        history(instance, task, ApprovalHistory.REJECT, actor.userId(), reason, null);
 
         cancelPendingAt(instance, null, task.getId(), actor.userId(), "实例被驳回，待办关闭");
         instance.finish(ApprovalInstance.STATUS_REJECTED, now);
         instance.setUpdatedBy(actor.userId());
         store.saveInstance(instance);
-        history(instance, task, ApprovalHistory.INSTANCE_REJECTED, actor.userId(), comment,
+        history(instance, task, ApprovalHistory.INSTANCE_REJECTED, actor.userId(), reason,
                 Map.of("nodeKey", task.getNodeKey()));
 
-        callback(instance).ifPresent(cb -> cb.onRejected(instance.getBizId(), instance.getId(),
-                comment == null ? "" : comment));
+        callback(instance).ifPresent(cb -> cb.onRejected(instance.getBizId(), instance.getId(), reason));
         notifier.notify(instance.getInitiatorId(), "APPROVAL_RESULT", "审批被驳回",
                 "单据 " + instance.getBizType() + "#" + instance.getBizId() + " 在节点「"
-                        + safeName(task) + "」被驳回" + (comment == null || comment.isBlank() ? "" : "：" + comment),
+                        + safeName(task) + "」被驳回：" + reason,
                 instance.getBizType(), instance.getBizId());
     }
 
