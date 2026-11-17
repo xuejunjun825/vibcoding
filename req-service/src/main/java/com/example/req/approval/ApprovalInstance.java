@@ -24,6 +24,11 @@ public class ApprovalInstance {
     public static final String STATUS_APPROVED = "APPROVED";
     public static final String STATUS_REJECTED = "REJECTED";
     public static final String STATUS_WITHDRAWN = "WITHDRAWN";
+    /**
+     * 已作废（r26）：重提时旧的在途单据置为该终态，保留历史可追溯但不占用唯一键。
+     * {@code status} 列长 16，容纳该值无需迁移。
+     */
+    public static final String STATUS_SUPERSEDED = "SUPERSEDED";
 
     /** 唯一键里的「在途」标记。 */
     public static final Integer ACTIVE = 1;

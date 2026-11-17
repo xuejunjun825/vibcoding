@@ -1,36 +1,273 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { ApprovalInstanceDetail, ApprovalTimelineEvent, RequirementDetail } from '@/api/types'
+import { computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { submitEstimate } from '@/api/req'
+import type {
+  ApprovalInstanceDetail,
+  ApprovalTimelineEvent,
+  EstimateBlock,
+  RequirementDetail,
+} from '@/api/types'
 import ApprovalTimeline from '@/components/ApprovalTimeline.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import { usePermission } from '@/composables/usePermission'
 import { formatDate, formatDateTime, formatDays } from '@/utils/format'
-import { childInfo, typeLabel, usePlatformDict } from '@/views/req/platform'
+import {
+  ESTIMATE_CTA_LABEL,
+  ESTIMATE_EVENT_LABEL,
+  ESTIMATE_META,
+  ESTIMATE_STALE_REASON,
+  ESTIMATE_SUPERSEDED_REASON,
+  estimateDeviationLabel,
+  estimateGateTip,
+  estimateStatusOf,
+} from '@/views/req/estimate'
+import { childInfo, messageOf, typeLabel, usePlatformDict } from '@/views/req/platform'
 
 /**
  * P2 · 概览 tab：左字段网格，右审批进度小卡 + 最近 5 条动态。
  * 父需求的人天来自子需求汇总，只读并带锁标记（DESIGN §5 P2）。
+ *
+ * r26：顶部整宽「工时评估」卡片（六态 + 提交弹窗）。卡片门提示与动作行提示
+ * 共用 `estimateGateTip()`，禁在模板里拼字符串（AC-13 逐字一致）。
  */
 const props = defineProps<{
   detail: RequirementDetail
   approval: ApprovalInstanceDetail | null
   approvalLoading: boolean
   timeline: ApprovalTimelineEvent[]
+  /** 工时评估块；BUS 或老后端为 null（NONE 是完整对象，不是空态） */
+  estimate: EstimateBlock | null
 }>()
 
-const emit = defineEmits<{ (event: 'open-approval'): void }>()
+const emit = defineEmits<{
+  (event: 'open-approval'): void
+  (event: 'submitted'): void
+}>()
 
 const { domainName, vendorName, userName } = usePlatformDict()
+const { can } = usePermission()
 
 const rollup = computed(() => childInfo(props.detail))
 const isParent = computed(() => rollup.value.childCount > 0)
 const pendingTasks = computed(() => (props.approval?.tasks ?? []).filter((task) => task.status === 'PENDING'))
-const recent = computed(() => props.timeline.slice(0, 5))
+/** 最近 5 条 = 时间线末尾（升序渲染），不能取头部，否则评估事件永远进不来 */
+const recent = computed(() => props.timeline.slice(-5))
 const currentNode = computed(() => props.approval?.instance.currentNode ?? '')
 const approvalStatus = computed(() => props.approval?.instance.status ?? '')
+
+// —— 工时评估卡片（r26） ——
+const estimateStatus = computed(() => estimateStatusOf(props.estimate))
+const estimateMeta = computed(() => ESTIMATE_META[estimateStatus.value])
+const gateTip = computed(() => estimateGateTip(estimateStatus.value))
+const currentDays = computed(() => props.detail.estimateDays ?? null)
+/** PENDING/REJECTED 显示待审单据人天；APPROVED/STALE 显示已通过人天 */
+const assessedDays = computed(() => props.estimate?.approvedDays ?? props.estimate?.proposedDays ?? null)
+const deviation = computed(() => estimateDeviationLabel(currentDays.value, assessedDays.value))
+const approverName = computed(() =>
+  props.estimate?.approverId != null ? userName(props.estimate.approverId) : '—',
+)
+/** 无评估单时卡片仍渲染，只把「提交评估」当唯一 CTA */
+const canSubmitEstimate = computed(() => can('req:deliver'))
+const canResubmitEstimate = computed(() =>
+  ['NONE', 'REJECTED', 'SUPERSEDED', 'STALE'].includes(estimateStatus.value),
+)
+const hasInstance = computed(() => props.estimate?.instanceId != null)
+
+const metaRow = computed(() => {
+  const block = props.estimate
+  if (!block) return ''
+  switch (estimateStatus.value) {
+    case 'PENDING':
+      return `提交人 ${userName(props.detail.ownerId)} · 提交于 ${formatDateTime(block.submittedAt)}`
+    case 'APPROVED':
+    case 'STALE':
+      return block.decidedAt
+        ? `审批人 ${approverName.value} · 通过于 ${formatDateTime(block.decidedAt)}`
+        : `审批人 ${approverName.value}`
+    case 'REJECTED':
+      return block.decidedAt
+        ? `驳回人 ${approverName.value} · ${formatDateTime(block.decidedAt)}`
+        : `驳回人 ${approverName.value}`
+    case 'SUPERSEDED':
+      return block.decidedAt ? `作废于 ${formatDateTime(block.decidedAt)}` : ''
+    default:
+      return ''
+  }
+})
+
+const reasonText = computed(() => {
+  const block = props.estimate
+  if (!block) return ''
+  if (estimateStatus.value === 'REJECTED') return `驳回原因：${block.reason ?? '—'}`
+  if (estimateStatus.value === 'SUPERSEDED') return ESTIMATE_SUPERSEDED_REASON
+  if (estimateStatus.value === 'STALE') {
+    if (block.approvedDays != null && currentDays.value != null) {
+      return `人天已由 ${formatDays(block.approvedDays)} 调整为 ${formatDays(currentDays.value)}（${deviation.value}），超过 ±20%，评估已失效。`
+    }
+    return ESTIMATE_STALE_REASON
+  }
+  return ''
+})
+
+// —— 提交评估弹窗 ——
+const dialogOpen = ref(false)
+const formDays = ref<number | undefined>()
+const formNote = ref('')
+const formError = ref('')
+const submitting = ref(false)
+const flash = ref(false)
+
+const dialogTitle = computed(() =>
+  estimateStatus.value === 'NONE' ? '提交工时评估' : '重新提交工时评估',
+)
+/** 重提时提示上次单据人天，避免负责人凭记忆重填 */
+const lastDaysHint = computed(() => {
+  if (estimateStatus.value === 'NONE' || props.estimate?.proposedDays == null) return ''
+  return `上次评估 ${formatDays(props.estimate.proposedDays)}`
+})
+
+function openEstimateDialog(): void {
+  if (!canSubmitEstimate.value) return
+  formDays.value = props.estimate?.proposedDays ?? props.detail.estimateDays ?? undefined
+  formNote.value = ''
+  formError.value = ''
+  dialogOpen.value = true
+}
+
+function flashCard(): void {
+  flash.value = true
+  window.setTimeout(() => {
+    flash.value = false
+  }, 600)
+}
+
+async function submitForm(): Promise<void> {
+  if (!canSubmitEstimate.value) return
+  const days = Number(formDays.value ?? 0)
+  if (!Number.isFinite(days) || days <= 0) {
+    formError.value = '评估人天必须大于 0'
+    return
+  }
+  // 与后端同口径：只接受 0.5 人天的整数倍（400 INVALID_DAY_PRECISION）
+  if (Math.round(days * 2) !== days * 2) {
+    formError.value = '评估人天必须按 0.5 人天为步长填写'
+    return
+  }
+  if (formNote.value.length > 500) {
+    formError.value = '说明最多 500 字'
+    return
+  }
+  submitting.value = true
+  formError.value = ''
+  try {
+    await submitEstimate(props.detail.id, {
+      estimateDays: days,
+      note: formNote.value.trim() || undefined,
+    })
+    ElMessage.success('工时评估已提交，等待审批')
+    dialogOpen.value = false
+    flashCard()
+    emit('submitted')
+  } catch (error) {
+    const status = (error as { status?: number }).status
+    const code = (error as { code?: string }).code
+    // 已通过且人天未变：不关窗，行内说明并刷新卡片（AC-4 / §3.6）
+    if (status === 409 && code === 'ESTIMATE_ALREADY_APPROVED') {
+      formError.value = messageOf(error) || '该需求已通过工时评估且人天未变，无需重新提交'
+      emit('submitted')
+      return
+    }
+    if (status === 403) {
+      formError.value = '无权提交工时评估'
+      return
+    }
+    formError.value = messageOf(error)
+  } finally {
+    submitting.value = false
+  }
+}
 </script>
 
 <template>
   <div class="overview">
+    <section
+      v-if="detail.type !== 'BUS'"
+      class="surface surface--pad estimate-card"
+      :class="{ 'is-flash': flash }"
+      data-test="estimate-card"
+      :data-status="estimateStatus"
+      aria-live="polite"
+    >
+      <header class="estimate-card__head">
+        <div class="estimate-card__title-row">
+          <h3 class="estimate-card__title">工时评估</h3>
+          <span class="estimate-pill" :class="`estimate-pill--${estimateMeta.tone}`">
+            {{ estimateMeta.label }}
+          </span>
+        </div>
+        <div class="estimate-card__cta">
+          <el-button
+            v-if="canResubmitEstimate"
+            size="small"
+            data-test="estimate-submit"
+            :disabled="!canSubmitEstimate || submitting"
+            :title="canSubmitEstimate ? '' : '需要权限：req:deliver'"
+            @click="openEstimateDialog"
+          >
+            {{ estimateStatus === 'NONE' ? ESTIMATE_CTA_LABEL.submit : ESTIMATE_CTA_LABEL.resubmit }}
+          </el-button>
+          <el-button v-if="hasInstance" size="small" @click="emit('open-approval')">
+            {{ ESTIMATE_CTA_LABEL.view }}
+          </el-button>
+        </div>
+      </header>
+
+      <dl class="estimate-metrics">
+        <div>
+          <dt>当前人天</dt>
+          <dd class="num">{{ formatDays(currentDays) }}</dd>
+        </div>
+        <div>
+          <dt>评估人天</dt>
+          <dd class="num">{{ formatDays(assessedDays) }}</dd>
+        </div>
+        <div>
+          <dt>偏差</dt>
+          <dd class="num">{{ deviation }}</dd>
+        </div>
+        <div>
+          <dt>审批人</dt>
+          <dd>{{ approverName }}</dd>
+        </div>
+      </dl>
+
+      <p v-if="metaRow" class="estimate-card__meta">{{ metaRow }}</p>
+      <p v-if="estimate?.note" class="estimate-card__note">
+        评估说明：{{ estimate.note }}
+      </p>
+      <p
+        v-if="reasonText"
+        class="estimate-reason"
+        :class="estimateStatus === 'REJECTED' ? 'estimate-reason--danger' : 'estimate-reason--warning'"
+      >
+        {{ reasonText }}
+      </p>
+      <p v-if="gateTip" class="estimate-gate" data-test="estimate-gate-tip">
+        <svg class="estimate-gate__lock" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <path
+            d="M3.5 5V3.75a2.5 2.5 0 0 1 5 0V5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.2"
+            stroke-linecap="round"
+          />
+          <rect x="2.25" y="5" width="7.5" height="5.25" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.2" />
+        </svg>
+        <span class="estimate-gate__text">{{ gateTip }}</span>
+      </p>
+    </section>
+
     <div class="overview__grid">
       <section class="surface surface--pad overview__fields">
         <h3 class="overview__title">基本信息</h3>
@@ -114,6 +351,7 @@ const approvalStatus = computed(() => props.approval?.instance.status ?? '')
           <ApprovalTimeline
             v-if="recent.length"
             :events="recent"
+            :labels="ESTIMATE_EVENT_LABEL"
             dense
             :active="approvalStatus === 'PENDING'"
             pending-label="等待后续审批节点"
@@ -122,10 +360,50 @@ const approvalStatus = computed(() => props.approval?.instance.status ?? '')
         </section>
       </aside>
     </div>
+
+    <el-dialog v-model="dialogOpen" :title="dialogTitle" width="520px" append-to-body>
+      <el-form label-position="top" size="small" @submit.prevent>
+        <el-form-item label="评估人天" required>
+          <el-input-number
+            v-model="formDays"
+            :min="0.5"
+            :step="0.5"
+            :precision="1"
+            controls-position="right"
+            style="width: 160px"
+            aria-required="true"
+          />
+          <span class="estimate-dialog__suffix">人天，按 0.5 步长</span>
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input
+            v-model="formNote"
+            type="textarea"
+            :rows="3"
+            :maxlength="500"
+            show-word-limit
+            placeholder="补充评估依据（可选）"
+          />
+        </el-form-item>
+      </el-form>
+      <p v-if="lastDaysHint" class="estimate-dialog__hint">{{ lastDaysHint }}</p>
+      <p v-if="formError" class="dialog-error">{{ formError }}</p>
+      <template #footer>
+        <el-button @click="dialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" :disabled="submitting" @click="submitForm">
+          {{ ESTIMATE_CTA_LABEL.submit }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .overview__grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
@@ -142,6 +420,162 @@ const approvalStatus = computed(() => props.approval?.instance.status ?? '')
   font-size: 14px;
   font-weight: 600;
   color: var(--text-title);
+}
+/* ---- 工时评估卡片（r26） ---- */
+.estimate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.estimate-card.is-flash {
+  animation: estimate-flash 600ms var(--ease);
+}
+@keyframes estimate-flash {
+  from {
+    background: var(--flash-ok);
+  }
+  to {
+    background: var(--bg-card);
+  }
+}
+.estimate-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.estimate-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.estimate-card__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-title);
+}
+.estimate-card__cta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.estimate-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--r-ctl);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.estimate-pill--success {
+  background: var(--color-success-bg);
+  color: var(--success-ink);
+}
+.estimate-pill--warning {
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
+}
+.estimate-pill--danger {
+  background: var(--color-danger-bg);
+  color: var(--danger-ink);
+}
+.estimate-pill--info {
+  background: var(--color-info-bg);
+  color: var(--info-ink);
+}
+.estimate-pill--muted {
+  background: var(--bg-hover);
+  color: var(--text-muted-aa);
+}
+.estimate-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--bg-hover);
+  border-radius: var(--r-ctl);
+}
+.estimate-metrics dt {
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+.estimate-metrics dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-title);
+  font-variant-numeric: tabular-nums;
+}
+.estimate-metrics dd.num {
+  font-size: 18px;
+  font-weight: 600;
+}
+.estimate-card__meta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+.estimate-card__note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-body);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.estimate-reason {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--r-ctl);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.estimate-reason--danger {
+  background: var(--color-danger-bg);
+  color: var(--danger-ink);
+}
+.estimate-reason--warning {
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
+}
+.estimate-gate {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+  line-height: 1.6;
+}
+.estimate-gate__lock {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  margin-top: 2px;
+  color: currentColor;
+}
+.estimate-gate__text {
+  min-width: 0;
+}
+.estimate-dialog__suffix {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+.estimate-dialog__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+.dialog-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--danger-ink);
 }
 .overview__card-head {
   display: flex;
@@ -245,6 +679,11 @@ const approvalStatus = computed(() => props.approval?.instance.status ?? '')
 @media (max-width: 1100px) {
   .overview__grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .estimate-card.is-flash {
+    animation: none;
   }
 }
 </style>

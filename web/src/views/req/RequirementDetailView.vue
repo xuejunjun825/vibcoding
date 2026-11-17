@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { assignVendor, deliverRequirement, getApprovalInstance, getRequirement, actOnRequirement, listApprovalMine } from '@/api/req'
@@ -7,14 +7,24 @@ import { listDictionaryUsers, listDictionaryVendors } from '@/api/dictionaries'
 import type { DictionaryUser, DictionaryVendor } from '@/api/dictionaries'
 import type {
   ApprovalInstanceDetail,
+  ApprovalTimelineEvent,
   ApprovalTodoRow,
+  EstimateBlock,
   RequirementDetail,
+  RequirementDetailResponse,
 } from '@/api/types'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PriorityDot from '@/components/PriorityDot.vue'
 import ScopeChip from '@/components/ScopeChip.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import { usePermission } from '@/composables/usePermission'
+import {
+  ESTIMATE_EVENT,
+  estimateGateTip,
+  estimateStatusOf,
+  gateActionOfType,
+} from '@/views/req/estimate'
 import ApprovalTab from '@/views/req/tabs/ApprovalTab.vue'
 import ChildrenTab from '@/views/req/tabs/ChildrenTab.vue'
 import DefectsTab from '@/views/req/tabs/DefectsTab.vue'
@@ -33,6 +43,7 @@ import {
   normalizeRequirementDetail,
   normalizeTimeline,
   typeLabel,
+  usePlatformDict,
 } from '@/views/req/platform'
 import { useAuthStore } from '@/stores/auth'
 import { useDictStore } from '@/stores/dict'
@@ -83,6 +94,76 @@ const footerActionKeys = new Set(['submit', 'withdraw'])
 const headerActions = computed(() => allowedActions.value.filter((action) => !footerActionKeys.has(action)))
 const approvalTimeline = computed(() => normalizeTimeline(approval.value?.timeline))
 
+// —— 工时评估单（r26，AC-13） ——
+// 动作行口径「渲染看权限、禁用看门」：受门动作在门未过（或无权限）时**仍渲染**但 disabled，
+// 并给出一句原因；有权限且门已过、只是当前状态不允许时保持既有行为（隐藏，不编文案）。
+const { canAction } = usePermission()
+const estimate = computed<EstimateBlock | null>(() => detail.value?.estimate ?? null)
+const estimateStatus = computed(() => estimateStatusOf(estimate.value))
+const gateOpen = computed(() => estimateStatus.value === 'APPROVED')
+
+/**
+ * 评估事件并入「最近动态」（AC-3/AC-4，US-2）：后端把 ESTIMATE_* 写在审计表，
+ * 需求页没有动态查询接口，因此用详情里的 estimate 快照合成事件——驳回原因作为 comment 展示，
+ * 研发不必再进审批页找「为什么被驳回」。
+ */
+const { userName } = usePlatformDict()
+const estimateTimeline = computed<ApprovalTimelineEvent[]>(() => {
+  const block = estimate.value
+  if (!block?.instanceId) return []
+  const status = estimateStatus.value
+  const submitter = userName(detail.value?.ownerId)
+  const approver = block.approverId != null ? userName(block.approverId) : '审批人'
+  const events: ApprovalTimelineEvent[] = []
+  if (block.submittedAt) {
+    events.push({ action: ESTIMATE_EVENT.SUBMIT, operator: submitter, at: block.submittedAt })
+  }
+  if (!block.decidedAt) return events
+  if (status === 'APPROVED' || status === 'STALE') {
+    events.push({ action: ESTIMATE_EVENT.APPROVED, operator: approver, at: block.decidedAt })
+  } else if (status === 'REJECTED') {
+    events.push({
+      action: ESTIMATE_EVENT.REJECTED,
+      operator: approver,
+      at: block.decidedAt,
+      comment: block.reason ?? null,
+    })
+  } else if (status === 'SUPERSEDED') {
+    events.push({ action: ESTIMATE_EVENT.SUPERSEDED, operator: approver, at: block.decidedAt })
+  }
+  return events
+})
+
+/** 审批时间线 + 评估事件，按时间升序（从上到下读） */
+const timeline = computed<ApprovalTimelineEvent[]>(() => {
+  const timeOf = (event: ApprovalTimelineEvent): number => {
+    const parsed = Date.parse(event.at)
+    return Number.isNaN(parsed) ? 0 : parsed
+  }
+  return [...approvalTimeline.value, ...estimateTimeline.value].sort((a, b) => timeOf(a) - timeOf(b))
+})
+const gateAction = computed(() => gateActionOfType(detail.value?.type))
+const pinnedGateAction = computed<{ action: string; permitted: boolean } | null>(() => {
+  const action = gateAction.value
+  if (!action) return null
+  // 已在 allowedActions 里的动作照旧由常规按钮渲染，不重复出第二个入口
+  if (headerActions.value.includes(action)) return null
+  const permitted = canAction(`req.action.${action}`)
+  if (permitted && gateOpen.value) return null
+  return { action, permitted }
+})
+const gateActionTip = computed(() => {
+  const pinned = pinnedGateAction.value
+  if (!pinned) return ''
+  // 权限原因与门原因物理分离：两种文案由不同来源生成，绝不互相拼接
+  return pinned.permitted ? estimateGateTip(estimateStatus.value) : `需要权限：req.action.${pinned.action}`
+})
+
+/** 被门钉住的按钮点击不产生任何请求、不改 URL、不落 /403 —— 只有提示可读。 */
+function onPinnedClick(): void {
+  return
+}
+
 function actionLabel(action: string): string {
   return metaOf(action).label
 }
@@ -97,7 +178,10 @@ async function load(): Promise<void> {
   loadError.value = ''
   errorStatus.value = undefined
   try {
-    detail.value = normalizeRequirementDetail(await getRequirement(id.value))
+    const raw: RequirementDetailResponse = await getRequirement(id.value)
+    // estimate 是 Detail 顶层字段（与 view 平级），normalizeRequirementDetail 只摊平 view，
+    // 这里补一次合并，否则评估卡片永远等于 null
+    detail.value = { ...normalizeRequirementDetail(raw), estimate: raw.estimate ?? null }
     tabCounts.children = detail.value.children.length
   } catch (error) {
     detail.value = null
@@ -133,7 +217,45 @@ async function loadApproval(): Promise<void> {
 
 async function refreshAll(): Promise<void> {
   await load()
-  await loadApproval()
+  await Promise.all([loadApproval(), loadEstimateApproval()])
+}
+
+// —— 工时评估单实例（AC-6）：按 detail.estimate.instanceId 直取 ——
+// 不能用 listApprovalMine() 的 bizType.includes('REQ') 那条路径：WBS_ESTIMATE 不含 REQ，
+// 旧过滤永远匹配不到这张单。审批动作仍只在审批中心，这里只读。
+const estimateInstance = ref<ApprovalInstanceDetail | null>(null)
+const estimateLoading = ref(false)
+const estimateError = ref('')
+
+async function loadEstimateApproval(): Promise<void> {
+  const instanceId = estimate.value?.instanceId
+  if (instanceId == null) {
+    estimateInstance.value = null
+    estimateError.value = ''
+    estimateLoading.value = false
+    return
+  }
+  estimateLoading.value = true
+  estimateError.value = ''
+  try {
+    estimateInstance.value = await getApprovalInstance(instanceId)
+  } catch (error) {
+    estimateInstance.value = null
+    estimateError.value = messageOf(error)
+  } finally {
+    estimateLoading.value = false
+  }
+}
+
+/** 「查看评估单」：切到审批页签，把只读评估块滚进视野并聚焦其标题。 */
+async function openEstimateApproval(): Promise<void> {
+  setTab('approval')
+  await nextTick()
+  const block = document.querySelector<HTMLElement>('[data-test="estimate-block"]')
+  if (!block) return
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  block.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' })
+  block.querySelector<HTMLElement>('.estimate-block__title')?.focus({ preventScroll: true })
 }
 
 function setTab(tab: TabKey): void {
@@ -145,7 +267,10 @@ function handleActionError(error: unknown): void {
   const status = (error as { status?: number }).status
   const code = (error as { code?: string }).code
   if (status === 409) {
-    actionBanner.value = { text: messageOf(error), code }
+    // 评估门的 409 与其它 409 共用既有分支（常驻 banner + 就地刷新），
+    // 但把「哪张评估单挡住了」补进文案，避免只看到一句泛化报错
+    const gateSuffix = code === 'ESTIMATE_NOT_APPROVED' ? `（${estimateGateTip(estimateStatus.value)}）` : ''
+    actionBanner.value = { text: `${messageOf(error)}${gateSuffix}`, code }
     void refreshAll()
     return
   }
@@ -339,7 +464,7 @@ watch(
 
 onMounted(async () => {
   await load()
-  await loadApproval()
+  await Promise.all([loadApproval(), loadEstimateApproval()])
 })
 </script>
 
@@ -388,7 +513,25 @@ onMounted(async () => {
             >
               {{ actionLabel(action) }}
             </el-button>
-            <span v-if="allowedActions.length === 0" class="detail__no-action">当前状态无可执行动作</span>
+            <!-- 受工时评估门约束的动作：无条件渲染、门未过时 disabled（r25 三色），
+                 点击不发请求不改 URL；原因由 estimateGateTip / 权限前缀各自生成 -->
+            <el-button
+              v-if="pinnedGateAction"
+              class="btn--disabled-reason"
+              :data-test="`action-${pinnedGateAction.action}`"
+              size="small"
+              disabled
+              :title="gateActionTip"
+              @click="onPinnedClick"
+            >
+              {{ actionLabel(pinnedGateAction.action) }}
+            </el-button>
+            <span v-if="pinnedGateAction" class="detail__gate-hint" data-test="gate-hint" aria-live="polite">
+              {{ gateActionTip }}
+            </span>
+            <span v-if="allowedActions.length === 0 && !pinnedGateAction" class="detail__no-action">
+              当前状态无可执行动作
+            </span>
           </div>
         </div>
       </header>
@@ -422,8 +565,10 @@ onMounted(async () => {
           :detail="detail"
           :approval="approval"
           :approval-loading="approvalLoading"
-          :timeline="approvalTimeline"
-          @open-approval="setTab('approval')"
+          :timeline="timeline"
+          :estimate="estimate"
+          @open-approval="openEstimateApproval"
+          @submitted="refreshAll"
         />
         <ChildrenTab v-else-if="activeTab === 'children'" :detail="detail" @decompose="decomposeOpen = true" />
         <TasksTab
@@ -439,8 +584,13 @@ onMounted(async () => {
           :loading="approvalLoading"
           :error="approvalError"
           :can-submit="canSubmit"
+          :estimate="estimate"
+          :estimate-instance="estimateInstance"
+          :estimate-loading="estimateLoading"
+          :estimate-error="estimateError"
           @changed="refreshAll"
           @submit="runSimpleAction('submit')"
+          @retry-estimate="loadEstimateApproval"
         />
         <TraceTab
           v-else-if="activeTab === 'trace'"
@@ -599,6 +749,23 @@ onMounted(async () => {
 }
 .detail__no-action {
   font-size: 12px;
+  color: var(--text-muted-aa);
+}
+/* 受门动作：保持 r25 的禁用三色（不叠 opacity、不加 pointer-events，title/内联提示仍可读） */
+.btn--disabled-reason.is-disabled,
+.btn--disabled-reason.is-disabled:hover {
+  background: var(--el-disabled-bg-color);
+  border-color: var(--el-disabled-border-color);
+  color: var(--el-disabled-text-color);
+  opacity: 1;
+  cursor: not-allowed;
+}
+/* 门/权限原因单独占一行、右对齐，避免与动作按钮抢宽度 */
+.detail__gate-hint {
+  flex: 1 0 100%;
+  text-align: right;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--text-muted-aa);
 }
 .detail__tabs {

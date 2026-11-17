@@ -173,6 +173,30 @@ class ApprovalEngineTest {
         assertEquals(view.id(), store.instanceOf(view.id()).getId());
     }
 
+    @Test
+    @DisplayName("AC-4 驳回必须带原因：缺失/空白 → 400 REASON_REQUIRED，实例与待办仍是 PENDING")
+    void rejectRequiresReasonAndKeepsInstancePending() {
+        directory.role("PMO", ALICE, BOB);
+        registry.publish(1, 1, WorkflowVersion.BIZ_REQ_REVIEW,
+                def("n1", approval("n1", "会签", WorkflowDefinition.MODE_ALL, "end", role("PMO"))));
+
+        ApprovalViews.InstanceView view = start(2007L, Map.of());
+        actors.as(ALICE);
+        long taskId = taskOf(store.tasks(view.id()), ALICE).getId();
+
+        for (String blank : new String[] {null, "", "   "}) {
+            ApprovalException error =
+                    assertThrows(ApprovalException.class, () -> engine.reject(taskId, blank));
+            assertEquals(400, error.status(), "原因缺失必须是 400，不能静默驳回");
+            assertEquals(ApprovalException.REASON_REQUIRED, error.code());
+        }
+
+        assertEquals(ApprovalInstance.STATUS_PENDING, store.instanceOf(view.id()).getStatus());
+        assertEquals(ApprovalTask.STATUS_PENDING, taskOf(store.tasks(view.id()), ALICE).getStatus());
+        assertEquals(0, callback.rejected, "校验失败不得触发单据回调");
+        assertEquals(0, countAction(view.id(), ApprovalHistory.REJECT));
+    }
+
     // ---------------------------------------------------------------- AC-8 版本
 
     @Test

@@ -258,6 +258,17 @@ public class SeedService {
         seedWorkflow(tenantId, "REQ_REVIEW", "ANY", "需求复核默认审批", apprProduct, users.get("admin"), now);
         seedWorkflow(tenantId, "RELEASE", "ANY", "版本发布默认审批", apprProduct, users.get("admin"), now);
         seedWorkflow(tenantId, "REQ_DEPLOY", "ANY", "发布单默认审批", apprAdmin, users.get("admin"), now);
+        // 第五类（r26）：工时评估初审。或签 = 产品经理 || 需求所属域负责人；ANY 类型通吃 PDR/RD。
+        // 域负责人节点靠 ApproverResolver.TYPE_DOMAIN_OWNER 读 biz_domain.owner_user_id，
+        // 而既有种子建域时没写该列 —— 不回填的话或签只剩 PRODUCT，AC-15「审批人=域负责人」不成立。
+        String apprEstimate = "{\"schemaVersion\":1,\"start\":\"n1\",\"nodes\":["
+                + "{\"key\":\"n1\",\"type\":\"APPROVAL\",\"name\":\"工时评估初审\",\"mode\":\"ANY\","
+                + "\"approvers\":[{\"type\":\"ROLE\",\"value\":\"PRODUCT\"},"
+                + "{\"type\":\"DOMAIN_OWNER\",\"value\":\"\"}],\"next\":\"end\"}]}";
+        seedWorkflow(tenantId, "WBS_ESTIMATE", "ANY", "工时评估初审（域负责人或产品经理）", apprEstimate,
+                users.get("admin"), now);
+        jdbc.update("UPDATE biz_domain SET owner_user_id = ? WHERE tenant_id = ? AND owner_user_id IS NULL",
+                users.get("pm"), tenantId);
 
         // 完整链路：BUS → 2 个 PDR → 4 个 RD
         LocalDate today = LocalDate.now();

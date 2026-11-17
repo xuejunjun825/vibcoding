@@ -8,6 +8,7 @@ import com.example.req.requirement.RequirementDtos.CreateRequest;
 import com.example.req.requirement.RequirementDtos.DeliverRequest;
 import com.example.req.requirement.RequirementDtos.DecomposeRequest;
 import com.example.req.requirement.RequirementDtos.QuickTestRequest;
+import com.example.req.requirement.RequirementDtos.SubmitEstimateRequest;
 import com.example.req.requirement.RequirementDtos.UpdateRequest;
 import com.example.req.requirement.RequirementViews.Created;
 import com.example.req.requirement.RequirementViews.Detail;
@@ -45,17 +46,20 @@ public class RequirementController {
     private final RequirementExport export;
     private final AuditService auditService;
     private final RequirementDomainValidator domainValidator;
+    private final WbsEstimateService estimateService;
 
     public RequirementController(RequirementService requirementService,
                                  RequirementPoolQuery poolQuery,
                                  RequirementExport export,
                                  AuditService auditService,
-                                 RequirementDomainValidator domainValidator) {
+                                 RequirementDomainValidator domainValidator,
+                                 WbsEstimateService estimateService) {
         this.requirementService = requirementService;
         this.poolQuery = poolQuery;
         this.export = export;
         this.auditService = auditService;
         this.domainValidator = domainValidator;
+        this.estimateService = estimateService;
     }
 
     @GetMapping
@@ -149,6 +153,21 @@ public class RequirementController {
     @PostMapping("/{id}/deliver")
     public View deliver(@PathVariable long id, @RequestBody DeliverRequest request) {
         return requirementService.deliver(id, request);
+    }
+
+    @PostMapping("/{id}/estimate")
+    public ResponseEntity<RequirementViews.EstimateCreated> submitEstimate(
+            @PathVariable long id, @RequestBody SubmitEstimateRequest request) {
+        // 未知字段一律 400：静默忽略会让前端把 estimateDays 拼错也「提交成功」。
+        if (request.extra() != null && !request.extra().isEmpty()) {
+            String field = request.extra().keySet().iterator().next();
+            throw RequirementErrors.validation("未知字段：" + field, Map.of("field", field));
+        }
+        WbsEstimateViews.EstimateView estimate =
+                estimateService.submit(id, request.estimateDays, request.note);
+        return ResponseEntity.status(201)
+                .body(new RequirementViews.EstimateCreated(estimate.instanceId(),
+                        estimate.status(), estimate));
     }
 
     @PostMapping("/{id}/quick-test")

@@ -55,6 +55,17 @@ public final class DemoFixture {
     public static final long PO1_VISIBLE = 8;
     public static final long VENDOR_A_VISIBLE = 3;
     public static final long VENDOR_B_VISIBLE = 0;
+    /**
+     * r26：演示夹具给 11 条非 BUS 需求（4 PDR + 7 RD）各建一张 APPROVED 工时评估单。
+     *
+     * <p>演示必须能「直接排期 / 直接开始开发」，所以评估门在演示数据里是已放行的；
+     * 没有这 11 张单，概览卡片全是「未评估」、动作行全是禁用，演示反而卡死。</p>
+     */
+    public static final long ESTIMATE_APPROVED_COUNT = 11;
+    /** 评估单必须全部收口：在途 0 张，否则演示里的门停在「待审核」。 */
+    public static final long ESTIMATE_PENDING_COUNT = 0;
+    /** 有生效评估单的需求数 = 11（与 {@link #ESTIMATE_APPROVED_COUNT} 一致，防重复建单）。 */
+    public static final long ESTIMATE_REQUIREMENT_COUNT = 11;
 
     /**
      * 保留行的基线状态：{@code keepFilter} 只保证「行还在」，不保证「值还是种子值」。

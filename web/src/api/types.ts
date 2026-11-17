@@ -193,6 +193,36 @@ export interface RequirementDelivery {
 }
 
 /**
+ * 工时评估块（r26 · `WBS_ESTIMATE`，后端 `WbsEstimateViews.EstimateView`）。
+ * 字段与后端 record 一一对应：改一处必须同步另一处（TECHNICAL §3.2）。
+ * `status` 六态：NONE / PENDING / APPROVED / REJECTED / SUPERSEDED / STALE。
+ */
+export interface EstimateBlock {
+  status: string
+  instanceId: number | null
+  instanceStatus: string | null
+  /** 单据人天（提交时的快照值，待审/驳回时它也用于「评估人天」列） */
+  proposedDays: number | null
+  /** 审批通过时落库的人天；未通过为 null */
+  approvedDays: number | null
+  note: string | null
+  /** 驳回原因；STALE 时为空（原因由前端固定文案说明） */
+  reason: string | null
+  approverId: number | null
+  submittedAt: string | null
+  decidedAt: string | null
+  /** 门要求的动作码（`ESTIMATE_APPROVED`），仅 409 场景使用；详情里恒 null */
+  required: string | null
+}
+
+/** `POST /requirements/{id}/estimate` 的 201 响应 */
+export interface EstimateCreated {
+  instanceId: number
+  status: string
+  estimate: EstimateBlock | null
+}
+
+/**
  * GET/详情类端点里 `RequirementViews.View` 的扁平形状（已归一）。
  * 注意：线上 `GET /requirements/{id}` 外面还包了一层，见 {@link RequirementDetailResponse}；
  * 页面统一通过 `normalizeRequirementDetail` 转成本类型，不要在页面里直接摊平。
@@ -210,6 +240,8 @@ export interface RequirementDetail extends RequirementRow {
   attachments?: AttachmentRow[]
   /** 拆解前置门（r23）；仅详情返回，列表行为 null/缺失 */
   decomposeGate?: RequirementDecomposeGate
+  /** 工时评估块（r26）；BUS 无评估单时后端给 null，NONE 是完整对象 */
+  estimate?: EstimateBlock | null
 }
 
 /**
@@ -222,6 +254,8 @@ export interface RequirementDetailResponse {
   children: RequirementRow[]
   allowedActions: string[]
   permissions?: { fields?: string[] }
+  /** r26：评估块在**顶层**（不在 view 里），`normalizeRequirementDetail` 不搬运它 */
+  estimate?: EstimateBlock | null
 }
 
 /** 创建/拆解返回 `{id,code,type,status,allowedActions}`（不是详情）。 */

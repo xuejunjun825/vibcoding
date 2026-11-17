@@ -69,7 +69,14 @@ public class RequirementService {
      * 与「执行判定」读到不同版本——那正是 r17 之前「按钮能点、接口 403」的来源。</p>
      */
     private final ActionPermissionResolver actionPermissions;
+    /**
+     * 工时评估门（r26）。用 Provider 注入：{@link WbsEstimateService} 反过来依赖本服务
+     * （提交单据要读需求），直接构造会成环。
+     */
+    private final ObjectProvider<WbsEstimateService> estimateGate;
 
+
+    /** 十参构造：保留给既有单测（不装配评估门时门与 estimate 块均不生效）。 */
     public RequirementService(RequirementRepository repository,
                               RequirementDomainRelRepository domainRelRepository,
                               RequirementStateMachine stateMachine,
@@ -80,6 +87,23 @@ public class RequirementService {
                               ObjectProvider<RequirementApprovalStarter> approvalStarter,
                               JdbcTemplate jdbcTemplate,
                               ActionPermissionResolver actionPermissions) {
+        this(repository, domainRelRepository, stateMachine, codeGenerator, auditService,
+                notificationWriter, gatePort, approvalStarter, jdbcTemplate, actionPermissions,
+                null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public RequirementService(RequirementRepository repository,
+                              RequirementDomainRelRepository domainRelRepository,
+                              RequirementStateMachine stateMachine,
+                              CodeGenerator codeGenerator,
+                              AuditService auditService,
+                              NotificationWriter notificationWriter,
+                              ObjectProvider<GatePort> gatePort,
+                              ObjectProvider<RequirementApprovalStarter> approvalStarter,
+                              JdbcTemplate jdbcTemplate,
+                              ActionPermissionResolver actionPermissions,
+                              ObjectProvider<WbsEstimateService> estimateGate) {
         this.repository = repository;
         this.domainRelRepository = domainRelRepository;
         this.stateMachine = stateMachine;
@@ -90,6 +114,7 @@ public class RequirementService {
         this.approvalStarter = approvalStarter;
         this.jdbcTemplate = jdbcTemplate;
         this.actionPermissions = actionPermissions;
+        this.estimateGate = estimateGate;
     }
 
     // ---------------------------------------------------------------- create
@@ -311,7 +336,25 @@ public class RequirementService {
                 child.getType(), child.getStatus(), child.getTitle(), child.getOwnerUserId(),
                 child.getEstimateDays(), child.getActualDays())).toList();
         return new Detail(toView(entity, rollup), childViews,
-                allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId()), Map.of());
+                gateFiltered(entity,
+                        allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId())),
+                Map.of(), estimateOf(entity));
+    }
+
+    /** 工时评估块的唯一入口（BUS 为 null，未评估为完整 NONE 对象）。 */
+    private WbsEstimateViews.EstimateView estimateOf(RequirementEntity entity) {
+        WbsEstimateService gate = estimateGate();
+        return gate == null ? null : gate.view(entity);
+    }
+
+    /** allowedActions 的受门动作过滤（r26）：与接口 409 判定同源。 */
+    private List<String> gateFiltered(RequirementEntity entity, List<String> actions) {
+        WbsEstimateService gate = estimateGate();
+        return gate == null ? actions : gate.applyGate(entity, actions);
+    }
+
+    private WbsEstimateService estimateGate() {
+        return estimateGate == null ? null : estimateGate.getIfAvailable();
     }
 
     public List<String> allowedActions(long id) {
@@ -358,7 +401,8 @@ public class RequirementService {
                     "definitionId", Objects.requireNonNullElse(definitionId, 0L),
                     "comment", Objects.requireNonNullElse(comment, ""), "operator", scope.userId()));
             return new TransitionResult(entity.getId(), from,
-                    allowedActions(entity.getType(), from, entity.getReporterId()));
+                    gateFiltered(entity,
+                            allowedActions(entity.getType(), from, entity.getReporterId())));
         }
 
         // AC-10 反向守卫：没有 APPROVED 的 REQ_REVIEW 实例时，review_pass 一律 409，
@@ -379,6 +423,15 @@ public class RequirementService {
                 if (result != null && !result.passed()) {
                     throw RequirementErrors.gateBlocked(result);
                 }
+            }
+        }
+        // r26 工时评估门：唯一插点。位置固定——403（requireWritable/authorize）→ 409
+        // ILLEGAL_TRANSITION（stateMachine.target）→ r23 既有门 → 本门；被拦时不落库、不写
+        // STATE_CHANGE、不发通知，因此这里只抛异常，不做任何写入。
+        if (entity != null) {
+            WbsEstimateService gate = estimateGate();
+            if (gate != null && gate.gated(entity.getType(), action)) {
+                gate.ensureGate(entity, action);
             }
         }
         if ("APPROVING".equals(target)) {
@@ -403,7 +456,41 @@ public class RequirementService {
                 "comment", Objects.requireNonNullElse(comment, ""), "operator", scope.userId()));
         notifyTransition(entity, from, target, comment);
         return new TransitionResult(entity.getId(), target,
-                allowedActions(entity.getType(), target, entity.getReporterId()));
+                gateFiltered(entity,
+                        allowedActions(entity.getType(), target, entity.getReporterId())));
+    }
+
+    // -------------------------------------------------------- estimate callback
+
+    /**
+     * 评估通过后落人天（r26，由 {@code WbsEstimateCallback} 在引擎事务内调用）。
+     * 需求状态不变——评估单只管人天。
+     */
+    @Transactional
+    public void applyApprovedEstimate(long requirementId, BigDecimal approvedDays, long instanceId) {
+        if (approvedDays == null) {
+            return;
+        }
+        DataScope scope = TenantContext.require();
+        RequirementEntity entity = repository.findByIdAndTenantId(requirementId, scope.tenantId())
+                .orElseThrow(() -> RequirementErrors.notFound("需求", requirementId));
+        entity.setEstimateDays(RequirementRollup.scale(approvedDays));
+        entity.setUpdatedBy(scope.userId());
+        repository.save(entity);
+        if (entity.getParentId() != null) {
+            refreshParentRollup(requireVisible(entity.getParentId()));
+        }
+        auditService.record("ESTIMATE_APPLIED", BIZ_TYPE, requirementId, Map.of(
+                "instanceId", instanceId,
+                "estimateDays", entity.getEstimateDays()));
+    }
+
+    /** 写一条需求动态（评估提交/通过/驳回/撤回），审计表即动态数据源。 */
+    @Transactional
+    public void recordEstimateEvent(long requirementId, String action,
+                                    Map<String, Object> detail) {
+        auditService.record(action, BIZ_TYPE, requirementId,
+                detail == null ? Map.of() : detail);
     }
 
     // -------------------------------------------------------------- decompose
@@ -704,7 +791,9 @@ public class RequirementService {
                 entity.getEstimateDays(), entity.getActualDays(), entity.getMrUrl(),
                 entity.getExpectedDeliveryDate(), entity.getPlanStartDate(), entity.getPlanEndDate(),
                 entity.getClosedAt(), entity.getUpdatedAt(), rollup,
-                allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId()), Map.of(),
+                gateFiltered(entity,
+                        allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId())),
+                Map.of(),
                 RequirementViews.DecomposeGate.from(
                         RequirementRules.decomposeGate(entity.getType(), entity.getStatus()),
                         entity.getStatus()));

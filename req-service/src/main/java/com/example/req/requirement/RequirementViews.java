@@ -47,7 +47,13 @@ public final class RequirementViews {
     }
 
     public record Detail(View view, List<Child> children, List<String> allowedActions,
-                         Map<String, Boolean> permissions) {
+                         Map<String, Boolean> permissions,
+                         WbsEstimateViews.EstimateView estimate) {
+    }
+
+    /** 提交评估 201 响应（{@code instanceId} 供前端直接跳审批单）。 */
+    public record EstimateCreated(long instanceId, String status,
+                                  WbsEstimateViews.EstimateView estimate) {
     }
 
     public record Created(long id, String code, String type, String status,

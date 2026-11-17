@@ -8,6 +8,7 @@ import type {
   ApprovalInstanceDetail,
   ApprovalTaskRow,
   ApprovalTimelineEvent,
+  EstimateBlock,
 } from '@/api/types'
 import ApprovalTimeline from '@/components/ApprovalTimeline.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -15,26 +16,73 @@ import ErrorState from '@/components/ErrorState.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { usePermission } from '@/composables/usePermission'
 import { useAuthStore } from '@/stores/auth'
-import { formatDateTime } from '@/utils/format'
-import { messageOf, normalizeTimeline, summaryText } from '@/views/req/platform'
+import { formatDateTime, formatDays } from '@/utils/format'
+import { messageOf, normalizeTimeline, summaryText, usePlatformDict } from '@/views/req/platform'
+import { ESTIMATE_META, ESTIMATE_STALE_REASON, ESTIMATE_SUPERSEDED_REASON, estimateStatusOf } from '@/views/req/estimate'
 
 /**
  * P2 · 审批 tab（AC-6/7/8/9）：时间线 + 当前节点动作。
  * 动作是否出现只由父级 allowedActions/权限决定；本组件再按「任务是否属于我」禁用并给出原因。
+ *
+ * r26：顶部并列一张**只读**的工时评估单（`WBS_ESTIMATE`）。实例由父级按
+ * `detail.estimate.instanceId` 直取，不走审批待办列表的 `includes('REQ')` 过滤——那张单的 bizType
+ * 不含 `REQ`，旧过滤永远匹配不到（AC-6）。审批动作仍只在审批中心。
  */
-const props = defineProps<{
-  instance: ApprovalInstanceDetail | null
-  loading: boolean
-  error: string
-  canSubmit: boolean
+const props = withDefaults(
+  defineProps<{
+    instance: ApprovalInstanceDetail | null
+    loading: boolean
+    error: string
+    canSubmit: boolean
+    estimate?: EstimateBlock | null
+    estimateInstance?: ApprovalInstanceDetail | null
+    estimateLoading?: boolean
+    estimateError?: string
+  }>(),
+  {
+    estimate: null,
+    estimateInstance: null,
+    estimateLoading: false,
+    estimateError: '',
+  },
+)
+const emit = defineEmits<{
+  (event: 'changed'): void
+  (event: 'submit'): void
+  (event: 'retry-estimate'): void
 }>()
-const emit = defineEmits<{ (event: 'changed'): void; (event: 'submit'): void }>()
 
 const auth = useAuthStore()
 const { can } = usePermission()
+const { userName } = usePlatformDict()
 
 const actionError = ref('')
 const busy = ref(false)
+
+// —— 工时评估只读块（r26） ——
+const showEstimateBlock = computed(() => props.estimate != null || props.estimateInstance != null)
+const estimateMeta = computed(() => ESTIMATE_META[estimateStatusOf(props.estimate)])
+const estimateNode = computed(() => String(props.estimateInstance?.instance?.currentNode ?? ''))
+const estimateTimeline = computed<ApprovalTimelineEvent[]>(() => normalizeTimeline(props.estimateInstance?.timeline))
+const estimateActive = computed(() => String(props.estimateInstance?.instance?.status ?? '') === 'PENDING')
+const estimateConclueText = computed(() => {
+  const block = props.estimate
+  if (!block) return ''
+  const status = estimateStatusOf(block)
+  if (status === 'REJECTED' && block.reason) return `驳回原因：${block.reason}`
+  if (status === 'SUPERSEDED') return ESTIMATE_SUPERSEDED_REASON
+  if (status === 'STALE') return ESTIMATE_STALE_REASON
+  return ''
+})
+const estimateMetaText = computed(() => {
+  const block = props.estimate
+  if (!block) return ''
+  const parts: string[] = []
+  if (block.approverId != null) parts.push(`审批人 ${userName(block.approverId)}`)
+  if (block.decidedAt) parts.push(`结论于 ${formatDateTime(block.decidedAt)}`)
+  else if (block.submittedAt) parts.push(`提交于 ${formatDateTime(block.submittedAt)}`)
+  return parts.join(' · ')
+})
 
 const instance = computed(() => (props.instance?.instance ?? null) as Record<string, unknown> | null)
 const tasks = computed<ApprovalTaskRow[]>(() => props.instance?.tasks ?? [])
@@ -289,6 +337,50 @@ watch(
 
 <template>
   <div class="approval-tab">
+    <section
+      v-if="showEstimateBlock"
+      class="surface surface--pad estimate-block"
+      data-test="estimate-block"
+      :data-status="estimateMeta.label"
+    >
+      <header class="estimate-block__head">
+        <h3 class="estimate-block__title" tabindex="-1">工时评估</h3>
+        <span class="estimate-pill" :class="`estimate-pill--${estimateMeta.tone}`">
+          {{ estimateMeta.label }}
+        </span>
+        <span class="estimate-block__days">单据人天：{{ formatDays(estimate?.proposedDays) }}</span>
+        <span v-if="estimateNode" class="estimate-block__node">当前节点：{{ estimateNode }}</span>
+      </header>
+
+      <div v-if="estimateLoading" class="skeleton skeleton__row" />
+      <ErrorState
+        v-else-if="estimateError"
+        compact
+        title="工时评估单暂不可用"
+        :message="estimateError"
+        @retry="emit('retry-estimate')"
+      />
+      <EmptyState
+        v-else-if="!estimateInstance"
+        title="该需求还没有工时评估单"
+        description="负责人在概览提交工时评估后，这张单会与提报单并列显示在这里。"
+        icon="lock"
+        compact
+      />
+      <template v-else>
+        <p v-if="estimate?.note" class="estimate-block__note">说明：{{ estimate.note }}</p>
+        <p
+          v-if="estimateConclueText"
+          class="estimate-block__reason"
+          :class="estimateStatusOf(estimate) === 'REJECTED' ? 'estimate-block__reason--danger' : 'estimate-block__reason--warning'"
+        >
+          {{ estimateConclueText }}
+        </p>
+        <ApprovalTimeline :events="estimateTimeline" :active="estimateActive" dense />
+        <p v-if="estimateMetaText" class="estimate-block__meta">{{ estimateMetaText }}</p>
+      </template>
+    </section>
+
     <div v-if="loading" class="skeleton skeleton__row" />
     <ErrorState v-else-if="error" compact title="审批信息暂不可用" :message="error" />
 
@@ -460,6 +552,89 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+/* ---- 工时评估只读块（r26） ---- */
+.estimate-block__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.estimate-block__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-title);
+}
+.estimate-block__title:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.estimate-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--r-ctl);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.estimate-pill--success {
+  background: var(--color-success-bg);
+  color: var(--success-ink);
+}
+.estimate-pill--warning {
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
+}
+.estimate-pill--danger {
+  background: var(--color-danger-bg);
+  color: var(--danger-ink);
+}
+.estimate-pill--info {
+  background: var(--color-info-bg);
+  color: var(--info-ink);
+}
+.estimate-pill--muted {
+  background: var(--bg-hover);
+  color: var(--text-muted-aa);
+}
+.estimate-block__days,
+.estimate-block__node {
+  font-size: 12px;
+  color: var(--text-body);
+  font-variant-numeric: tabular-nums;
+}
+.estimate-block__note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-body);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.estimate-block__reason {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: var(--r-ctl);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.estimate-block__reason--danger {
+  background: var(--color-danger-bg);
+  color: var(--danger-ink);
+}
+.estimate-block__reason--warning {
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
+}
+.estimate-block__meta {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--divider);
+  font-size: 12px;
+  color: var(--text-muted-aa);
 }
 .approval-tab__summary {
   display: flex;

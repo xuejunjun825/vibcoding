@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # platform-test-negative.sh — TECHNICAL §8.3 的 17 段负向用例（r17 起含动作级授权）。
 # r23 增 4b) 段：流转前置门（拆解/直建/改父共用一道门）+ 提报 domainIds 必填，含正向回归。
+# r26 增 4c) 段：工时评估门（六态拦人、驳回后仍拦、改人天超 20% 派生 STALE、越权提交 403）。
 # r24 增 17) 段：VENDOR_PM 的第 11 个角色边界（厂商隔离 / 12 条写口 DENY / 账号必须绑厂商）。
 # 每条都断言两件事：被拒绝（4xx + 错误码），且**没有落库**（表计数不变）。
 # 绿色 = 非法路径确实走不通；不是"接口返回 200 但界面拦住了"。
@@ -100,6 +101,8 @@ api_call PATCH "/api/req/requirements/${RD_ID}" '{"status":"DONE"}'
 deny "PATCH status → 400 STATUS_NOT_WRITABLE" 400 "STATUS_NOT_WRITABLE" "StatusForbiddenDto 的 setter 必须抛 400"
 api_call POST "/api/req/requirements/${RD_ID}/actions" '{"action":"finish"}'
 deny "RD TODO --finish--> 409（跳步）" 409 "ILLEGAL_TRANSITION" "状态表是唯一来源，非法动作给 allowedTargets"
+# r26 起 start_dev 还受工时评估门约束：这张夹具没有评估单，所以这步会 409 并停在 TODO，
+# 下面的 test_pass 依旧从 TODO 触发（断言仍成立）。评估门本身在 4c) 段逐态断言。
 api_call POST "/api/req/requirements/${RD_ID}/actions" '{"action":"start_dev"}'
 api_call POST "/api/req/requirements/${RD_ID}/actions" '{"action":"test_pass"}'
 deny "RD IN_DEV --test_pass--> 409（未提交测试不可通过）" 409 "ILLEGAL_TRANSITION"
@@ -176,6 +179,87 @@ api_call PUT "/api/req/requirements/${GATE_RD}" "{\"parentId\":${LEGAL_PDR}}"
 allow "RD 改挂另一合法 PDR → 200" 200 ""
 api_call PUT "/api/req/requirements/${GATE_RD}" "{\"parentId\":${PDR_ID}}"
 allow "RD 改回原父 → 200（合法写不被误伤）" 200 ""
+
+# ---------------------------------------------------------------- 4c
+section "4c) 工时评估门（r26）：未评估/待审核/已驳回/已失效都拦，通过才放行，越权 403"
+# 夹具沿用 4b 的 GATE_RD（父 PDR_ID=SCHEDULED、状态 TODO），它没有评估单 → 六态里的 NONE。
+# 判定顺序必须是 403 → ILLEGAL_TRANSITION → r23 前置门 → 409 ESTIMATE_NOT_APPROVED：
+# TODO→start_dev 是合法流转，所以这里命中的是评估门本身，而不是状态机或父状态门。
+api_call POST "/api/req/requirements/${GATE_RD}/actions" '{"action":"start_dev"}'
+deny "未评估 RD 开始开发 → 409 ESTIMATE_NOT_APPROVED" 409 "ESTIMATE_NOT_APPROVED" \
+    "门必须在 RequirementService.transition 里、状态判定之后抛 409"
+deny "409 detail 给出六态 status=NONE" 409 '"status":"NONE"' "前端按 detail.status 就地刷新卡片，不能只给一句文案"
+deny "409 detail 给出 required=ESTIMATE_APPROVED" 409 '"required":"ESTIMATE_APPROVED"' "缺什么必须机器可读"
+
+# 未评估的 PDR 同样排不了期（AC-16 要求 schedule 与 start_dev 成对覆盖）。
+api_call POST "/api/req/requirements/${GATE_PDR}/actions" '{"action":"schedule"}'
+deny "未评估 PDR 排期 → 409 ESTIMATE_NOT_APPROVED" 409 "ESTIMATE_NOT_APPROVED" \
+    "两个受门动作（schedule/start_dev）必须同源判定"
+
+# 待审核（PENDING）同样拦：单据在途 ≠ 已通过。
+api_call POST "/api/req/requirements/${GATE_RD}/estimate" '{"estimateDays":2,"note":"负向：待审核"}'
+allow "提交工时评估单 → 201（负向夹具就绪）" 201 "" "POST /{id}/estimate 与 /{id}/deliver 同址同风格"
+GATE_EST_INST="$(jget_ "$HTTP_BODY" '.instanceId')"
+api_call POST "/api/req/requirements/${GATE_RD}/actions" '{"action":"start_dev"}'
+deny "待审核 RD 开始开发 → 409 ESTIMATE_NOT_APPROVED(status=PENDING)" 409 '"status":"PENDING"' \
+    "PENDING 不是通过，门不得放行"
+
+# 驳回：结论与原因都要留痕，驳回后门仍关。
+login_as "pm" "Passw0rd!" || fail "pm 登录失败（工时评估审批）" "make platform-seed 必须创建 pm/Passw0rd!"
+api_call GET /api/req/approvals/todo?page=1\&size=100
+EST_TASK="$(jget_ "$HTTP_BODY" "[.items[] | select(.bizId == ${GATE_RD} and .bizType == \"WBS_ESTIMATE\")][0].taskId")"
+if [[ -n "$EST_TASK" && "$EST_TASK" != "null" ]]; then
+    # D-01（AC-4）：驳回必须带原因。引擎级约束，所有五类单据共用；校验必须发生在任何写入之前。
+    api_call POST "/api/req/approvals/tasks/${EST_TASK}/actions" '{"action":"REJECT"}'
+    deny "驳回不带原因 → 400 REASON_REQUIRED" 400 "REASON_REQUIRED" \
+        "原因缺失必须拒绝，不能静默驳回成 REJECTED"
+    api_call POST "/api/req/approvals/tasks/${EST_TASK}/actions" '{"action":"REJECT","comment":"   "}'
+    deny "驳回原因全空白 → 400 REASON_REQUIRED" 400 "REASON_REQUIRED" "空白等于没填，同样 400"
+    api_call GET "/api/req/approvals/instances/${GATE_EST_INST}"
+    deny "两次非法驳回后实例仍 PENDING（未落驳回结果）" 200 '"status":"PENDING"' \
+        "校验要在 task/instance 写入之前，否则待办已被吃掉"
+    api_call POST "/api/req/approvals/tasks/${EST_TASK}/actions" '{"action":"REJECT","comment":"人天评估偏高，重新拆"}'
+    allow "驳回工时评估（带原因）→ 200" 200 "" ""
+else
+    fail "审批人待办里没有工时评估单（instance=${GATE_EST_INST:-?}）" "或签节点必须解析出域负责人/产品经理"
+fi
+api_call GET "/api/req/requirements/${GATE_RD}"
+deny "驳回原因进需求动态/评估块" 200 "人天评估偏高，重新拆" "结论文案要能让研发看到为什么被驳回"
+API_TOKEN="$ADMIN_TOKEN"
+api_call POST "/api/req/requirements/${GATE_RD}/actions" '{"action":"start_dev"}'
+deny "已驳回 RD 开始开发 → 409 ESTIMATE_NOT_APPROVED(status=REJECTED)" 409 '"status":"REJECTED"' \
+    "驳回后必须重新提交并审批通过才能排期/开发"
+
+# 通过 → 改人天超 20% → 读时派生 STALE，门再次关；改回后门重新打开（同一函数派生，AC-11）。
+api_call POST "/api/req/requirements/${GATE_RD}/estimate" '{"estimateDays":2,"note":"负向：重提"}'
+allow "重提工时评估单 → 201（旧单转 SUPERSEDED）" 201 "" "重提必须先把旧 PENDING 置终态，否则唯一键冲突"
+login_as "pm" "Passw0rd!" || warn "pm 登录失败（重提审批）"
+api_call GET /api/req/approvals/todo?page=1\&size=100
+EST_TASK2="$(jget_ "$HTTP_BODY" "[.items[] | select(.bizId == ${GATE_RD} and .bizType == \"WBS_ESTIMATE\")][0].taskId")"
+[[ -n "$EST_TASK2" && "$EST_TASK2" != "null" ]] \
+    && api_call POST "/api/req/approvals/tasks/${EST_TASK2}/actions" '{"action":"APPROVE","comment":"重提通过"}'
+API_TOKEN="$ADMIN_TOKEN"
+api_call PUT "/api/req/requirements/${GATE_RD}" '{"estimateDays":3}'
+allow "通过后改人天到 3（偏差 50%）→ 200" 200 "" "写路径不改：STALE 是读时派生的"
+api_call GET "/api/req/requirements/${GATE_RD}"
+deny "detail.estimate.status 派生为 STALE" 200 '"status":"STALE"' "偏差 > 20% 即失效，判定只在服务端一处"
+api_call POST "/api/req/requirements/${GATE_RD}/actions" '{"action":"start_dev"}'
+deny "已失效 RD 开始开发 → 409 ESTIMATE_NOT_APPROVED(status=STALE)" 409 '"status":"STALE"' \
+    "STALE 必须与 PENDING/REJECTED 同样拦人"
+api_call PUT "/api/req/requirements/${GATE_RD}" '{"estimateDays":2}'
+api_call POST "/api/req/requirements/${GATE_RD}/actions" '{"action":"start_dev"}'
+allow "人天改回评估值 → 门重新放行 start_dev 200" 200 "" "六态与门判定同源：偏差收敛即恢复"
+
+# 越权：厂商账号没有 req:deliver，提交评估 403（且不落库）。
+if login_as "vpm1" "Passw0rd!"; then
+    BEFORE_EST="$(db_count wf_instance "tenant_id=${TID} AND biz_type='WBS_ESTIMATE'")"
+    api_call POST "/api/req/requirements/${GATE_RD}/estimate" '{"estimateDays":1,"note":"越权"}'
+    deny "厂商账号提交工时评估 → 403" 403 "" "req:deliver 缺失必须 403，不能落一张单"
+    same_count "越权提交未建单" wf_instance "tenant_id=${TID} AND biz_type='WBS_ESTIMATE'" "$BEFORE_EST"
+    API_TOKEN="$ADMIN_TOKEN"
+else
+    fail "vpm1 登录失败（评估越权用例）" "make platform-seed 必须创建 vpm1/Passw0rd!"
+fi
 
 # ---------------------------------------------------------------- 5/6
 section "5) 无审批人发布 → 400；6) 编辑已发布流程 → 409"
@@ -549,12 +633,25 @@ if [[ -n "$VPM_VEN_A" && -n "$VPM_REQ_A" && -n "$VPM_REQ_B" ]]; then
                 deny_action "VENDOR_PM 驳回需求 → 403" "$VPM_REQ_A" "APPROVING" '"action":"req.action.reject"' "REQ_SUBMIT" 1
 
                 # ---- ⑤ 正例：排期是 VENDOR_PM 唯一的需求写动作（release:plan 派生）
-                api_call POST "/api/req/requirements/${VPM_REQ_SCHEDULE}/actions" '{"action":"schedule"}'
-                if [[ "$HTTP_CODE" == "200" ]]; then
-                    pass "VENDOR_PM 排期本厂商 PDR → 200（唯一的需求写动作确实开着）"
-                else
-                    fail "VENDOR_PM 排期本厂商 PDR 返回 ${HTTP_CODE}: $(printf '%s' "$HTTP_BODY" | head -c 160)" \
-                        "req.action.schedule 对 VENDOR_PM 应为 ALLOW（release:plan 派生）"
+                # r26 起排期多了一道工时评估门：先以内部身份把这条 PDR 的评估单批掉，
+                # 否则权限正确也会被 409 ESTIMATE_NOT_APPROVED 拦住（门与权限是两件事）。
+                API_TOKEN="$ADMIN_TOKEN"
+                api_call POST "/api/req/requirements/${VPM_REQ_SCHEDULE}/estimate" '{"estimateDays":5,"note":"负向夹具：厂商排期前评估"}'
+                [[ "$HTTP_CODE" == "201" ]] || warn "厂商 PDR 评估单提交失败（HTTP ${HTTP_CODE}）：排期断言可能被评估门挡住"
+                login_as "pm" "Passw0rd!" || warn "pm 登录失败（厂商排期夹具）"
+                api_call GET /api/req/approvals/todo?page=1\&size=100
+                VPM_EST_TASK="$(jget_ "$HTTP_BODY" "[.items[] | select(.bizId == ${VPM_REQ_SCHEDULE} and .bizType == \"WBS_ESTIMATE\")][0].taskId")"
+                [[ -n "$VPM_EST_TASK" && "$VPM_EST_TASK" != "null" ]] \
+                    && api_call POST "/api/req/approvals/tasks/${VPM_EST_TASK}/actions" '{"action":"APPROVE","comment":"厂商排期前评估通过"}'
+                API_TOKEN="$ADMIN_TOKEN"
+                if login_as "vpm1" "Passw0rd!"; then
+                    api_call POST "/api/req/requirements/${VPM_REQ_SCHEDULE}/actions" '{"action":"schedule"}'
+                    if [[ "$HTTP_CODE" == "200" ]]; then
+                        pass "VENDOR_PM 排期本厂商 PDR → 200（唯一的需求写动作确实开着）"
+                    else
+                        fail "VENDOR_PM 排期本厂商 PDR 返回 ${HTTP_CODE}: $(printf '%s' "$HTTP_BODY" | head -c 160)" \
+                            "req.action.schedule 对 VENDOR_PM 应为 ALLOW（release:plan 派生），且评估单已批"
+                    fi
                 fi
             fi
 

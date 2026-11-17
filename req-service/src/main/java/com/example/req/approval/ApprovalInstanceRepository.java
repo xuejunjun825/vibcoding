@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 /** {@code wf_instance} 访问；并发推进用 {@link #lockById} 的悲观写锁串行化。 */
@@ -17,6 +18,10 @@ public interface ApprovalInstanceRepository extends JpaRepository<ApprovalInstan
             Long tenantId, String bizType, Long bizId, Integer activeFlag);
 
     Optional<ApprovalInstance> findFirstByTenantIdAndBizTypeAndBizIdOrderByIdDesc(
+            Long tenantId, String bizType, Long bizId);
+
+    /** 同需求全部单据（新→旧）；用于撤回后回落与「新单通过即取代旧 APPROVED」（AC-5）。 */
+    List<ApprovalInstance> findAllByTenantIdAndBizTypeAndBizIdOrderByIdDesc(
             Long tenantId, String bizType, Long bizId);
 
     Optional<ApprovalInstance> findByIdAndTenantId(Long id, Long tenantId);

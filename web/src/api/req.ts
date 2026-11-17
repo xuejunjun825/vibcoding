@@ -17,6 +17,7 @@ import type {
   DeployOrderDetail,
   DeployOrderRow,
   DeploySubmitResult,
+  EstimateCreated,
   GateDecision,
   GateItem,
   LoginPayload,
@@ -146,6 +147,20 @@ export function deliverRequirement(
   payload: { estimateDays: number; actualDays?: number; mrUrl: string; ownerUserId?: number },
 ): Promise<RequirementRow> {
   return http.post<RequirementRow>(`${REQ}/requirements/${id}/deliver`, payload)
+}
+
+/**
+ * 提交工时评估（r26 · 第五类审批单据 `WBS_ESTIMATE`）。
+ * 403 交回弹窗就地提示（无权限不跳 /403）；409 由调用方区分
+ * `ESTIMATE_ALREADY_APPROVED`（已通过且人天未变）与 `ILLEGAL_TRANSITION`（并发双提交）。
+ */
+export function submitEstimate(
+  id: number | string,
+  payload: { estimateDays: number; note?: string },
+): Promise<EstimateCreated> {
+  return http.post<EstimateCreated>(`${REQ}/requirements/${id}/estimate`, payload, {
+    silentForbidden: true,
+  })
 }
 
 export function quickTest(

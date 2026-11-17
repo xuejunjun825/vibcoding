@@ -186,8 +186,8 @@ public class ApprovalCenterService {
         for (DocumentSummaryProvider provider : documents) {
             if (instance.getBizType().equals(provider.bizType())) {
                 try {
-                    Map<String, Object> summary = provider.summary(
-                            instance.getTenantId(), instance.getBizId(), viewerId);
+                    // 实例重载：单据摘要读 SUBMIT 快照，而不是业务对象的当前值（r26）。
+                    Map<String, Object> summary = provider.summary(instance, viewerId);
                     return summary == null ? Map.of() : summary;
                 } catch (RuntimeException ex) {
                     return Map.of();

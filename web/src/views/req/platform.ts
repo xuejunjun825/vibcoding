@@ -91,8 +91,12 @@ export const ACTION_IMPACT: Record<string, string[]> = {
 }
 
 /**
- * 后端 RequirementViews.Detail 是 `{view, children, allowedActions, permissions}` 包装，
+ * 后端 RequirementViews.Detail 是 `{view, children, allowedActions, permissions, estimate}` 包装，
  * 前端类型按扁平声明（另一条线可能改成扁平），这里统一成扁平，页面只认一种。
+ *
+ * r26：`estimate`（工时评估块）与 `view` **平级**，不随 `view` 展开；早期版本漏搬它，
+ * 页面只好各自兜 `{...normalize(raw), estimate: raw.estimate ?? null}`。这里补齐：
+ * 包装分支缺省给 null（与后端 BUS/无单据时一致），扁平分支保持原样（调用方仍 `?? null`）。
  */
 export function normalizeRequirementDetail(raw: unknown): RequirementDetail {
   const record = (raw ?? {}) as Record<string, unknown>
@@ -106,6 +110,8 @@ export function normalizeRequirementDetail(raw: unknown): RequirementDetail {
         : (view.allowedActions ?? []),
       permissions:
         (record.permissions as RequirementDetail['permissions'] | undefined) ?? view.permissions,
+      estimate:
+        (record.estimate as RequirementDetail['estimate'] | undefined) ?? view.estimate ?? null,
     }
   }
   const detail = raw as RequirementDetail
