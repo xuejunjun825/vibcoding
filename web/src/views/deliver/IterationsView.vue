@@ -10,8 +10,10 @@ import {
 } from '@/api/deliver'
 import { listReleases } from '@/api/req'
 import type { ReleaseRow, SprintBoard } from '@/api/types'
+import { usePermission } from '@/composables/usePermission'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
+import ScopeChip from '@/components/ScopeChip.vue'
 import '@/views/deliver/shared.css'
 
 /**
@@ -27,6 +29,25 @@ const releaseId = ref(String(route.query.releaseId ?? ''))
 const sprints = ref<Array<{ id: number; name: string }>>([])
 const loading = ref(false)
 const error = ref<{ message: string; code?: string; status?: number } | null>(null)
+
+/**
+ * 写入口准入（r25 AC-1）：原按钮只看 releaseId，vpm1 可点直接吃 403。
+ * 现在两个条件合成 canCreateIteration，disabled 与 handler 兜底同源；
+ * title 里「前置条件」优先于「权限」——先选版本才知道要建什么。
+ */
+const perm = usePermission()
+const canCreateSprint = computed(() => perm.canAction('sprint.action.create'))
+const canCreateIteration = computed(() => canCreateSprint.value && !!releaseId.value)
+const createDenyTip = computed(() =>
+  !releaseId.value
+    ? '请先选择版本'
+    : canCreateSprint.value
+      ? ''
+      : '需要权限：sprint.action.create',
+)
+const deniedWriteChip = computed(() =>
+  canCreateSprint.value ? '' : '1 个操作需要权限',
+)
 
 async function loadReleases(): Promise<void> {
   try {
@@ -80,6 +101,7 @@ const form = reactive({
 })
 
 function openCreate(): void {
+  if (!canCreateIteration.value) return
   Object.assign(form, { name: '', goal: '', startDate: '', endDate: '', capacityDays: undefined })
   createVisible.value = true
 }
@@ -186,7 +208,20 @@ onMounted(async () => {
         <span class="dl-meta">按版本组织的冲刺，看板按人泳道</span>
       </div>
       <div class="dl-head__actions">
-        <el-button type="primary" :disabled="!releaseId" @click="openCreate">新建迭代</el-button>
+        <ScopeChip
+          v-if="deniedWriteChip"
+          :label="deniedWriteChip"
+          scope="sprint.action.create"
+          tone="info"
+        />
+        <el-button
+          :type="canCreateIteration ? 'primary' : 'default'"
+          :disabled="!canCreateIteration"
+          :title="createDenyTip"
+          @click="openCreate"
+        >
+          新建迭代
+        </el-button>
       </div>
     </header>
 
@@ -224,9 +259,18 @@ onMounted(async () => {
         :title="releaseId ? '这个版本还没有迭代' : '先选择一个版本'"
         :description="releaseId ? '新建迭代后即可把任务拖到看板上' : '迭代必须在版本下创建'"
         icon="inbox"
-        :action-text="releaseId ? '新建迭代' : undefined"
-        @action="openCreate"
-      />
+      >
+        <template #action>
+          <el-button
+            :type="canCreateIteration ? 'primary' : 'default'"
+            :disabled="!canCreateIteration"
+            :title="createDenyTip"
+            @click="openCreate"
+          >
+            新建迭代
+          </el-button>
+        </template>
+      </EmptyState>
       <template v-else>
         <el-table v-loading="loading" :data="sprints" row-key="id">
           <el-table-column prop="name" label="迭代" min-width="220">

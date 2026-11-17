@@ -334,6 +334,12 @@ public final class DemoFixture {
      * 恰好看到 8 条；后 4 条 origin 在 IT 部门（不在 po1 子树内），其中 3 条承接厂商为 VEN-A
      * → vendor1（VENDOR 档按 owner/assignee 厂商过滤）看到 3 条，VEN-C 那条对 vendor2 不可见。
      * 域都在种子那 7 个域内 → 域档账号（pm/dev/qa/tl）看到全部 12 条。</p>
+     *
+     * <p>r25：VEN-A 承接链（{@code DEMO-R-09} 及其研发子需求 {@code DEMO-R-10/11}）整链纳入
+     * {@code DEMO-REL-1}，让厂商视角的版本计划/用例库不再是空页。写法仍是同源两处：
+     * {@code requirement.release_id = releaseId}（本表的 inRelease 列）与
+     * {@code release_requirement} 一行（{@link DemoResetService} 插入时按同一个布尔值派生），
+     * 不用 UPDATE 补关系。总数仍是 12 条需求 / 12 条用例，变的只是「哪些进了版本」。</p>
      */
     private static final String[][] REQUIREMENTS = {
             {"DEMO-R-01", "BUS", "", "ORD", "supplyOrg", "po1", "", "", "采购订单协同（业务提报）",
@@ -353,11 +359,11 @@ public final class DemoFixture {
             {"DEMO-R-08", "RD", "DEMO-R-07", "LOG", "supplyOrg", "pm", "dev2", "",
                     "签收回执生成", "P3", "DONE", "2", "-10", "-2", "1"},
             {"DEMO-R-09", "PDR", "", "ORD", "itOrg", "pm", "", "VEN-A",
-                    "外协订单对账（VEN-A 承接）", "P2", "IN_DEV", "5", "-6", "9", "0"},
+                    "外协订单对账（VEN-A 承接）", "P2", "IN_DEV", "5", "-6", "9", "1"},
             {"DEMO-R-10", "RD", "DEMO-R-09", "ORD", "itOrg", "pm", "", "VEN-A",
-                    "对账单导出", "P2", "PENDING_TEST", "3", "-3", "10", "0"},
+                    "对账单导出", "P2", "PENDING_TEST", "3", "-3", "10", "1"},
             {"DEMO-R-11", "RD", "DEMO-R-09", "SUP", "itOrg", "pm", "", "VEN-A",
-                    "供应商对账提醒", "P3", "IN_DEV", "2", "-2", "12", "0"},
+                    "供应商对账提醒", "P3", "IN_DEV", "2", "-2", "12", "1"},
             {"DEMO-R-12", "RD", "DEMO-R-09", "MDM", "itOrg", "pm", "", "VEN-C",
                     "主数据清洗脚本（VEN-C 承接）", "P3", "TODO", "2", "1", "14", "0"},
     };

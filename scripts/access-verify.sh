@@ -1,26 +1,27 @@
 #!/usr/bin/env bash
 # access-verify.sh — 角色×页面×菜单准入验收（20261110-r7 P0 修复的门禁；r13 扩到 143，r17 到 148，
-#                     r24 加入 VENDOR_PM 窄例外后到 165）
+#                     r24 加入 VENDOR_PM 窄例外后到 165，r25 加入写按钮门禁 a6 后到 190）
 #
-# 六段按关注点分段，失败能定位到「字典契约 / 隔离 / 页面矩阵 / 导航声明 / 菜单可见集 / 能力探测」：
+# 七段按关注点分段，失败能定位到「字典契约 / 隔离 / 页面矩阵 / 导航声明 / 菜单可见集 / 能力探测 / 写按钮」：
 #   a0 字典契约（29）· a1 租户与厂商隔离（8）· a2 9 页 × 8 角色精确状态码（73）
 #   a3 导航静态审计（11，R11 = internalOnly 窄例外同源）· a4 8 角色真实权限 → 菜单可见集（19）
 #   a5 可选能力探测：8 账号 × 2 端点 + 调用点静态审计 + 审计器自检 + 动作授权单点真相（25）
+#   a6 写按钮门禁：写入口形态（disabled + 需要权限 + handler 兜底）14 + 403 降级 5 + vpm1 运行时 403 4 + 自检 2（25）
 # 聚合器只做编排：各段自己打印断言明细并写一行计数到 ${ACCESS_COUNTS}，
-# 这里求和后做 PASS==TOTAL、六段齐全、总数 ≥165（r24 下限）、分段下限四道守卫。
-# 注：165 = 29+8+73+11+19+25；a3 的 9→11 是 R11 新增 + R10 基线，a4 的 16→19 是 vpm1 三条断言。
-# 绝不为凑数字去删 a5 的断言（AC-17 明令不得删项放宽）。
+# 这里求和后做 PASS==TOTAL、七段齐全、总数 ≥189（r25 下限）、分段下限四道守卫。
+# 注：189 = 29+8+73+11+19+25+24；a3 的 9→11 是 R11 新增 + R10 基线，a4 的 16→19 是 vpm1 三条断言。
+# 绝不为凑数字去删 a5/a6 的断言（AC-17 明令不得删项放宽）。
 # 分段下限比总数更早定位「哪一段掉了几条」；只对本次实际跑过的段生效（调试子集不误伤）。
 #
 # 用法：
-#   ./scripts/access-verify.sh            # 全部六段（需 make platform-up + platform-seed）
+#   ./scripts/access-verify.sh            # 全部七段（需 make platform-up + platform-seed）
 #   ./scripts/access-verify.sh a0 a2      # 只跑指定段（调试用，仍要求栈就绪）
 set -uo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 ACCESS_DIR="$ROOT/scripts/tests/access"
-ALL_SEGMENTS=(a0 a1 a2 a3 a4 a5)
+ALL_SEGMENTS=(a0 a1 a2 a3 a4 a5 a6)
 
 SELECTED=()
 if (( $# > 0 )); then
@@ -39,7 +40,7 @@ fi
 segment_cmd() {
     case "$1" in
         a0|a1|a2) printf 'bash %s/%s-*.sh' "$ACCESS_DIR" "$1" ;;
-        a3|a4|a5) printf 'node %s/%s-*.mjs' "$ACCESS_DIR" "$1" ;;
+        a3|a4|a5|a6) printf 'node %s/%s-*.mjs' "$ACCESS_DIR" "$1" ;;
     esac
 }
 segment_file() {
@@ -50,6 +51,7 @@ segment_file() {
         a3) printf '%s/a3-nav-audit.mjs' "$ACCESS_DIR" ;;
         a4) printf '%s/a4-nav-visibility.mjs' "$ACCESS_DIR" ;;
         a5) printf '%s/a5-capability-probe.mjs' "$ACCESS_DIR" ;;
+        a6) printf '%s/a6-write-button-gate.mjs' "$ACCESS_DIR" ;;
     esac
 }
 
@@ -64,6 +66,7 @@ segment_min() {
         a3) printf 11 ;;
         a4) printf 19 ;;
         a5) printf 23 ;;
+        a6) printf 24 ;;
         *)  printf 0 ;;
     esac
 }
@@ -100,7 +103,7 @@ for seg in "${SELECTED[@]}"; do
     [[ -f "$file" ]] || { err "缺少脚本: ${file}"; FAILED_SEGMENTS+=("${seg}(缺失)"); continue; }
     printf '\n\033[1;35m────────── %s ──────────\033[0m\n' "$(basename "$file")"
     start=$(date +%s)
-    if [[ "$seg" == a3 || "$seg" == a4 || "$seg" == a5 ]]; then
+    if [[ "$seg" == a3 || "$seg" == a4 || "$seg" == a5 || "$seg" == a6 ]]; then
         node "$file"; rc=$?
     else
         bash "$file"; rc=$?
@@ -131,9 +134,9 @@ printf '\n'
 (( ${#MISSING[@]} == 0 )) || err "以下段没有产出计数（脚本中途失败）: ${MISSING[*]}"
 (( ${#FAILED_SEGMENTS[@]} == 0 )) || err "失败段: ${FAILED_SEGMENTS[*]}"
 
-# 165 条是「全量六段」的下限（r24：29+8+73+11+19+25）；调试子集（如 a0 a3）不适用，否则调试永远红
-if (( ${#SELECTED[@]} == ${#ALL_SEGMENTS[@]} && TOTAL < 165 )); then
-    err "断言总数 ${TOTAL} < 165（r24 下限）：有段没跑起来，或断言被删（a0-a5 一条都不许减少）"
+# 189 条是「全量七段」的下限（r25：29+8+73+11+19+25+24）；调试子集（如 a0 a3）不适用，否则调试永远红
+if (( ${#SELECTED[@]} == ${#ALL_SEGMENTS[@]} && TOTAL < 189 )); then
+    err "断言总数 ${TOTAL} < 189（r25 下限）：有段没跑起来，或断言被删（a0-a6 一条都不许减少）"
     exit 1
 fi
 if (( PASS != TOTAL )); then

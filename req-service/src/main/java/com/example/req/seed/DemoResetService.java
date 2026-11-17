@@ -375,6 +375,9 @@ public class DemoResetService {
         List<Object[]> requirementRows = DemoFixture.requirementRows(tenantId, refs);
         Map<String, Long> requirementIds = new LinkedHashMap<>();
         Map<String, Long> requirementDomains = new LinkedHashMap<>();
+        // r25：厂商归属从同一次需求遍历里带出来（与 TestCaseService.applyOwnership 同源：
+        // 用例的 vendor_id 就是所属需求的 vendor_id）。不新增用例行、不事后 UPDATE 补字段。
+        Map<String, Long> requirementVendors = new LinkedHashMap<>();
         int requirementIndex = 0;
         for (Object[] row : requirementRows) {
             String code = (String) row[DemoFixture.R_CODE];
@@ -406,6 +409,7 @@ public class DemoResetService {
                     Date.valueOf((LocalDate) row[DemoFixture.R_PLAN_END]), reporterId, reporterId);
             requirementIds.put(code, id);
             requirementDomains.put(code, domainId);
+            requirementVendors.put(code, (Long) row[DemoFixture.R_VENDOR_ID]);
             db.update("INSERT INTO requirement_domain_rel (tenant_id, requirement_id, domain_id)"
                     + " VALUES (?,?,?)", tenantId, id, domainId);
             if (inRelease) {
@@ -433,12 +437,15 @@ public class DemoResetService {
         List<Long> caseIds = new ArrayList<>();
         List<Long> caseRequirements = new ArrayList<>();
         for (Object[] row : DemoFixture.caseRows(refs)) {
-            Long requirementId = requirementIds.get((String) row[1]);
+            String requirementCode = (String) row[1];
+            Long requirementId = requirementIds.get(requirementCode);
+            Long vendorId = requirementVendors.get(requirementCode);
             long caseId = db.insert("INSERT INTO test_case (tenant_id, code, module_id, title, type,"
                             + " priority, automated, status, current_version, requirement_id,"
-                            + " domain_id, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            + " domain_id, vendor_id, created_by, updated_by)"
+                            + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     tenantId, row[0], row[6], row[2], row[3], row[4], 0, "ACTIVE", 1,
-                    requirementId, row[5], pm, pm);
+                    requirementId, row[5], vendorId, pm, pm);
             caseIds.add(caseId);
             caseRequirements.add(requirementId);
         }

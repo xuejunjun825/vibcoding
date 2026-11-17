@@ -86,6 +86,20 @@ const {
 const canHandle = computed(() => perm.can('defect:handle'))
 const canPickPeople = computed(() => perm.can('org:manage'))
 const forcedSummary = computed(() => !canHandle.value && !perm.can('defect:board'))
+
+/**
+ * 写入口准入（r25 AC-1）：`defect.action.create` 是服务端 @RequiresAction 的唯一判据，
+ * 前端镜像它——无权限时入口仍渲染，但 disabled + title「需要权限：<码>」，
+ * 点击零反馈（不进 /403、不发请求）。
+ */
+const canCreateDefect = computed(() => perm.canAction('defect.action.create'))
+const createDenyTip = computed(() =>
+  canCreateDefect.value ? '' : '需要权限：defect.action.create',
+)
+const deniedWriteChip = computed(() =>
+  canCreateDefect.value ? '' : '1 个操作需要权限',
+)
+
 const summaryMode = computed(
   () => forcedSummary.value || route.query.summary === '1',
 )
@@ -126,6 +140,8 @@ const createVisible = ref(false)
 const submitting = ref(false)
 const reqLoading = ref(false)
 const reqOptions = ref<RequirementRow[]>([])
+/** 需求搜索 403 后就地降级（DESIGN §4.4 #1/§0.2）：不跳 /403，只把下拉置灰并给原因 */
+const reqForbidden = ref(false)
 const form = reactive({
   title: '',
   description: '',
@@ -139,6 +155,7 @@ const form = reactive({
 })
 
 function openCreate(): void {
+  if (!canCreateDefect.value) return
   Object.assign(form, {
     title: '',
     description: '',
@@ -151,6 +168,7 @@ function openCreate(): void {
     expectedFixDate: '',
   })
   reqOptions.value = []
+  reqForbidden.value = false
   createVisible.value = true
 }
 
@@ -162,8 +180,11 @@ async function searchReqs(keyword: string): Promise<void> {
   reqLoading.value = true
   try {
     reqOptions.value = await searchRequirements(keyword.trim())
-  } catch {
+    reqForbidden.value = false
+  } catch (err) {
     reqOptions.value = []
+    // 只有 403 才是「没有权限」；网络/500 仍按空结果处理，不误报权限原因
+    reqForbidden.value = (err as { status?: number }).status === 403
   } finally {
     reqLoading.value = false
   }
@@ -295,6 +316,12 @@ onMounted(() => {
         <ScopeChip v-if="forcedSummary" label="金额与处理人字段受限" tone="info" />
       </div>
       <div class="dl-head__actions">
+        <ScopeChip
+          v-if="deniedWriteChip"
+          :label="deniedWriteChip"
+          scope="defect.action.create"
+          tone="info"
+        />
         <el-button @click="router.push({ name: 'defect-board' })">质量看板</el-button>
         <el-tooltip
           :content="forcedSummary ? '摘要视图由权限固定，无法切换' : '只显示状态 / 严重级 / 预计修复时间'"
@@ -310,7 +337,14 @@ onMounted(() => {
           </el-button>
         </el-tooltip>
         <el-button @click="exportCsv">导出 CSV</el-button>
-        <el-button type="primary" @click="openCreate">新建缺陷</el-button>
+        <el-button
+          :type="canCreateDefect ? 'primary' : 'default'"
+          :disabled="!canCreateDefect"
+          :title="createDenyTip"
+          @click="openCreate"
+        >
+          新建缺陷
+        </el-button>
       </div>
     </header>
 
@@ -419,9 +453,20 @@ onMounted(() => {
         :title="isFiltered ? '当前筛选下没有缺陷' : '还没有缺陷'"
         :description="isFiltered ? '放宽筛选条件或切换状态看看' : '从测试执行失败或手工提报开始'"
         icon="inbox"
-        :action-text="isFiltered ? '重置筛选' : '新建缺陷'"
-        @action="isFiltered ? resetFilters() : openCreate()"
-      />
+      >
+        <template #action>
+          <el-button v-if="isFiltered" type="primary" @click="resetFilters()">重置筛选</el-button>
+          <el-button
+            v-else
+            :type="canCreateDefect ? 'primary' : 'default'"
+            :disabled="!canCreateDefect"
+            :title="createDenyTip"
+            @click="openCreate"
+          >
+            新建缺陷
+          </el-button>
+        </template>
+      </EmptyState>
       <template v-else>
         <el-table
           v-loading="loading"
@@ -537,7 +582,9 @@ onMounted(() => {
               clearable
               :remote-method="searchReqs"
               :loading="reqLoading"
-              placeholder="输入需求编号/标题搜索"
+              :disabled="reqForbidden"
+              :title="reqForbidden ? '需要权限：需求搜索' : ''"
+              :placeholder="reqForbidden ? '无可用选项' : '输入需求编号/标题搜索'"
             >
               <el-option
                 v-for="item in reqOptions"
@@ -546,6 +593,10 @@ onMounted(() => {
                 :value="item.id"
               />
             </el-select>
+            <p v-if="reqForbidden" class="probe-degrade">
+              <span class="probe-degrade__mark" aria-hidden="true">!</span>
+              需求搜索不在你的权限范围内，可先创建缺陷，之后再补关联
+            </p>
           </el-form-item>
           <el-form-item label="归属版本">
             <el-select v-model="form.releaseId" clearable placeholder="可不选">
@@ -615,6 +666,29 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* 探测 403 后的内联降级提示（DESIGN §0.2）：不套背景色——可选依赖缺失不是故障 */
+.probe-degrade {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.probe-degrade__mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 9px;
+  line-height: 1;
+}
+
 .drill-note {
   display: flex;
   align-items: center;

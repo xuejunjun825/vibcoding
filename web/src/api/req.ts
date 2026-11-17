@@ -155,8 +155,13 @@ export function quickTest(
   return http.post(`${REQ}/requirements/${id}/quick-test`, payload)
 }
 
+/**
+ * 需求搜索（缺陷弹窗的需求关联下拉，探测式调用）。
+ * 403 时**不跳** /403，由调用方就地降级为空选项（DESIGN §4.4 / AC-3）：
+ * 这是一个可选能力探测，不是页面主体数据。签名不变，仅内部传 opts。
+ */
 export function searchRequirements(q: string): Promise<RequirementRow[]> {
-  return http.get<RequirementRow[]>(`${REQ}/requirements/search`, { q })
+  return http.get<RequirementRow[]>(`${REQ}/requirements/search`, { q }, { silentForbidden: true })
 }
 
 export function exportRequirementsCsv(params: RequirementListQuery): Promise<void> {
