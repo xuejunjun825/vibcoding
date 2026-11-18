@@ -4,6 +4,7 @@
 # r26 增 4c) 段：工时评估门（六态拦人、驳回后仍拦、改人天超 20% 派生 STALE、越权提交 403）。
 # r27 增 4d) 段：列表/搜索/详情四处 allowedActions 原始数组逐字符相等（R27_PARITY_MUTATE=order 变异自检）。
 # r24 增 17) 段：VENDOR_PM 的第 11 个角色边界（厂商隔离 / 12 条写口 DENY / 账号必须绑厂商）。
+# r28 重写 7/8 段：段内自造夹具（biz1 BUS→submit→pm 待办），两条断言恒定，夹具步骤只 fail 不计数。
 # 每条都断言两件事：被拒绝（4xx + 错误码），且**没有落库**（表计数不变）。
 # 绿色 = 非法路径确实走不通；不是"接口返回 200 但界面拦住了"。
 set -uo pipefail
@@ -421,17 +422,59 @@ deny "编辑已发布流程 → 409 WORKFLOW_PUBLISHED_IMMUTABLE" 409 "WORKFLOW_
 
 # ---------------------------------------------------------------- 7/8
 section "7) 减签空原因 → 400；8) 已处理任务加签 → 409"
-login_as "pm" "Passw0rd!" || warn "pm 登录失败，跳过审批负向"
-api_call GET "/api/req/approvals/todo?page=1&size=20"
-TASK_ANY="$(jget_ "$HTTP_BODY" '.items[0].taskId // .items[0].id')"
-if [[ -n "$TASK_ANY" && "$TASK_ANY" != "null" ]]; then
-    api_call POST "/api/req/approvals/tasks/${TASK_ANY}/remove-sign" '{"targetUserId":1,"reason":""}'
-    deny "减签空原因 → 400 REASON_REQUIRED" 400 "REASON_REQUIRED" "减签必须留原因"
-    api_call POST "/api/req/approvals/tasks/${TASK_ANY}/actions" '{"action":"APPROVE","comment":"neg"}'
-    api_call POST "/api/req/approvals/tasks/${TASK_ANY}/add-sign" '{"type":"AFTER","userIds":[1],"comment":"x"}'
-    deny "已处理任务加签 → 409 TASK_ALREADY_HANDLED" 409 "TASK_ALREADY_HANDLED" "加签只对 PENDING 任务生效"
+# r28：段内自造夹具，不再依赖「环境恰好有 pm 待办」——biz1 建 BUS → 自服务 submit → 从 pm 待办
+# 按 bizId+bizType 精确取 taskId。夹具步骤一律 fail（绝不 pass/warn），故两条断言恒定执行、总数恒定。
+R28_BUS=""
+if ! login_as "biz1" "Passw0rd!"; then
+    fail "7) biz1 登录失败，无法造减签/加签夹具" "make platform-seed 必须创建 biz1/Passw0rd!"
 else
-    warn "无待办任务，跳过减签/加签负向"
+    api_call POST /api/req/requirements "{\"type\":\"BUS\",\"title\":\"neg-r28-bus-${RUN_TAG}\",\"domainIds\":[$DOMAIN1]}"
+    R28_BUS="$(jget_ "$HTTP_BODY" '.id')"
+    if [[ "$HTTP_CODE" != "201" || -z "$R28_BUS" || "$R28_BUS" == "null" ]]; then
+        fail "7) 造 BUS 夹具失败（HTTP ${HTTP_CODE}，body=$(printf '%s' "$HTTP_BODY" | head -c 160)）" \
+            "biz1 需 req:report:bus；POST /requirements {type:BUS} 必须返回 201 + id"
+        R28_BUS=""
+    else
+        api_call POST "/api/req/requirements/${R28_BUS}/actions" '{"action":"submit"}'
+        if [[ "$HTTP_CODE" != "200" ]]; then
+            fail "7) 夹具 BUS submit 失败（HTTP ${HTTP_CODE}，body=$(printf '%s' "$HTTP_BODY" | head -c 160)）" \
+                "默认 REQ_SUBMIT/BUS 流程必须允许 biz1 自服务提交"
+            R28_BUS=""
+        fi
+    fi
+fi
+
+R28_TASK=""
+if [[ -n "$R28_BUS" ]]; then
+    if ! login_as "pm" "Passw0rd!"; then
+        fail "7) pm 登录失败，取不到审批待办" "make platform-seed 必须创建 pm/Passw0rd!"
+    else
+        api_call GET "/api/req/approvals/todo?page=1&size=200"
+        if [[ "$HTTP_CODE" != "200" ]]; then
+            fail "7) pm 待办列表返回 ${HTTP_CODE}，取不到夹具 taskId" "GET /approvals/todo 必须 200"
+        else
+            R28_TASK="$(jget_ "$HTTP_BODY" "[.items[] | select(.bizId == ${R28_BUS} and .bizType == \"REQ_SUBMIT\")][0].taskId")"
+            if [[ -z "$R28_TASK" || "$R28_TASK" == "null" ]]; then
+                fail "7) pm 待办里没有夹具 BUS 的 REQ_SUBMIT 待办（bizId=${R28_BUS}）" \
+                    "默认流程 approver=ROLE PRODUCT（mode=ALL）必须解析到 pm"
+            fi
+        fi
+    fi
+fi
+
+if [[ -n "$R28_TASK" && "$R28_TASK" != "null" ]]; then
+    api_call POST "/api/req/approvals/tasks/${R28_TASK}/remove-sign" '{"targetUserId":1,"reason":""}'
+    deny "减签空原因 → 400 REASON_REQUIRED" 400 "REASON_REQUIRED" "减签必须留原因"
+    api_call POST "/api/req/approvals/tasks/${R28_TASK}/actions" '{"action":"APPROVE","comment":"r28 夹具：先处理"}'
+    if [[ "$HTTP_CODE" != "200" ]]; then
+        fail "8) 夹具通过任务失败（HTTP ${HTTP_CODE}，body=$(printf '%s' "$HTTP_BODY" | head -c 160)）" \
+            "pm 是该夹具 BUS 的当前审批人，通过必须 200"
+    else
+        api_call POST "/api/req/approvals/tasks/${R28_TASK}/add-sign" '{"type":"AFTER","userIds":[1],"comment":"x"}'
+        deny "已处理任务加签 → 409 TASK_ALREADY_HANDLED" 409 "TASK_ALREADY_HANDLED" "加签只对 PENDING 任务生效"
+    fi
+else
+    fail "8) 无夹具 taskId，加签负向未执行" "第 7 段夹具必须先造出 bizId=${R28_BUS:-?} 的 REQ_SUBMIT 待办"
 fi
 API_TOKEN="$ADMIN_TOKEN"
 
