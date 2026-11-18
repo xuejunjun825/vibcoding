@@ -45,6 +45,11 @@ spring:
 platform:
   seed:
     enabled: ${PLATFORM_SEED_ENABLED:false}
+  ops:
+    # 存量人天回填是短窗口运维动作，与种子开关刻意分开：生产 seed 长期关，
+    # 回填默认关（未部署脚本的实例不暴露写入口 → 404）。
+    backfill:
+      enabled: ${PLATFORM_OPS_BACKFILL_ENABLED:false}
   # SeedController compares against platform.internal-token; InternalTokenClient
   # reads platform.internal.token. Both spellings are bound to the same env var so
   # the two call sites cannot drift apart.

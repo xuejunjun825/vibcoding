@@ -71,6 +71,9 @@ ok "构建完成"
 
 STAGE="4 启动 req-service (${REQ_PORT})"
 export PLATFORM_SEED_ENABLED=true
+# r29 存量回填（/internal/wbs-estimate-backfill）：与 seed 开关并列但独立——生产 seed 长期关、
+# 回填只是短窗口操作，两者语义不同不能共用一个开关。生产不设该变量 → 开关默认 false → 接口 404。
+export PLATFORM_OPS_BACKFILL_ENABLED=true
 export PLATFORM_INTERNAL_TOKEN PLATFORM_JWT_SECRET PLATFORM_MASTER_KEY
 
 # M7 集成凭据密钥（ADR-T7）：本地栈用 .run/integration.key，首次生成后复用——
