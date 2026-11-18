@@ -357,6 +357,12 @@ public final class PermissionRouteTable {
         rules.add(rule(null, "^/admin/permissions.*$", page("admin.permissions")));
         rules.add(rule(null, "^/admin/workflows.*$",
                 action("admin.workflows", "workflow.action.manage")));
+        // r30：分级审批绑定与流程定义同属「审批链配置」，页面码与动作码复用 admin.workflows /
+        // workflow.action.manage（不新增权限码，rbac=113 不动）。读也要动作码：绑定内容决定全租户
+        // 的审批链，非管理员连读都不该放行（AC-6）。缺这一条时声明校验器会以 P0 崩启动（D-1），
+        // 而 PermissionInterceptor 对未声明路径直接放行（D-2）。
+        rules.add(rule(null, "^/admin/flow-bindings.*$",
+                action("admin.workflows", "workflow.action.manage")));
         rules.add(rule(null, "^/admin/api-clients.*$",
                 action("admin.api-clients", "apiclient.action.manage")));
         rules.add(rule(null, "^/admin/metric-definitions.*$", page("admin.metrics")));

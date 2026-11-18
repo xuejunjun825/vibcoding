@@ -53,11 +53,15 @@ public class SeedService {
 
     private final JdbcTemplate jdbc;
     private final boolean enabled;
+    /** r30 分级链种子：独立服务是因为它只用 ensure 语义补 6 条定义 + 6 个绑定槽。 */
+    private final FlowChainSeedService flowChainSeed;
     private final Map<String, Set<String>> columnCache = new ConcurrentHashMap<>();
 
-    public SeedService(JdbcTemplate jdbc, @Value("${platform.seed.enabled:false}") boolean enabled) {
+    public SeedService(JdbcTemplate jdbc, @Value("${platform.seed.enabled:false}") boolean enabled,
+                       FlowChainSeedService flowChainSeed) {
         this.jdbc = jdbc;
         this.enabled = enabled;
+        this.flowChainSeed = flowChainSeed;
     }
 
     public boolean isEnabled() {
@@ -478,6 +482,11 @@ public class SeedService {
         if (scale > 20) {
             bulkRequirements(tenantId, pdrBulk, domain1, supplyOrg, users.get("admin"), scale, now);
         }
+
+        // r30：分级审批链（RELEASE × 3 等级 + REQ_DEPLOY × 3 槽）与 6 个默认绑定。
+        // 走同一个 /internal/seed 幂等入口而不是另造升级脚本：ensure 语义下重跑只补缺失行，
+        // 老的单节点定义（v1）不删不覆盖，所以「既有环境升级」与「全新安装」是同一条路径。
+        flowChainSeed.seed(tenantId, users.get("admin"));
     }
 
     /**

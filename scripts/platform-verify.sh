@@ -553,6 +553,13 @@ section "AC-7 审批语义：会签/或签/驳回回退/抄送不阻塞"
 submit_req() { # id
     api_call POST "/api/req/requirements/$1/actions" '{"action":"submit"}'
 }
+
+# r30：发布单提交前置「版本必须 LOCKED」（DeployOrderService.requireReleaseLocked）。
+# LOCKED 由「发起版本审批」得到；注意末级审批通过会立刻把版本推成 PUBLISHED（审批回调是
+# 唯一发布口），而 requireReleaseLocked 只认 LOCKED —— 所以这里只发起、不走完审批链。
+lock_release() { # lock_release <releaseId>
+    api_call POST "/api/req/releases/$1/approval"
+}
 # 或签夹具：BUS 的种子默认流程是会签（ALL），本段要验「任一通过即过」，
 # 所以先发布一条 BUS 专用、mode=ANY、isDefault=true 的流程覆盖默认路由。
 api_call POST "/api/req/admin/workflows" "$(jq -cn --arg n "verify-bus-any-${RUN_TAG}" '{
@@ -1002,6 +1009,11 @@ for D9_SIGN_USER in qa1 pm tl1; do
 done
 API_TOKEN="$ADMIN_TOKEN"
 API_TENANT="${SAVED_TENANT:-$API_TENANT}"
+# r30：submit 新增「版本必须 LOCKED」闸门，故先走完版本分级审批链把 D9_REL 锁定。
+lock_release "$D9_REL"
+expect_num "准入正向版本已锁定（r30：提交发布单要求 LOCKED）" \
+    "$(db_count "\`release\`" "id=${D9_REL} AND status='LOCKED'")" eq 1 \
+    "版本审批链走完后 status 必须是 LOCKED，否则 submit 恒 409 RELEASE_NOT_LOCKED"
 api_call POST /api/req/deploy-orders "$(jq -cn --argjson r "$D9_REL" --argjson q "$D9_RD" '{
   releaseId:$r, env:"PROD", windowStart:"2026-12-02T22:00:00+08:00",
   windowEnd:"2026-12-02T23:00:00+08:00", artifactVersion:"v1.0.1",

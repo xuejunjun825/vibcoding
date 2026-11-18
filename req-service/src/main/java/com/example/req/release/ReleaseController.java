@@ -81,10 +81,24 @@ public class ReleaseController {
         return releaseService.lock(id);
     }
 
+    /**
+     * 改等级（AC-5）：{@code NORMAL} 时两个必填项被忽略并清空；{@code EMERGENCY}/{@code ROLLBACK}
+     * 分别在 {@code emergencyReason}/{@code previousDeployOrderCode} 缺省时 400（detail.field 指名）。
+     * 只允许 PLAN 且未锁定、无在途实例的窗口内改，否则 409 RELEASE_LOCKED。
+     */
+    @PatchMapping("/{id}/level")
+    public ReleaseView updateLevel(@PathVariable long id,
+                                   @RequestBody ReleaseService.UpdateLevel request) {
+        return releaseService.updateLevel(id, request);
+    }
+
+    /**
+     * 发起审批（AC-1/AC-5）：返回解析出的审批链身份，前端据此直接进入待办，
+     * 也让「这次按哪条链走」在响应里可核对，而不是只能事后翻审计。
+     */
     @PostMapping("/{id}/approval")
-    public ResponseEntity<Map<String, Object>> startApproval(@PathVariable long id) {
-        long instanceId = releaseService.startApproval(id);
-        return ResponseEntity.status(201).body(Map.of("instanceId", instanceId, "releaseId", id));
+    public ResponseEntity<ReleaseService.StartResult> startApproval(@PathVariable long id) {
+        return ResponseEntity.status(201).body(releaseService.startApproval(id));
     }
 
     @PostMapping("/{id}/milestones")

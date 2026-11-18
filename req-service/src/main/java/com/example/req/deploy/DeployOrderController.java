@@ -1,5 +1,6 @@
 package com.example.req.deploy;
 
+import com.example.req.release.FlowChainViews;
 import com.example.req.requirement.RequirementViews;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * 发布单接口（TECHNICAL §4.3）。网关已 StripPrefix {@code /api/req}，这里的路径是服务内路径。
@@ -87,6 +89,23 @@ public class DeployOrderController {
     public DeployViews.OrderDetail forceRelease(@PathVariable long id,
                                                 @RequestBody(required = false) DeployOrderService.ForceReleaseCmd cmd) {
         return service.forceRelease(id, cmd == null ? null : cmd.reason());
+    }
+
+    /**
+     * 轮次条（只读，AC-10）：这一单提交过几轮、每轮的 hash 与时间（升序）。
+     *
+     * <p>只有 GET —— 快照是证据，没有"重新生成""删除某一轮"的入口（AC-11）；
+     * 写路径唯一是 {@code submit}，静态审计按"该表无 UPDATE/DELETE"核对。</p>
+     */
+    @GetMapping("/{id}/flow-snapshots")
+    public List<FlowChainViews.FlowSnapshotSummary> flowSnapshots(@PathVariable long id) {
+        return service.snapshots(id);
+    }
+
+    /** 按轮次回放（只读，AC-10）：200 返回当轮四段原样；无该轮 → 404 {@code SNAPSHOT_NOT_FOUND}。 */
+    @GetMapping("/{id}/flow-snapshots/{round}")
+    public FlowChainViews.FlowSnapshotView flowSnapshot(@PathVariable long id, @PathVariable int round) {
+        return service.replaySnapshot(id, round);
     }
 
     @PostMapping("/{id}/execution")

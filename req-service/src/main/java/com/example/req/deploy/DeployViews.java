@@ -1,6 +1,7 @@
 package com.example.req.deploy;
 
 import com.example.platform.contract.quality.GateSnapshot;
+import com.example.req.release.FlowChainViews;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -155,7 +156,16 @@ public final class DeployViews {
                               List<RequirementRow> requirements, AdmissionSnapshot admission,
                               ForcedRelease forcedReleaseDetail,
                               Execution execution,
-                              Long qualityGateSnapshotId, String gateResult) {
+                              Long qualityGateSnapshotId, String gateResult,
+                              String releaseLevel,
+                              List<FlowChainViews.ApprovalLevel> approvalLevels,
+                              FlowChainViews.FlowSnapshotView flowSnapshot,
+                              List<FlowChainViews.FlowSnapshotSummary> flowSnapshotHistory) {
+
+        public OrderDetail {
+            approvalLevels = approvalLevels == null ? List.of() : List.copyOf(approvalLevels);
+            flowSnapshotHistory = flowSnapshotHistory == null ? List.of() : List.copyOf(flowSnapshotHistory);
+        }
     }
 
     /**

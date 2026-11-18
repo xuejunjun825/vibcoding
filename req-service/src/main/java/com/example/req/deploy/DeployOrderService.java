@@ -9,12 +9,20 @@ import com.example.req.approval.ApprovalEngine;
 import com.example.req.approval.ApprovalException;
 import com.example.req.approval.ApprovalInstance;
 import com.example.req.approval.ApprovalInstanceRepository;
+import com.example.req.approval.ApprovalLevelProjector;
 import com.example.req.approval.ApproverDirectory;
 import com.example.req.approval.StartApproval;
+import com.example.req.approval.WorkflowDefinition;
+import com.example.req.approval.WorkflowRegistry;
 import com.example.req.requirement.RequirementEntity;
 import com.example.req.requirement.RequirementRepository;
 import com.example.req.requirement.RequirementViews;
+import com.example.req.release.FlowBindingService;
+import com.example.req.release.FlowChainService;
+import com.example.req.release.FlowChainViews;
+import com.example.req.release.FlowSnapshotService;
 import com.example.req.release.ReleaseEntity;
+import com.example.req.release.ReleaseLevel;
 import com.example.req.release.ReleaseRepository;
 import com.example.req.release.ReleaseService;
 import com.example.req.review.ReleaseReviewService;
@@ -89,6 +97,15 @@ public class DeployOrderService {
     private final ApprovalInstanceRepository instanceRepository;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<ApprovalEngine> approvalEngine;
+    /** r30：四段链路聚合（deliver 事实 + 本地准入段）——发布单详情与提交快照的唯一来源。 */
+    private final FlowChainService flowChainService;
+    /** r30：提交快照的固化/回放（只插不改）。 */
+    private final FlowSnapshotService flowSnapshotService;
+    /** r30：等级 → 槽位 → definitionId（发布单审批也走分级绑定，不写死单节点定义）。 */
+    private final FlowBindingService flowBindings;
+    private final WorkflowRegistry workflows;
+    /** r30：逐级审批阶梯，与版本详情同一投影（两处各写一套会漂移）。 */
+    private final ApprovalLevelProjector approvalLevelProjector;
 
     public DeployOrderService(DeployOrderRepository repository,
                               DeployOrderRequirementRepository orderRequirementRepository,
@@ -104,7 +121,12 @@ public class DeployOrderService {
                               ApproverDirectory approverDirectory,
                               ApprovalInstanceRepository instanceRepository,
                               ObjectMapper objectMapper,
-                              ObjectProvider<ApprovalEngine> approvalEngine) {
+                              ObjectProvider<ApprovalEngine> approvalEngine,
+                              FlowChainService flowChainService,
+                              FlowSnapshotService flowSnapshotService,
+                              FlowBindingService flowBindings,
+                              WorkflowRegistry workflows,
+                              ApprovalLevelProjector approvalLevelProjector) {
         this.repository = repository;
         this.orderRequirementRepository = orderRequirementRepository;
         this.requirementRepository = requirementRepository;
@@ -120,6 +142,11 @@ public class DeployOrderService {
         this.instanceRepository = instanceRepository;
         this.objectMapper = objectMapper;
         this.approvalEngine = approvalEngine;
+        this.flowChainService = flowChainService;
+        this.flowSnapshotService = flowSnapshotService;
+        this.flowBindings = flowBindings;
+        this.workflows = workflows;
+        this.approvalLevelProjector = approvalLevelProjector;
     }
 
     // ------------------------------------------------------------------ 查询
@@ -147,6 +174,26 @@ public class DeployOrderService {
     public DeployViews.OrderDetail detail(long id) {
         DeployOrderEntity order = requireVisible(id);
         return toDetail(order);
+    }
+
+    /**
+     * 轮次条（升序，只读）：每一轮提交的"{@code round/capturedAt/payloadHash}"。
+     * 先过 {@link #requireVisible} 再做快照读取，越权者连"有几轮"都不该知道。
+     */
+    @Transactional(readOnly = true)
+    public List<FlowChainViews.FlowSnapshotSummary> snapshots(long id) {
+        requireVisible(id);
+        return flowSnapshotService.history(id);
+    }
+
+    /**
+     * 按轮次回放（只读，AC-10）：返回的是<b>那一轮固化的四段原样</b> + 后端算出的段级 stale；
+     * 不存在的轮次 404 {@code SNAPSHOT_NOT_FOUND}（不返回空对象冒充"这一轮没有变化"）。
+     */
+    @Transactional(readOnly = true)
+    public FlowChainViews.FlowSnapshotView replaySnapshot(long id, int round) {
+        requireVisible(id);
+        return flowSnapshotService.replay(id, round);
     }
 
     // ------------------------------------------------------------------ 创建
@@ -277,6 +324,11 @@ public class DeployOrderService {
             throw DeployErrors.illegalTransition("submit", order.getStatus());
         }
         requireNoGoConfirmed(order, cmd);
+        ReleaseEntity release = releaseService.requireVisible(order.getReleaseId());
+        // ③ 计划未批真拦（AC-12）：排在准入之前——这条拒绝不写准入快照，更不写提交快照（轮次不增）。
+        planGuard.requireApproved(order.getReleaseId(), admissionEvaluator.requirementIds(order));
+        // ④ 版本必须 LOCKED（AC-14）：版本被驳回回 PLAN 后不再锁定，发布单不能带着旧准入继续提交。
+        requireReleaseLocked(release);
         DeployViews.AdmissionResult result = admissionEvaluator.evaluateAndStore(order);
         DeployViews.GateEvidence gate = result.gate();
         requireSkippedAcknowledged(result, cmd);
@@ -291,10 +343,13 @@ public class DeployOrderService {
         order.setQualityGateSnapshotId(gate == null ? null : gate.snapshotId());
         order.setQualityGateId(gate == null ? null : gate.gateId());
         order.setReportId(gate == null ? null : gate.reportId());
-        ReleaseEntity release = releaseService.requireVisible(order.getReleaseId());
-        startApproval(order, release, scope);
+        // ⑨ 起审批（等级 → 槽位 → definitionId），拿到本轮要固化的定义与节点链
+        ApprovalStart started = startApproval(order, release, scope);
+        // ⑩ 快照与状态写在同一事务里：状态先进 PENDING_APPROVAL 再取四段，
+        // 快照的 deployAdmission 段才与提交后读到的一致（否则第一轮一打开就"已变化"）。
         order.setStatus(DeployOrderStates.PENDING_APPROVAL);
         order.setUpdatedBy(scope.userId());
+        captureSnapshot(order, started, scope);
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("status", DeployOrderStates.PENDING_APPROVAL);
         detail.put("forcedRelease", order.isForcedRelease());
@@ -403,24 +458,45 @@ public class DeployOrderService {
         }
     }
 
-    private void startApproval(DeployOrderEntity order, ReleaseEntity release, DataScope scope) {
+    /**
+     * 发起审批（r30 起按发布等级绑定的多级链）。
+     *
+     * <p>definitionId 一律由 {@link FlowBindingService#requireDefinitionId} 解析（槽位 → 默认定义 → 任一 PUBLISHED
+     * → 409 {@code WORKFLOW_NOT_CONFIGURED}），这里<b>不写死任何定义 id</b>：发布单的 REQ_DEPLOY 槽可以独立改，
+     * 老的单节点定义仍可绑，在途实例按自己的 {@code definition_version} 走完。</p>
+     *
+     * @return 本轮要固化进快照的定义版本与节点 key（提交成功后由 {@link #captureSnapshot} 使用）
+     */
+    private ApprovalStart startApproval(DeployOrderEntity order, ReleaseEntity release, DataScope scope) {
         ApprovalEngine engine = approvalEngine.getIfAvailable();
         if (engine == null) {
             throw DeployErrors.approvalNotConfigured();
         }
+        String level = ReleaseLevel.normalise(flowSnapshotService.releaseLevel(order.getReleaseId()));
+        long definitionId = flowBindings.requireDefinitionId(scope.tenantId(), APPROVAL_BIZ_TYPE, level);
+        WorkflowRegistry.ResolvedWorkflow resolved = workflows.byId(definitionId);
+        List<String> nodeKeys = resolved == null ? List.of()
+                : resolved.definition().nodes().stream()
+                        .filter(WorkflowDefinition.Node::isApproval)
+                        .map(WorkflowDefinition.Node::key)
+                        .toList();
         // 已在本单上跑过（挂起/失败重试）就不重复发起：引擎会以 ILLEGAL_TRANSITION 拒绝。
-        if (instanceRepository.findFirstByTenantIdAndBizTypeAndBizIdAndActiveFlag(
-                scope.tenantId(), APPROVAL_BIZ_TYPE, order.getId(), ApprovalInstance.ACTIVE).isPresent()) {
-            return;
+        var running = instanceRepository.findFirstByTenantIdAndBizTypeAndBizIdAndActiveFlag(
+                scope.tenantId(), APPROVAL_BIZ_TYPE, order.getId(), ApprovalInstance.ACTIVE);
+        if (running.isPresent()) {
+            // 复用既有实例：快照记的是<b>这个实例</b>钉住的定义版本，不是刚解析出来的那条。
+            ApprovalInstance instance = running.get();
+            return new ApprovalStart(instance.getDefinitionId(), instance.getDefinitionVersion(), nodeKeys);
         }
         Map<String, Object> attributes = new LinkedHashMap<>();
         attributes.put("releaseId", order.getReleaseId());
         attributes.put("env", order.getEnv());
         attributes.put("forcedRelease", order.isForcedRelease());
         attributes.put("requirementCount", admissionEvaluator.requirementIds(order).size());
+        attributes.put("releaseLevel", level);
         try {
             engine.start(new StartApproval(APPROVAL_BIZ_TYPE, order.getId(), null, release.getDomainId(),
-                    attributes, null, null));
+                    attributes, definitionId, null));
         } catch (ApprovalException ex) {
             if (ApprovalException.NO_WORKFLOW.equals(ex.code())
                     || ApprovalException.APPROVER_UNRESOLVED.equals(ex.code())) {
@@ -428,6 +504,52 @@ public class DeployOrderService {
             }
             throw ex;
         }
+        return new ApprovalStart(definitionId, resolved == null ? null : resolved.version(), nodeKeys);
+    }
+
+    /**
+     * 固化本轮提交快照（AC-10 / AC-11）。
+     *
+     * <p>只在 {@link #submit} 的成功路径、所有闸门之后调用一次——"拒绝不写快照、轮次不变"由<b>调用顺序</b>保证，
+     * 不靠 if 判断（少一处判断就少一个能被绕过的地方）。</p>
+     */
+    private void captureSnapshot(DeployOrderEntity order, ApprovalStart started, DataScope scope) {
+        FlowChainViews.FlowChain chain;
+        try {
+            chain = flowChainService.assemble(order.getReleaseId());
+        } catch (RuntimeException ex) {
+            // 四段取不全也要留回执：快照记录的是"提交那一刻服务端看到的事实"，缺段由 MISSING 表达，
+            // 而不是让整个提交因为一次跨服务抖动失败（提交闸门已经在前面的步骤放行过了）。
+            chain = null;
+        }
+        flowSnapshotService.capture(order, chain,
+                started == null ? null : started.definitionId(),
+                started == null ? null : started.definitionVersion(),
+                started == null ? List.of() : started.nodeKeys(),
+                scope.userId());
+    }
+
+    /** 本轮审批的定位信息：写进快照的定义 id/版本/节点链（回放时不用再去查一次）。 */
+    private record ApprovalStart(Long definitionId, Integer definitionVersion, List<String> nodeKeys) {
+    }
+
+    /**
+     * AC-14：版本未 LOCKED 时发布单不能提交（驳回回 PLAN 后版本解锁，旧准入/旧门快照都不能替代一次新的版本审批）。
+     *
+     * <p>机器码固定 {@code RELEASE_NOT_LOCKED}（409），{@code detail} 带 {@code releaseId/status}，
+     * 前端与脚本据此提示"先去把版本审批走完"，而不是把它显示成通用的 409。</p>
+     */
+    private void requireReleaseLocked(ReleaseEntity release) {
+        String status = release.getStatus();
+        if (ReleaseService.STATUS_LOCKED.equals(status)) {
+            return;
+        }
+        String shown = status == null || status.isBlank() ? "未知" : status;
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("releaseId", release.getId() == null ? 0L : release.getId());
+        detail.put("status", shown);
+        throw new ApiException(409, "RELEASE_NOT_LOCKED",
+                "版本未锁定（当前 " + shown + "），请先走完版本的审批链再提交发布单", detail);
     }
 
     // ------------------------------------------------------------------ 强制放行（已退役）
@@ -581,6 +703,13 @@ public class DeployOrderService {
         // 强制放行已退役：动作不再出现在 allowedActions 里（历史单据的 forced 痕迹仍只读展示）。
         // 状态机是唯一来源，这里不再做第二道过滤（DeployOrderStates 已不产出该动作）。
         List<String> allowedActions = DeployOrderStates.allowedActions(order.getStatus());
+        // r30：等级继承版本（只读）、逐级审批阶梯、最新快照 + 轮次条。
+        // 没有快照时是 null/[]，而不是伪造的"第 0 轮"——"还没提交过"和"提交过但什么都没记"必须能区分。
+        String releaseLevel = ReleaseLevel.normalise(flowSnapshotService.releaseLevel(order.getReleaseId()));
+        ApprovalLevelProjector.Mount mount = approvalLevelProjector.mount(order.getTenantId(),
+                APPROVAL_BIZ_TYPE, order.getId());
+        FlowChainViews.FlowSnapshotView snapshot = flowSnapshotService.latest(order.getId());
+        List<FlowChainViews.FlowSnapshotSummary> snapshotHistory = flowSnapshotService.history(order.getId());
         return new DeployViews.OrderDetail(order.getId(), order.getCode(), order.getReleaseId(), releaseName,
                 order.getEnv(), order.getStatus(), order.getWindowStart(), order.getWindowEnd(),
                 order.getArtifactVersion(), steps, order.getRollbackPlan(), order.getImpact(),
@@ -589,7 +718,11 @@ public class DeployOrderService {
                 order.getCreatedAt(), order.getUpdatedAt(), requirements,
                 admission, forced, execution,
                 order.getQualityGateSnapshotId(),
-                admission == null || admission.gate() == null ? null : admission.gate().result());
+                admission == null || admission.gate() == null ? null : admission.gate().result(),
+                releaseLevel,
+                mount.levels(),
+                snapshot,
+                snapshotHistory);
     }
 
     private DeployViews.OrderRow toRow(DeployOrderEntity order, String releaseName) {

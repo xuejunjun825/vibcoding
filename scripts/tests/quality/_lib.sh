@@ -151,6 +151,23 @@ q_case_ids() { # q_case_ids <n> → 用空格分隔的用例 id（清库种子�
     printf '%s' "$ids"
 }
 
+# r30：发布单提交前置「版本必须 LOCKED」（DeployOrderService.requireReleaseLocked）。
+# 版本只有在「发起审批」后才进入 LOCKED，所以凡是走到 submit 的 fixture 必须先把需求
+# 挂完（锁定后不能增删需求）再调本 helper。
+q_lock_release() { # q_lock_release <releaseId>：幂等（已 LOCKED 时 409 RELEASE_LOCKED 也算成功）
+    local rel="$1"
+    api_call POST "/api/req/releases/${rel}/approval"
+    if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "201" ]]; then
+        return 0
+    fi
+    if [[ "$HTTP_CODE" == "409" && "$HTTP_BODY" == *"RELEASE_LOCKED"* ]]; then
+        return 0
+    fi
+    err "版本 ${rel} 发起审批失败 (HTTP ${HTTP_CODE}): $(printf '%s' "$HTTP_BODY" | head -c 200)"
+    err "r30 起 submit 要求版本 LOCKED；锁定前置没建立时后续 submit 会先撞 RELEASE_NOT_LOCKED"
+    return 1
+}
+
 q_create_release() { # q_create_release <name> → RELEASE_ID
     local name="$1"
     api_call POST /api/req/releases "$(jq -cn --arg n "$name" --argjson d "$(q_domain)" \

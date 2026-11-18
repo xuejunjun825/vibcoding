@@ -177,6 +177,19 @@ const deliverRoutes: RouteRecordRaw[] = [
         },
       },
       {
+        // r30：发布等级审批链绑定。复用 workflow:manage 与 admin.workflows 页面码口径，
+        // 故不带 pageCode、不进侧栏导航——a3 审计的 pageCode 集合与 access 计数都不被本页扰动。
+        path: 'flow-bindings',
+        name: 'admin-flow-bindings',
+        component: () => import('@/views/admin/AdminFlowBindingsView.vue'),
+        meta: {
+          title: '发布等级审批链',
+          navKey: 'admin-workflows',
+          parentPath: '/admin/workflows',
+          functionCode: 'workflow:manage',
+        },
+      },
+      {
         path: 'api-clients',
         name: 'admin-api-clients',
         component: () => import('@/views/admin/AdminApiClientsView.vue'),

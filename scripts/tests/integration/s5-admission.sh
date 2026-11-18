@@ -78,6 +78,10 @@ if [[ "$ST9" == "FAIL" && "$RC9" == "ARTIFACT_MISSING" ]]; then pass "⑨ FAIL/A
 SKIPPED="$(jq -r '.counts.skipped' <<<"$HTTP_BODY")"
 expect_num "counts.skipped=1" "$SKIPPED" eq 1
 
+# r30：submit 前置「版本必须 LOCKED」（DeployOrderService.requireReleaseLocked）。
+# 本套件验的是准入闸门，锁定只影响 submit 的前置顺序，不改变 9 项求值。
+q_lock_release "$REL" || exit 1
+
 section "s5 · 跳过≠通过：提交必须确认跳过数（400 SKIP_NOT_ACKNOWLEDGED）"
 api_call POST "/api/req/deploy-orders/${ORD}/submit" '{}'
 if [[ "$HTTP_CODE" == "400" ]]; then

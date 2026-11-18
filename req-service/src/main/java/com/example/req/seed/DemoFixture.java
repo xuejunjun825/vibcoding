@@ -104,6 +104,22 @@ public final class DemoFixture {
             List.of("test_env", "wf_definition", "test_module");
 
     /**
+     * 门禁建的一次性账号：{@code s3u…} / {@code s5u…} / {@code s6u…} / {@code s7a…} / {@code s8u…}
+     * （rbac 的 sN 用例）与 {@code t6p…} / {@code probe…}（平台负向/探针）。它们建号后多数只 disable
+     * 自己那一份，跑失败的轮次会留下 ACTIVE 行——tenant 1 一度积累 66 个，PMO 角色 61 人 ACTIVE。
+     *
+     * <p>为什么这会影响交付：r30 的分级链是<b>按角色</b>解析会签人（AC-1 明确 PMO/ALL），
+     * 61 个 PMO 成员意味着 n2 一次生成 61 条待办，三级链在演示环境永远走不完，AC-18 的端到端
+     * 演示与 {@code release-flow-verify} 的 S2/S3 都不可重复。重置必须把「可演示的账号基线」
+     * 也还原：只改 status（行保留、历史审计的用户名仍可解析），不动种子 14 个账号。
+     */
+    public static final String DISABLE_GATE_TEMP_USERS =
+            "UPDATE sys_user SET status = 'DISABLED' WHERE tenant_id = ? AND status = 'ACTIVE'"
+                    + " AND username NOT IN ('admin','pm','tl1','po1','biz1','suite1','dev1','dev2',"
+                    + "'qa1','qa2','vendor1','vendor2','mgr1','vpm1')"
+                    + " AND username REGEXP '^(s[0-9]+[a-z]*u|t[0-9]+[a-z]*|probe)[0-9]*$'";
+
+    /**
      * 一条删除指令：{@code table} 必填，{@code keepFilter} 为可选的保留谓词（{@code null} = 整表清空）。
      *
      * <p>为什么把「保留」做成数据而不是第二份白名单：删哪些表、留哪些行是同一个领域判断，

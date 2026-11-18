@@ -31,9 +31,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 FAIL=0
 CASE=0
-# 本脚本固定 69 项断言（r26 起，原 66 项 + 工时评估单 3 项）。断言只增：新增/删除断言时同步改这里，
-# 末尾会校验实际执行数 == 声明数，漂移直接红——否则「69/69」会变成一句没人维护的祝福。
-TOTAL_CHECKS=69
+# 本脚本固定 70 项断言（r26 起 66 → 69；r30 加账号基线 1 项 → 70）。断言只增：新增/删除断言时同步改这里，
+# 末尾会校验实际执行数 == 声明数，漂移直接红——否则「70/70」会变成一句没人维护的祝福。
+TOTAL_CHECKS=70
 FAIL_TRANSPORT=0
 FAIL_API=0
 FAIL_ASSERT=0
@@ -255,6 +255,15 @@ KEPT_VENDORS="$(db_count sys_vendor "tenant_id = ${TENANT_ID}")"
     && pass "定义数据保留：种子账号 14 / 域 7 / 厂商 3" \
     || fail "定义数据被误删：种子账号 ${KEPT_USERS} / 域 ${KEPT_DOMAINS} / 厂商 ${KEPT_VENDORS}" \
             "DELETE_ORDER 只能包含业务实例表，账号/域/厂商属定义数据"
+
+# r30：账号「基线」也要还原，不只是「种子还在」。门禁建的一次性账号（s8u…/t6p…/probe…）若停在
+# ACTIVE，会污染按角色解析的审批人集合——PMO/ALL 会签节点一次生成 61 条待办，三级链与演示都走不完
+# （QA D-5）。重置只改 status（行与审计保留），REGEXP 与 DemoFixture.DISABLE_GATE_TEMP_USERS 同源。
+TEMP_ACTIVE="$(db_count sys_user "tenant_id = ${TENANT_ID} AND status = 'ACTIVE' AND username NOT IN ('admin','pm','tl1','po1','biz1','suite1','dev1','dev2','qa1','qa2','vendor1','vendor2','mgr1','vpm1') AND username REGEXP '^(s[0-9]+[a-z]*u|t[0-9]+[a-z]*|probe)[0-9]*$'")"
+[[ "${TEMP_ACTIVE:-0}" == "0" ]] \
+    && pass "账号基线还原：无 ACTIVE 门禁临时账号（PMO/ALL 会签人回到种子集合）" \
+    || fail "仍有 ${TEMP_ACTIVE} 个 ACTIVE 门禁临时账号" \
+            "DemoFixture.DISABLE_GATE_TEMP_USERS 未执行，或新的造号前缀没进 REGEXP"
 
 # 协作域定义数据（V9 ⑤ 种子）：重置不重建，删掉演示页就是空白
 KEPT_POLICIES="$(db_count branch_policy "tenant_id = ${TENANT_ID}")"

@@ -98,6 +98,7 @@ expect "记录 NO-GO 评审 201" 201
 REVIEW_NOGO="$(jget "$HTTP_BODY" '.id')"
 Q_REQ_ID="$(db_q "SELECT requirement_id FROM test_case WHERE id=${CASES[0]}")"
 [[ -n "$Q_REQ_ID" && "$Q_REQ_ID" != "NULL" ]] || Q_REQ_ID="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TENANT_ID} ORDER BY id LIMIT 1")"
+q_lock_release "$REL" || exit 1
 DEP="$(q_create_deploy_order "$REL" "${Q_REQ_ID}" PROD)" || exit 1
 api_call POST "/api/req/deploy-orders/${DEP}/submit" '{}'
 deny "最新评审 NO-GO 时提交 → 409 NO_GO_CONFIRM_REQUIRED" 409 NO_GO_CONFIRM_REQUIRED

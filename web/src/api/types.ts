@@ -371,6 +371,11 @@ export interface ReleaseRow {
   endDate?: string
   plannedReleaseDate?: string
   gateMode?: 'STRICT' | 'LOOSE'
+  /** 发布等级（r30）：常规/紧急/回滚决定审批链槽位 */
+  releaseLevel?: ReleaseLevel | null
+  releaseLevelLabel?: string | null
+  emergencyReason?: string | null
+  previousDeployOrderCode?: string | null
   lockedAt?: string | null
   releasedAt?: string | null
   /** 服务端给出的可执行动作（release:plan 权限下的 lock/publish/…），页面只渲染这些 */
@@ -380,11 +385,183 @@ export interface ReleaseRow {
   riskCount?: number
 }
 
+/* ---------------- 发版多级审批链（r30） ----------------
+ * 这里只声明「服务端已经判定好」的字段：段状态、段原因、段 digest、审批级状态全部由后端给定。
+ * 前端不推导 PASS/FAIL（不得按签署数自行判门，也不得复述 9 项准入顺序）。
+ */
+
+/** NORMAL 常规 / EMERGENCY 紧急 / ROLLBACK 回滚：取值与 ReleaseLevel#normalise 同源 */
+export type ReleaseLevel = 'NORMAL' | 'EMERGENCY' | 'ROLLBACK'
+
+/** 段状态：后端给 PASS/FAIL/IN_PROGRESS/MISSING，旧版可能给 OK；未知值按 MISSING 展示 */
+export type FlowSegmentStatus = 'PASS' | 'OK' | 'IN_PROGRESS' | 'PENDING' | 'FAIL' | 'MISSING'
+
+export interface FlowPlanLine {
+  code: string
+  status?: string | null
+  conclusion?: string | null
+}
+
+export interface FlowTestPlanSegment {
+  status?: FlowSegmentStatus | string | null
+  reason?: string | null
+  total?: number
+  approved?: number
+  pending?: number
+  allApproved?: boolean
+  plans?: FlowPlanLine[]
+}
+
+export interface FlowSignoffLevel {
+  orderNo: number
+  signRole?: string | null
+  roleName?: string | null
+  status?: string | null
+  signerName?: string | null
+  signedAt?: string | null
+}
+
+export interface FlowSignoffSegment {
+  status?: FlowSegmentStatus | string | null
+  reason?: string | null
+  reportId?: number | null
+  versionNo?: number | null
+  conclusion?: string | null
+  levels?: FlowSignoffLevel[]
+  approved?: number
+  total?: number
+  pendingRole?: string | null
+}
+
+export interface FlowGateRuleLine {
+  code: string
+  status?: string | null
+  /** 必过规则（后端 RuleLine.required）：仅用于展示“必过/参考”，不参与判定 */
+  required?: boolean
+  actual?: string | null
+  threshold?: string | null
+  fixHint?: string | null
+}
+
+export interface FlowQualityGateSegment {
+  status?: FlowSegmentStatus | string | null
+  reason?: string | null
+  result?: string | null
+  snapshotId?: number | null
+  gateId?: number | null
+  reportId?: number | null
+  computedAt?: string | null
+  failedRules?: FlowGateRuleLine[]
+  waivers?: Array<Record<string, unknown>>
+}
+
+export interface FlowAdmissionItem {
+  code?: string
+  name?: string
+  order?: number
+  status?: string
+  passed?: boolean
+  detail?: string | null
+  fixHint?: string | null
+  reasonCode?: string | null
+  /** 后端 DeployAdmissionSegment.items 是 Map<String,Object>，允许有扩展字段 */
+  [key: string]: unknown
+}
+
+export interface FlowDeployAdmissionSegment {
+  status?: FlowSegmentStatus | string | null
+  reason?: string | null
+  deployOrderId?: number | null
+  code?: string | null
+  orderStatus?: string | null
+  /** true = 已提交单据读冻结快照；false = DRAFT 实时评估 */
+  frozen?: boolean
+  items?: FlowAdmissionItem[]
+  passedCount?: number
+  failedCount?: number
+}
+
+/** GET /releases/{id} 的 flowChain：四段同源 + 段级 digest（前端只读展示） */
+export interface FlowChain {
+  releaseLevel?: ReleaseLevel | string | null
+  testPlan?: FlowTestPlanSegment | null
+  signoff?: FlowSignoffSegment | null
+  qualityGate?: FlowQualityGateSegment | null
+  deployAdmission?: FlowDeployAdmissionSegment | null
+  digests?: Record<string, string> | null
+}
+
+export interface ApprovalLevel {
+  index: number
+  nodeKey: string
+  nodeName: string
+  /** ALL 会签 / ANY 或签（后端原值） */
+  mode?: string | null
+  /** APPROVED / ACTIVE / PENDING / WAITING / REJECTED */
+  status?: string | null
+  approvers?: number[]
+  handledAt?: string | null
+  comment?: string | null
+}
+
+/** 提交时固化的不可变快照（只插不改，按轮次回放） */
+export interface FlowSnapshot {
+  round: number
+  capturedAt?: string | null
+  releaseLevel?: ReleaseLevel | string | null
+  definitionId?: number | null
+  definitionVersion?: number | null
+  nodeKeys?: string[]
+  chain?: FlowChain | null
+  /** 64 位十六进制 */
+  payloadHash: string
+  /** 段级是否已变化（后端比较 digest，前端不自行判断） */
+  segmentStale?: Record<string, boolean> | null
+  changedSinceSubmit?: boolean
+}
+
+export interface FlowSnapshotSummary {
+  round: number
+  capturedAt?: string | null
+  payloadHash: string
+}
+
+export interface FlowBindingNode {
+  key: string
+  name: string
+  mode?: string | null
+}
+
+/** /admin/flow-bindings 的 6 个槽：tenant+bizType+level 唯一 */
+export interface FlowBindingSlot {
+  bizType: string
+  releaseLevel: ReleaseLevel | string
+  releaseLevelLabel?: string | null
+  definitionId?: number | null
+  definitionName?: string | null
+  definitionVersion?: number | null
+  status?: string | null
+  /** true = 未配置绑定、按默认定义解析；reset 后回到 true */
+  isDefault: boolean
+  nodes?: FlowBindingNode[]
+  /** 后端 BindingSlot 末位字段：最近一次绑定变更时间（未绑定时为 null） */
+  updatedAt?: string | null
+}
+
 export interface ReleaseDetail {
   release: ReleaseRow
   requirements: RequirementRow[]
   stats: { total: number; done: number; estimateDays: number; actualDays: number }
   riskItems: RequirementRow[]
+  /** 逐级审批阶梯；长度等于绑定定义节点数 */
+  approvalLevels?: ApprovalLevel[]
+  activeInstanceId?: number | null
+  flowChain?: FlowChain | null
+  rejectedNodeKey?: string | null
+  rejectedNodeName?: string | null
+  rejectedBy?: number | null
+  rejectedAt?: string | null
+  rejectReason?: string | null
 }
 
 export type DeployOrderStatus =
@@ -436,6 +613,13 @@ export interface DeployOrderDetail extends DeployOrderRow {
   rollbackPlan?: string
   impact?: string
   admission?: AdmissionSnapshot
+  /** 继承自版本的发布等级（发布单只读，不允许在单据上改） */
+  releaseLevel?: ReleaseLevel | null
+  approvalLevels?: ApprovalLevel[]
+  /** 提交时固化的快照；DRAFT 为 null */
+  flowSnapshot?: FlowSnapshot | null
+  /** 按轮次升序 */
+  flowSnapshotHistory?: FlowSnapshotSummary[]
   forcedRelease?: { reason: string; by: string; at: string } | null
   /** 提交时固化的门禁快照（AC-5/AC-7）：回放只看它，不重算 */
   qualityGateSnapshotId?: number | null
