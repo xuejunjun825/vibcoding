@@ -4,7 +4,8 @@ SHELL := /bin/bash
 .PHONY: help dev-up dev-down verify build lint test test-negative nacos-status clean distclean \
         platform-up platform-down platform-web platform-verify platform-test-negative \
         platform-seed platform-unit platform-perf quality-verify quality-e2e integration-verify \
-        collab-verify collab-perf access-verify rbac-verify analytics-i18n-verify platform-demo-reset
+        collab-verify collab-perf access-verify rbac-verify analytics-i18n-verify platform-demo-reset \
+        wbs-backfill-verify
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
@@ -93,6 +94,10 @@ analytics-i18n-verify: ## 分析域中文化：三方一致 + 四页/导出 0 �
 
 platform-demo-reset: ## 单事务重建演示数据（12 需求链路 + 4 条不变量自检；先 make platform-up && platform-seed）
 	@./scripts/platform-demo-reset.sh
+
+# ---- r29 存量回填 (20261118-r29) ----
+wbs-backfill-verify: ## 存量工时回填门禁 S1..S6 共 18 条（契约/生效/幂等/BUS/人天缺失/失败语义；先 make platform-up && platform-seed && platform-demo-reset）
+	@./scripts/wbs-backfill-verify.sh
 
 clean: ## 清理 Maven 产物与运行态 pid（请先 make dev-down；保留 .nacos 缓存）
 	@bash -c 'source ./scripts/lib.sh; \
