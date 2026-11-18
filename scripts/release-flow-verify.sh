@@ -12,8 +12,9 @@
 #                           改报告后 hash 不变且 signoff stale、回放只读且可重复、被拒不落轮次
 #   S5 负向（4）             计划未批 409 PLAN_NOT_APPROVED、未三签 409 QUALITY_GATE_FAILED
 #                           （QG-02）、CONDITIONAL 未豁免 409、EMERGENCY 缺原因 400
-#   S6 回归与卫生（2）       无发布路由 / 快照表无 UPDATE·DELETE；pom 与 web/package.json 无 diff、
-#                           只新增 V14
+#   S6 回归与卫生（2）       无发布路由 / 快照表无 UPDATE·DELETE；提交区间 BASE..HEAD 内
+#                           7 个 *pom.xml 与 web/package.json·web/pnpm-lock.yaml 无 diff，
+#                           迁移只允许 0/1 条新增 V14（M/D/其它 A 即红）；判据自检 1 正 3 反同场执行
 #
 # 用法：
 #   bash scripts/release-flow-verify.sh                # 全量（需 make platform-up 已起栈必、已 demo-reset）
@@ -22,7 +23,9 @@
 # 约定（与 wbs-backfill-verify 一致）：
 #   - 脚本自声明 RELEASE_FLOW_TOTAL=32，CASE 必须等于 TOTAL，缺一条就是红；
 #   - 前置缺失（栈没起、种子账号不在）直接 die，不 skip（r28 教训：条件跳过=假绿）；
-#   - EXIT trap 复位演示数据（RELEASE_FLOW_SKIP_RESET=1 可跳过，调试用）。
+#   - 第 32 条只读 git 对象库（BASE..HEAD），工作树脏不影响结论；基线默认 main，
+#     RELEASE_FLOW_BASE_REF 可覆盖，解析失败判红而不回退 HEAD；
+#   - S1 开头幂等复位六个绑定槽（setup，不计数）；EXIT trap 复位演示数据（RELEASE_FLOW_SKIP_RESET=1 可跳过）。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,7 +41,7 @@ FIXTURES_SET=0
 STATIC_ONLY=0
 [[ "${1:-}" == "--static-only" ]] && STATIC_ONLY=1
 [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && {
-    sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 0
 }
 
@@ -324,6 +327,140 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# --------------------------------------------------------------------------- 第 32 条判据与夹具自愈
+# r31：提交卫生判据必须是「提交区间的纯函数」——入参只有 git 引用，出参只有 0|1 与
+# STATUS<TAB>relpath 行，全程只读 git 对象库、不读工作树。旧判据用 `git status`（提交后
+# 树必干净 → 恒红）或 `git diff HEAD`（对已提交改动恒绿），两种都是假信号。
+
+resolve_git_base() { # stdout=merge-base 的 sha；失败非 0，绝不回退 HEAD（回退=判据恒绿）
+    local ref="${RELEASE_FLOW_BASE_REF:-main}" base
+    base="$(git -C "$ROOT" merge-base "$ref" HEAD 2>/dev/null)" || return 1
+    [[ -n "$base" ]] || return 1
+    printf '%s\n' "$base"
+}
+
+check_commit_hygiene() { # <repo> <base> <head> -> 0 合规 / 1 违规 / 2 入参或 git 对象不可用
+    local repo="$1" base="$2" head="$3" bad=0 st path out
+    local pom_paths=('*pom.xml' 'web/package.json' 'web/pnpm-lock.yaml')
+    local mig_dir='req-service/src/main/resources/db/migration'
+    local mig_allowed="${mig_dir}/V14__release_flow_chain.sql"
+    local mig_count=0
+    [[ -n "$repo" && -n "$base" && -n "$head" ]] || return 2
+
+    # 1) 依赖/锁文件：根 pom 与全部模块 pom（仓库现有 7 个）都不许在区间内变动；
+    #    lockfile 是 pnpm 的 web/pnpm-lock.yaml（仓库没有 package-lock.json，指向不存在的
+    #    文件等于一条永远为空的判据）。
+    out="$(git -C "$repo" diff --name-status --no-renames "$base" "$head" -- "${pom_paths[@]}")" || return 2
+    while IFS=$'\t' read -r st path; do
+        [[ -n "$path" ]] || continue
+        printf '%s\t%s\n' "$st" "$path"
+        bad=1
+    done <<<"$out"
+
+    # 2) 迁移：只允许 0 或 1 条 `A .../V14__release_flow_chain.sql`（合并后 BASE 已含 V14 时
+    #    区间为空也必须绿）；M/D/R 与其它 A（V15+、R__*.sql）一律红。
+    out="$(git -C "$repo" diff --name-status --no-renames "$base" "$head" -- "$mig_dir")" || return 2
+    while IFS=$'\t' read -r st path; do
+        [[ -n "$path" ]] || continue
+        printf '%s\t%s\n' "$st" "$path"
+        if [[ "$st" == "A" && "$path" == "$mig_allowed" ]]; then
+            mig_count=$((mig_count + 1))
+            ((mig_count <= 1)) || bad=1
+        else
+            bad=1
+        fi
+    done <<<"$out"
+
+    return "$bad"
+}
+
+hygiene_self_test() { # <base> -> 0 判据按预期红/绿 / 1 判据退化或 worktree 不可用
+    # 自检与判据同文件、同一 case 内执行：先证明判据会红（3 个已提交变异），再证明它不会恒红
+    # （空区间 + 未跟踪临时文件必须绿）。变异必须是「已提交」的，这样退回 `git status` 判据会
+    # 立刻被反例 a/b/c 抓住。
+    local base="${1:-}"
+    [[ -n "$base" ]] || { printf '自检失败：基线为空（RELEASE_FLOW_BASE_REF）\n'; return 1; }
+    (
+        set +e
+        trap - EXIT # 子 shell 内不继承主流程的 demo-reset trap
+        # 故意不用 local：EXIT trap 在函数作用域退出后才执行，local 变量那时已被 unset，
+        # 清理会因 set -u 报 "unbound variable" 而漏删 worktree。子 shell 本身已隔离命名空间。
+        tmp=""
+        wt=""
+        orig=""
+        mut=""
+        mig_dir=""
+        tmp="$(mktemp -d "${TMPDIR:-/tmp}/rf-hygiene.XXXXXX")" || { printf '自检失败：mktemp 不可用\n'; exit 1; }
+        wt="$tmp/wt"
+        st_cleanup() {
+            [[ -n "${wt:-}" ]] && git -C "$ROOT" worktree remove --force "${wt:-}" >/dev/null 2>&1
+            [[ -n "${tmp:-}" ]] && rm -rf "${tmp:-}"
+            git -C "$ROOT" worktree prune >/dev/null 2>&1
+        }
+        trap st_cleanup EXIT
+        git -C "$ROOT" worktree add --detach "$wt" HEAD >/dev/null 2>&1 \
+            || { printf '自检失败：git worktree add 不可用（判据 fail-closed，不提供跳过开关）\n'; exit 1; }
+        orig="$(git -C "$wt" rev-parse HEAD)" || exit 1
+        local g=(git -C "$wt" -c user.name=hygiene-probe -c user.email=hygiene@example.invalid
+                 -c commit.gpgsign=false -c core.hooksPath=/dev/null)
+        mig_dir="$wt/req-service/src/main/resources/db/migration"
+
+        # 正例：空区间 + 工作树留一个未跟踪临时文件 → 必须绿（r31 的原始症状就是脏树影响了判定）
+        : >"$wt/.hygiene-untracked-probe"
+        if ! check_commit_hygiene "$wt" "$orig" "$orig" >/dev/null 2>&1; then
+            printf '自检正例未变绿：空区间 + 未跟踪文件被判违规\n'; exit 1
+        fi
+        rm -f "$wt/.hygiene-untracked-probe"
+
+        # 反例 a：已提交修改历史迁移 V13 → 必须红
+        printf '\n-- hygiene mutation a\n' >>"$mig_dir/V13__vendor_pm_role.sql"
+        "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm 'hygiene mutation a' >/dev/null 2>&1 \
+            || { printf '自检失败：变异 a 无法提交\n'; exit 1; }
+        mut="$(git -C "$wt" rev-parse HEAD)"
+        if check_commit_hygiene "$wt" "$orig" "$mut" >/dev/null 2>&1; then
+            printf '自检反例 a 未变红：已提交改 V13 仍被判合规\n'; exit 1
+        fi
+        git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 a 无法还原\n'; exit 1; }
+
+        # 反例 b：已提交新增 V15 → 必须红
+        : >"$mig_dir/V15__mutation_probe.sql"
+        "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm 'hygiene mutation b' >/dev/null 2>&1 \
+            || { printf '自检失败：变异 b 无法提交\n'; exit 1; }
+        mut="$(git -C "$wt" rev-parse HEAD)"
+        if check_commit_hygiene "$wt" "$orig" "$mut" >/dev/null 2>&1; then
+            printf '自检反例 b 未变红：已提交新增 V15 仍被判合规\n'; exit 1
+        fi
+        git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 b 无法还原\n'; exit 1; }
+
+        # 反例 c：已提交修改模块 pom → 必须红（守住 pom 覆盖面；只写反例的话判据被写成恒红也不会被发现）
+        printf '\n<!-- hygiene mutation c -->\n' >>"$wt/req-service/pom.xml"
+        "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm 'hygiene mutation c' >/dev/null 2>&1 \
+            || { printf '自检失败：变异 c 无法提交\n'; exit 1; }
+        mut="$(git -C "$wt" rev-parse HEAD)"
+        if check_commit_hygiene "$wt" "$orig" "$mut" >/dev/null 2>&1; then
+            printf '自检反例 c 未变红：已提交改 req-service/pom.xml 仍被判合规\n'; exit 1
+        fi
+        git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 c 无法还原\n'; exit 1; }
+
+        printf '自检 → 正例绿；a 改 V13 红；b 新增 V15 红；c 改 req-service/pom.xml 红\n'
+        exit 0
+    )
+}
+
+reset_binding_slots() { # 六个 (bizType,level) 槽 DELETE 回默认；幂等、不计数（setup，不是断言）
+    local bt lv rc=0
+    for bt in RELEASE REQ_DEPLOY; do
+        for lv in NORMAL EMERGENCY ROLLBACK; do
+            api_call DELETE "/api/req/admin/flow-bindings/${bt}/${lv}"
+            if [[ "$HTTP_CODE" != "200" ]]; then
+                printf '  槽 %s/%s 复位失败：HTTP %s\n' "$bt" "$lv" "$HTTP_CODE"
+                rc=1
+            fi
+        done
+    done
+    return "$rc"
+}
+
 # --------------------------------------------------------------------------- 静态模式
 
 static_checks() {
@@ -386,6 +523,18 @@ static_checks() {
 # --------------------------------------------------------------------------- 前置
 
 section "前置：栈与种子"
+
+# r31：基线在 preflight 解析、只打印、不 die —— 「基线不可解析」是第 32 条的结论而不是前置，
+# die 掉会让整轮门禁只剩「环境没起来」，看不到真正的红线。
+GIT_HEAD="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"
+GIT_BASE_REF="${RELEASE_FLOW_BASE_REF:-main}"
+GIT_BASE="$(resolve_git_base)"
+GIT_BASE_RC=$?
+printf '  基线：BASE=%s HEAD=%s BASE_REF=%s\n' "${GIT_BASE:0:7}" "${GIT_HEAD:0:7}" "$GIT_BASE_REF"
+if ((GIT_BASE_RC != 0)); then
+    printf '  \033[1;33mWARN\033[0m merge-base %s HEAD 解析失败：第 32 条将判红；用 RELEASE_FLOW_BASE_REF 指定可用基线（绝不回退 HEAD）\n' "$GIT_BASE_REF"
+fi
+
 need_cmd curl || die "缺少 curl"
 need_cmd jq || die "缺少 jq"
 need_cmd mysql || die "缺少 mysql 客户端（db_q 依赖它）"
@@ -428,6 +577,8 @@ printf '  租户=%s 域=%s 模块=%s 需求样本=%s\n' "$TID" "$DOMAIN_ID" "$MO
 
 # --------------------------------------------------------------------------- S1
 section "S1 绑定与等级（6）"
+# S1 前置自愈（H5）：上一轮中断/残留改绑会让 S1-1 假红；六个槽幂等 DELETE 回默认，setup 不计数。
+reset_binding_slots || printf '  \033[1;33mWARN\033[0m 六个绑定槽未能全部复位（S1-1 可能因残留改绑而红）\n'
 api_call GET /api/req/admin/flow-bindings
 SLOTS="$HTTP_BODY"
 
@@ -910,8 +1061,15 @@ fi
 section "S6 回归与卫生（2）"
 RC_FILE="${ROOT}/req-service/src/main/java/com/example/req/release/ReleaseController.java"
 SNAP_REPO="${ROOT}/req-service/src/main/java/com/example/req/release/FlowSnapshotRepository.java"
+S6_SRC_MISSING=""
 NO_PUBLISH=1
-grep -qE '@(Post|Put|Patch)Mapping\("[^"]*publish' "$RC_FILE" && NO_PUBLISH=0
+# H4：grep 读不到文件仍返回 1（未匹配），会让 NO_PUBLISH 保持 1 = 假绿；先判存在。
+if [[ ! -f "$RC_FILE" ]]; then
+    NO_PUBLISH=0
+    S6_SRC_MISSING="$RC_FILE"
+else
+    grep -qE '@(Post|Put|Patch)Mapping\("[^"]*publish' "$RC_FILE" && NO_PUBLISH=0
+fi
 if [[ ! -f "$SNAP_REPO" ]]; then
     SNAP_READONLY=0
 else
@@ -922,19 +1080,33 @@ fi
 if [[ "$NO_PUBLISH" == "1" && "$SNAP_READONLY" == "1" ]]; then
     pass "无发布 HTTP 路由；FlowSnapshotRepository 只有 save/读，无 UPDATE/DELETE（静态审计）"
 else
-    fail "只读证据被破坏（publishRoute=$NO_PUBLISH, repoReadOnly=${SNAP_READONLY:-file-missing}）" \
-        "发布只能由审批回调调用；快照仓库不得提供更新/删除方法"
+    fail "只读证据被破坏（publishRoute=$NO_PUBLISH, repoReadOnly=${SNAP_READONLY:-file-missing}${S6_SRC_MISSING:+, 缺 ${S6_SRC_MISSING}}）" \
+        "发布只能由审批回调调用；快照仓库不得提供更新/删除方法；源文件缺失也必须判红"
 fi
 
-GIT_POM=1
-git -C "$ROOT" diff --quiet HEAD -- pom.xml web/package.json || GIT_POM=0
-NEW_MIGRATIONS="$(git -C "$ROOT" status --porcelain -- req-service/src/main/resources/db/migration | awk '{print $2}' | xargs -n1 basename 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
-MODIFIED_MIGRATIONS="$(git -C "$ROOT" status --porcelain -- req-service/src/main/resources/db/migration | grep -c '^ M')"
-if [[ "$GIT_POM" == "1" && "$NEW_MIGRATIONS" == "V14__release_flow_chain.sql" && "$MODIFIED_MIGRATIONS" == "0" ]]; then
-    pass "pom.xml / web/package.json 无 diff；迁移只新增 V14__release_flow_chain.sql（未改 V1–V13）"
+# 第 32 条（r31 重写）：提交区间纯判据 BASE..HEAD + 同场正负变异自检。
+# 分母仍 32：自检验证的是判据本身，不是新业务事实，独立计数会污染 AC-20 的分母语义。
+POM_COUNT="$(git -C "$ROOT" ls-files '*pom.xml' | wc -l | tr -d ' ')"
+HYGIENE_OUT=""
+HYGIENE_RC=2
+SELF_OUT=""
+SELF_RC=2
+if [[ -z "$GIT_BASE" || -z "$GIT_HEAD" ]]; then
+    HYGIENE_OUT="基线不可解析：merge-base ${GIT_BASE_REF} HEAD 失败；用 RELEASE_FLOW_BASE_REF 指定可用基线"
 else
-    fail "提交卫生不符（pom/package diff clean=${GIT_POM}, new=[${NEW_MIGRATIONS}], modified=${MODIFIED_MIGRATIONS}）" \
-        "AC-23：不引新依赖、不改既有迁移；历史迁移文件不可变"
+    HYGIENE_OUT="$(check_commit_hygiene "$ROOT" "$GIT_BASE" "$GIT_HEAD" 2>&1)"
+    HYGIENE_RC=$?
+    SELF_OUT="$(hygiene_self_test "$GIT_BASE" 2>&1)"
+    SELF_RC=$?
+fi
+HYGIENE_BRIEF="$(printf '%s' "$HYGIENE_OUT" | tr '\n' ';' | sed 's/;$//')"
+SELF_BRIEF="$(printf '%s' "$SELF_OUT" | tr '\n' ';' | sed 's/;$//')"
+[[ "$SELF_RC" == "0" ]] && printf '  %s\n' "$SELF_BRIEF"
+if [[ "$HYGIENE_RC" == "0" && "$SELF_RC" == "0" ]]; then
+    pass "提交区间 ${GIT_BASE:0:7}..${GIT_HEAD:0:7} 卫生：${POM_COUNT} 个 *pom.xml + web/package.json + web/pnpm-lock.yaml 无改动、迁移仅 0/1 条 A V14；判据自检 4/4（正例绿 / 改 V13 / 新增 V15 / 改模块 pom 均红）"
+else
+    fail "提交卫生不符或判据自检失败（range=${GIT_BASE:0:7}..${GIT_HEAD:0:7}, hygiene=${HYGIENE_RC}, selfTest=${SELF_RC}）" \
+        "${HYGIENE_BRIEF:-无判据输出} | ${SELF_BRIEF:-无自检输出} —— AC-23：只认 BASE..HEAD；pom/lockfile 不得改；迁移只允许新增 V14；自检必须 1 正 3 反"
 fi
 
 # --------------------------------------------------------------------------- 汇总
