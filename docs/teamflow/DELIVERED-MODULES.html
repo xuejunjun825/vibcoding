@@ -6,40 +6,29 @@
 <title>已交付功能模块清单</title>
 <style>
 :root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
-*{box-sizing:border-box}
-body{margin:0;padding:0 0 60px;background:#fff;color:var(--body);
-  font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+*{box-sizing:border-box}body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
 .page{max-width:960px;margin:0 auto;padding:28px 32px}
 h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
 h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
 h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
-h3{font-size:15px;margin:24px 0 8px}
-h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
-p{margin:8px 0}
-a{color:var(--primary);text-decoration:none}
-a:hover{text-decoration:underline}
+h3{font-size:15px;margin:24px 0 8px}h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
 hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
-ul,ol{margin:8px 0 8px 22px;padding:0}
-li{margin:4px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}li{margin:4px 0}
 table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
 th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
 td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
 tr:hover td{background:#F7F9FC}
-code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;
-  font-family:"SF Mono",Menlo,Consolas,monospace}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;font-family:"SF Mono",Menlo,Consolas,monospace}
 pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
 pre code{background:none;padding:0;color:var(--text)}
 blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
 blockquote p{margin:4px 0}
-.meta-note{font-size:12px;color:var(--muted)}
 .toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
-.toc ul{margin:0 0 0 18px}
-.toc>ul{margin-left:0}
-.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
-@media print{body{padding:0}.toc{break-inside:avoid}}
-
-h1.title{display:none}
+.toc ul{margin:0 0 0 18px}.toc>ul{margin-left:0}.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
 td:first-child,th:first-child{white-space:nowrap}
+@media print{body{padding:0}.toc{break-inside:avoid}}
+h1.title{display:none}
 </style>
 </head>
 <body>
@@ -78,17 +67,24 @@ id="toc-8-质量保证闭环m6deliver-servicequality">8.
 数据模型与工程质量</a></li>
 <li><a href="#12-进行中--明确不做" id="toc-12-进行中--明确不做">12.
 进行中 / 明确不做</a></li>
+<li><a href="#13-权限体系与判定同源r18r22r27"
+id="toc-13-权限体系与判定同源r18r22r27">13.
+权限体系与判定同源（r18–r22、r27）</a></li>
+<li><a href="#14-流程管控强化r23r26r27"
+id="toc-14-流程管控强化r23r26r27">14.
+流程管控强化（r23、r26、r27）</a></li>
+<li><a href="#15-门禁与基线纪律" id="toc-15-门禁与基线纪律">15.
+门禁与基线纪律</a></li>
 </ul></li>
 </ul>
 </div>
 <h1 id="已交付功能模块清单">已交付功能模块清单</h1>
 <blockquote>
-<p>生成时间：2026-11-09 · 口径：<strong>已验收并合入
-<code>main</code></strong> 的能力；进行中的 M7 单列在
-§12，不计入已交付。任务夹路径见各轮目录
-<code>docs/teamflow/20261*-r*</code>。 分支 <code>main</code> 当前 =
-<code>5640227</code>（M6 合入后）；证据见各任务夹的
-<code>ACCEPTANCE.md</code>。</p>
+<p>生成时间：2026-11-09，<strong>最后更新 2026-11-18</strong>（r28
+合回后）· 口径：<strong>已验收并合入 <code>main</code></strong>
+的能力；任务夹路径见各轮目录 <code>docs/teamflow/20261*-r*</code>。 分支
+<code>main</code> 当前 = <code>0127ca4</code>；每轮证据见对应任务夹的
+<code>ACCEPTANCE.md</code>，门禁基线见 <code>memory.md:36</code>。</p>
 </blockquote>
 <h2 id="0-版本台账">0. 版本台账</h2>
 <table>
@@ -127,16 +123,134 @@ API</td>
 <tr>
 <td>r5</td>
 <td>M7 集成对接</td>
-<td>Jenkins/GitLab/Sonar/Nexus 适配层·准入扩到 9 项</td>
-<td>进行中</td>
-<td>未合入</td>
+<td>Jenkins/GitLab/Sonar/Nexus 适配层 + 准入扩到 9 项</td>
+<td>22/22 AC · 9 项准入落地</td>
+<td><code>9072719</code></td>
+</tr>
+<tr>
+<td>r6</td>
+<td>M8-A CCode/CTeam/CTest P0</td>
+<td>甘特三视图·Wiki·价值流·分支策略登记·CR
+行级评论·用例评审·测试数据</td>
+<td>20/20 AC · <code>collab-verify</code> 263/263</td>
+<td><code>ea877fa</code></td>
+</tr>
+<tr>
+<td>r7+r8</td>
+<td>角色×页面准入修复</td>
+<td>字典只读端点·403
+语义收敛·导航按权限隐藏·业务方账号·演示数据重置</td>
+<td>17 AC · <code>access</code> 117→152</td>
+<td><code>2c9df53</code></td>
+</tr>
+<tr>
+<td>r9→r13</td>
+<td>分析域（工作台/看板/报表）</td>
+<td>后端 analytics/portal/reports API + 四页前端 +
+FilterBar/交叉表/图表</td>
+<td><code>platform-verify</code> 174/174 · 四页可渲染</td>
+<td><code>f815830</code> → <code>234f9f9</code></td>
+</tr>
+<tr>
+<td>r14</td>
+<td>表头中文化</td>
+<td>维度/度量枚举统一中文、导出与页面同源、<code>analytics-i18n-verify</code>
+33/33</td>
+<td><code>analytics-i18n-verify</code> 33/33</td>
+<td><code>92e071b</code></td>
+</tr>
+<tr>
+<td>r15+r16</td>
+<td>演示数据治理</td>
+<td>重置覆盖
+<code>report_definition</code>/<code>portal_card_config</code>、预置 2
+张演示报表</td>
+<td><code>demo-reset</code> 49→52</td>
+<td><code>75e8864</code> / <code>d806027</code></td>
+</tr>
+<tr>
+<td>r17</td>
+<td>业务方提交权限</td>
+<td>动作级判定 <code>RequirementActionMatrix</code>、403 带
+<code>action</code>/<code>allowedActions</code></td>
+<td><code>access</code> 148/148 · neg 30/30</td>
+<td><code>a02332d</code></td>
+</tr>
+<tr>
+<td>r18→r20</td>
+<td>三层 RBAC</td>
+<td>角色可配（功能码/页面/动作 × 168
+格）、授权页三级树、<code>rbac-verify</code> s0–s9</td>
+<td>14/14 AC · <code>rbac</code> 111/111</td>
+<td><code>6f93922</code></td>
+</tr>
+<tr>
+<td>r21+r22</td>
+<td>判定入口收口</td>
+<td>删除 <code>TenantContext.can/access</code>、动作判定改走
+<code>PermissionService</code>/契约层解析器</td>
+<td>15 判定点 · <code>rbac</code> 111 · <code>access</code> 152</td>
+<td><code>211db80</code> / <code>535939a</code></td>
+</tr>
+<tr>
+<td>r23</td>
+<td>流程前置门</td>
+<td>拆解父状态门（<code>PARENT_NOT_POOLED</code>/<code>PARENT_NOT_SCHEDULED</code>）、必填域
+400</td>
+<td>neg 49/49 · verify 168/168</td>
+<td><code>3faf190</code></td>
+</tr>
+<tr>
+<td>r24+r25</td>
+<td>厂商项目经理</td>
+<td><code>VENDOR_PM</code> 第 11 角色 + <code>vpm1</code> 账号 +
+厂商演示数据 + 写按钮禁用收敛</td>
+<td><code>access</code> 190/190 · <code>rbac</code> 113/113</td>
+<td><code>20120f1</code> / <code>d5cd301</code></td>
+</tr>
+<tr>
+<td>r26</td>
+<td>工时评估门</td>
+<td>第五类单据
+<code>WBS_ESTIMATE</code>、<code>schedule</code>/<code>start_dev</code>
+前置门、±20% 派生 <code>STALE</code></td>
+<td><code>verify</code> 192 · neg 111 · <code>access</code> 206</td>
+<td><code>7144d30</code></td>
+</tr>
+<tr>
+<td>r27</td>
+<td>列表/详情同源</td>
+<td>池查询不再直出状态机、<code>allowedActions</code> 单一条判定链、4d
+段 19 条一致性断言</td>
+<td><code>verify</code> 193 · neg 130</td>
+<td><code>7144d30</code></td>
+</tr>
+<tr>
+<td>r28</td>
+<td>门禁自带夹具</td>
+<td>负向 7/8 段自造待审批任务，恒定 130；夹具失败 <code>fail</code> 不
+<code>warn</code></td>
+<td>干净重置 130/130</td>
+<td><code>0127ca4</code></td>
 </tr>
 </tbody>
 </table>
-<p><strong>规模</strong>：已交付 REST 映射 <strong>196</strong>
-个（req-service 81 / deliver-service 115），前端 <strong>54</strong>
-个页面/组件，数据库 <strong>53</strong> 张业务表（V1 39 + V5 14，另有 5
-次增列/字典迁移）。</p>
+<blockquote>
+<p>r6 任务夹：<a
+href="20261109-r6-ccode-cteam-ctest-p0/">docs/teamflow/20261109-r6-ccode-cteam-ctest-p0/</a>（PRD
+20 条 AC · DESIGN · TECHNICAL · QA-REPORT · ACCEPTANCE）。</p>
+</blockquote>
+<p><strong>规模（2026-11-18 实测）</strong>：Java <strong>537</strong>
+个类、Vue <strong>136</strong> 个页面/组件、TS <strong>50</strong>
+个、REST 映射 <strong>360</strong> 处、Flyway 迁移 <strong>13</strong>
+个（V1–V13）、运维与自测脚本 <strong>26</strong>
+个。门禁：<code>platform-verify</code>
+<strong>193</strong>、<code>platform-test-negative</code>
+<strong>130</strong>、<code>access-verify</code>
+<strong>206</strong>、<code>rbac-verify</code>
+<strong>113</strong>、<code>platform-demo-reset</code>
+<strong>69</strong>、<code>unit</code>
+<strong>371</strong>、<code>lint</code> 22、<code>verify</code> 14。</p>
 <h2 id="1-平台基座r1">1. 平台基座（r1）</h2>
 <ul>
 <li><strong>注册与配置</strong>：Nacos 3.3
@@ -161,9 +275,17 @@ standalone；<code>demo-service</code> 通过
 域；缺/错租户头 403 不落库。</li>
 <li><strong>组织树</strong>：集团 → 二级管理企业 → 部门 →
 人员；用户属厂商 + 被授权若干域。</li>
-<li><strong>权限</strong>：10 角色 ×
-权限矩阵（<code>PermissionMatrix</code> 26→41 码、410 格），后端
-<code>PermissionInterceptor</code> 拒绝而非隐藏按钮；多角色并集。</li>
+<li><strong>权限（r18→r20 改为三层可配）</strong>：功能码 / 页面 /
+动作三层授权，落 <code>sys_role_permission</code>（11 角色 × 168 格 =
+<strong>1848 行</strong>，<code>PermissionMatrix</code>
+退为种子），管理员可在 <code>/admin/roles</code> 与
+<code>/admin/roles/:id/permissions</code>
+逐格改（含「未绑定页面的功能码」分组）；判定三序「页面码非 DENY → 动作码
+ALLOW/RESTRICTED → 既有 DataScope」，<strong>唯一入口
+<code>PermissionService</code></strong>（r21 删除了
+<code>TenantContext.can/access</code>，r22 把动作判定收进契约层
+<code>ActionPermissionResolver</code>），后端拒绝而非隐藏按钮；多角色并集；写端点
+<code>@RequiresAction</code> 漏声明启动即失败。</li>
 <li><strong>隔离</strong>：域 ×
 厂商双维度，<code>ScopeSql</code>/<code>ScopedJdbc</code>
 单点生成谓词，覆盖列表/搜索/导出/附件/看板 8
@@ -187,17 +309,33 @@ Release，父需求只读汇总）。</li>
 <li><strong>提报与评审入池</strong>：二级企业业务人员可提报并跟踪自己提报、只读浏览全集团已入池业务需求。</li>
 <li><strong>版本计划</strong>：<code>release</code> +
 里程碑，可挂三类需求并按父需求聚合；延期标红。</li>
-<li><strong>人天口径</strong>：0.5
-天精度，子需求汇总，父需求只读；实际人天可由工时（÷8）回写。</li>
+<li><strong>人天口径与评估门（r26）</strong>：0.5
+天精度，子需求汇总，父需求只读；实际人天可由工时（÷8）回写。工时评估是<strong>第五类审批单据</strong>
+<code>WBS_ESTIMATE</code>（PDR/RD 各绑一张，或签 = 域负责人 /
+产品经理）：未通过时 <code>schedule</code>（PDR）与
+<code>start_dev</code>（RD）一律 <strong>409
+<code>ESTIMATE_NOT_APPROVED</code></strong>（detail
+<code>{requirementId,status,required}</code>）；评估通过后人天被改动
+<strong>&gt; ±20%</strong>（严格大于）自动派生
+<code>STALE</code>、门重新生效；六态
+<code>NONE/PENDING/APPROVED/REJECTED/SUPERSEDED/STALE</code> 中
+<code>STALE</code>
+是<strong>读时派生</strong>，两条写路径（<code>PUT</code> /
+<code>deliver</code>）都不必各自加判。前端「渲染看权限、禁用看门」：按钮在、置灰、文案由
+<code>web/src/views/req/estimate.ts</code> 的
+<code>estimateGateTip</code> 三处共用。</li>
 <li>接口：<code>/requirements</code>、<code>/releases</code>；页面：需求池/创建/详情
 + 8 个 Tab。</li>
 </ul>
 <h2 id="4-自定义审批引擎r2自研轻量">4.
 自定义审批引擎（r2，自研轻量）</h2>
 <ul>
-<li><strong>流程定义</strong>：四类单据（提报 / 评审入池 / 需求版本 /
-发布）+ 需求类型 ×
-域绑定、默认回退；发布后固化版本，在途实例按启动版本走。</li>
+<li><strong>流程定义</strong>：五类单据（提报 / 评审入池 / 需求版本 /
+发布 / <strong>工时评估</strong>，r26 新增）+ 需求类型 ×
+域绑定、默认回退；发布后固化版本，在途实例按启动版本走；<code>wbs_estimate</code>
+零 schema 变更（复用
+<code>wf_instance/wf_task/wf_history</code>，单据人天与说明存 SUBMIT
+快照）。</li>
 <li><strong>节点</strong>：审批（会签全员 /
 或签一人）、条件分支（类型/域/优先级/人天）、抄送（不阻塞）。</li>
 <li><strong>审批人来源</strong>：指定人 / 角色 / 发起人直属主管 /
@@ -326,14 +464,97 @@ webhook、Sonar 质量门禁、Nexus 制品检索与晋级；带来准入 9
 项、<code>integration_config</code>/<code>integration_sync_log</code>/<code>build_record</code>/<code>mr_sync</code>/<code>artifact_record</code>
 等表与 3
 个管理页；本地桩验收（<code>make integration-verify</code>）。</li>
-<li><strong>明确不做（本期非目标）</strong>：CPack/CCode/CAgent/CTest/CWiki/CTeam/CMeas/CCI/CFlow
-其余九平台、CPack 制品平台本体、自建 CI 执行器、移动端、AI
+<li><strong>本轮（M8，r6，分支未合入）</strong>：任务夹 <a
+href="20261109-r6-ccode-cteam-ctest-p0/">20261109-r6-ccode-cteam-ctest-p0/</a>，20
+条 AC，新增 11
+张表（<code>wiki_space</code>/<code>wiki_page</code>/<code>wiki_page_version</code>/<code>wiki_comment</code>/<code>wiki_page_link</code>/<code>stage_definition</code>/<code>branch_policy</code>/<code>branch_policy_check</code>/<code>mr_comment</code>/<code>test_case_review</code>/<code>test_executor</code>）与
+<code>mr_sync</code> 4 列、四主体
+<code>actual_*</code>、<code>test_plan.data_note</code>；权限矩阵 42→56
+格（14 个新码）；五个单点
+<code>WikiVisibility</code>/<code>GanttWarnings</code>/<code>GanttConfirmTokens</code>/<code>FlowMetricFormulas</code>/<code>ExecutorHealth</code>。证据：<code>make collab-verify</code>（s0–s8，本地
+GitLab 桩 127.0.0.1:19091）与 <code>make collab-perf</code>（AC-20 五项
+P95）。</li>
+<li><strong>明确不做（本期非目标）</strong>：CPack/CAgent/CWiki/CMeas/CCI/CFlow
+其余六平台、CPack 制品平台本体、自建 CI 执行器、移动端、AI
 辅助、表单自定义引擎、金额折算、多级会签、SSO、多语言、ES、甘特 FS/SS
-依赖。</li>
+依赖与关键路径、仓库托管。</li>
 <li><strong>遗留
 P3（不阻塞）</strong>：<code>PlanLifecycleService.java:165</code>
 状态字面量收敛、<code>QualityGateService</code> 规则证据 upsert
 需补文档、q4 脚本过时注释、横幅样式与键盘可达性人工补测。</li>
+</ul>
+<h2 id="13-权限体系与判定同源r18r22r27">13.
+权限体系与判定同源（r18–r22、r27）</h2>
+<ul>
+<li><strong>三层授权</strong>：FUNCTION（功能码）/ MENU（页面）/
+ACTION（动作码）三层写在同一张 <code>sys_role_permission</code>，按角色
+× 租户；动作码 <strong>72 个</strong>、页面 <strong>36 个</strong>，种子
+11 角色 × 168 格。</li>
+<li><strong>唯一判定</strong>：<code>PermissionService</code>（45s 快照
++ epoch
+失效）三序判定；<code>RequirementService.allowedActions/ gateFiltered</code>
+是动作集合的唯一来源，池/搜索/导出/详情<strong>共用</strong>（r27：<code>RequirementPoolQuery</code>
+只许外调 <code>allowedActionsByRow</code>，静态检查 + 4d 段
+<code>jq -c</code> 逐字符断言守护）。</li>
+<li><strong>防锁死</strong>：<code>PLATFORM_ADMIN</code> 的
+<code>org:manage</code>/<code>tenant:manage</code> 不可冻结，且必须保留
+≥1 名管理员；高危动作仅 3 个（强发、授权授予、停用用户），二次确认 +
+<code>highRiskGranted</code> 审计。</li>
+<li><strong>客户端</strong>：<code>web/src/stores/auth.ts</code>
+维护三层集合 +
+<code>canMenu</code>/<code>canAction</code>；写按钮统一「禁用 +
+悬停原因」，探测调用走 <code>silentForbidden</code> 不跳全局
+403（r25：<code>a6-write-button-gate</code> 24 条）。</li>
+</ul>
+<h2 id="14-流程管控强化r23r26r27">14. 流程管控强化（r23、r26、r27）</h2>
+<table>
+<thead>
+<tr>
+<th>管控点</th>
+<th>机制</th>
+<th>负向证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>拆解前置</td>
+<td>拆 PDR 要求父 BUS <code>POOLED</code>；拆 RD / 直建 RD / PUT 改父
+要求父 PDR <code>SCHEDULED/IN_DEV</code></td>
+<td>409 <code>PARENT_NOT_POOLED</code> /
+<code>PARENT_NOT_SCHEDULED</code>，detail 带
+<code>allowed[]</code>；被拒不落库</td>
+</tr>
+<tr>
+<td>提报必填</td>
+<td>缺 <code>domainIds</code> → 400 <code>VALIDATION_FAILED</code></td>
+<td>detail.field=domainIds（原为 500）</td>
+</tr>
+<tr>
+<td>工时评估</td>
+<td>第五类单据 + <code>schedule</code>/<code>start_dev</code> 门 + ±20%
+<code>STALE</code></td>
+<td>六态拦截、驳回原因留痕、改人天失效</td>
+</tr>
+<tr>
+<td>动作集合同源</td>
+<td>列表/搜索/详情 <code>allowedActions</code> 同一条判定链</td>
+<td>4d 段 19 条 <code>jq -c</code> 原始数组逐字符相等 + 变异必红</td>
+</tr>
+</tbody>
+</table>
+<h2 id="15-门禁与基线纪律">15. 门禁与基线纪律</h2>
+<ul>
+<li>门禁脚本：<code>platform-verify</code> /
+<code>platform-test-negative</code> / <code>access-verify</code> /
+<code>rbac-verify</code> / <code>collab-verify</code> /
+<code>quality-verify</code> / <code>platform-demo-reset</code> /
+<code>analytics-i18n-verify</code>，全部 <code>make</code> 目标化。</li>
+<li><strong>下限只增不减</strong>，实测值写入
+<code>docs/teamflow/memory.md:36</code>；基线漂移时在任务夹顶部加「基线订正」行，<strong>不改
+AC 文本</strong>。</li>
+<li>负向脚本禁止条件跳过：r28
+起需要前置数据的段必须自带夹具，夹具造不出来 <strong>fail 不
+warn</strong>（避免门禁静默缩水）。</li>
 </ul>
 </div>
 </body>

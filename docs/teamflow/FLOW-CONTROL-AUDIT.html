@@ -44,11 +44,16 @@ id="toc-需求全流程--管控点核对与补齐规划">需求全流程 ·
 八个管控点核对表</a></li>
 <li><a href="#3-缺口清单按优先级" id="toc-3-缺口清单按优先级">3.
 缺口清单（按优先级）</a></li>
-<li><a href="#4-补齐规划3-轮逐轮可验收"
-id="toc-4-补齐规划3-轮逐轮可验收">4. 补齐规划（3
-轮，逐轮可验收）</a></li>
+<li><a href="#4-补齐规划3-轮均已完成" id="toc-4-补齐规划3-轮均已完成">4.
+补齐规划（3 轮，均已完成）</a></li>
+<li><a href="#45-闭环后的实测数字2026-11-18main--0127ca4"
+id="toc-45-闭环后的实测数字2026-11-18main--0127ca4">4.5
+闭环后的实测数字（2026-11-18，<code>main</code> =
+<code>0127ca4</code>）</a></li>
 <li><a href="#5-附本次核查跑过的探针" id="toc-5-附本次核查跑过的探针">5.
 附：本次核查跑过的探针</a></li>
+<li><a href="#6-复核命令任何人可重跑" id="toc-6-复核命令任何人可重跑">6.
+复核命令（任何人可重跑）</a></li>
 </ul></li>
 </ul>
 </div>
@@ -59,7 +64,10 @@ id="toc-4-补齐规划3-轮逐轮可验收">4. 补齐规划（3
 合回后）。核查方式：读状态机/权限/审批/门禁代码 + 用真实账号与岗位跑
 HTTP 探针；每条结论都带证据。 目的：回答两个问题——①
 这条全流程<strong>是否真的被管住</strong>（不是"有页面"而是"绕不过去"）；②
-哪些缺口需要补、怎么排。</p>
+哪些缺口需要补、怎么排。
+<strong>复核（2026-11-18）</strong>：四个缺口已全部闭环，<code>main</code>
+= <code>0127ca4</code>（r28 合回后）。逐条闭环证据见 §5，验收数字见
+§4.5。</p>
 </blockquote>
 <h2 id="1-结论先说">1. 结论先说</h2>
 <ul>
@@ -69,7 +77,7 @@ HTTP 探针；每条结论都带证据。 目的：回答两个问题——①
 个有硬约束</strong>、<strong>2
 个只有"能填"没有"必须"</strong>、<strong>发现 1
 个接口级缺陷</strong>。</li>
-<li><strong>两个真缺口</strong>：①
+<li><strong>当时的两个真缺口（现已闭环，见 §1 末条）</strong>：①
 <strong>未审批的需求可以直接拆解</strong>（我实测 201 成功）；②
 <strong>工时评估没有独立环节，也没有任何前置门</strong>——没有评估人天也能排期、也能开始开发。</li>
 <li><strong>一个缺陷</strong>：提报时漏填业务域直接
@@ -77,6 +85,13 @@ HTTP 探针；每条结论都带证据。 目的：回答两个问题——①
 <code>VALIDATION_FAILED</code>。</li>
 <li><strong>一个岗位缺口</strong>：厂商侧"项目管理"没有独立角色，目前只能借
 <code>PMO</code>（域负责人）或厂商负责人身份，分权不干净。</li>
+<li><strong>闭环状态（2026-11-18）</strong>：G1/G3 → r23（前置门 +
+必填校验）、G4 → r24/r25（<code>VENDOR_PM</code>
+角色与演示数据、按钮收敛）、G2 → r26（<code>WBS_ESTIMATE</code>
+第五类单据 + 评估门）、r27 补列表/详情 <code>allowedActions</code>
+同源、r28
+修门禁自身的条件跳过。<strong>四个缺口现在都变成硬约束</strong>，复核数据见
+§4.5。</li>
 </ul>
 <h2 id="2-八个管控点核对表">2. 八个管控点核对表</h2>
 <p>判定口径：<strong>强制</strong> =
@@ -98,23 +113,25 @@ HTTP 探针；每条结论都带证据。 目的：回答两个问题——①
 <td>业务需求提报</td>
 <td><code>POST /requirements</code>（type=BUS），业务方
 <code>biz1</code> 可自提（r17 修复）</td>
-<td><strong>强制</strong>（类型/父级/权限），但<strong>缺域漏校验会
-500</strong></td>
-<td>r22 后实测：<code>biz1</code> 自提 →
-<code>SUBMITTED</code>、<code>allowedActions=["submit"]</code>；缺
-<code>domainIds</code> → <strong>500
-<code>Column 'domain_id' cannot be null</code></strong></td>
+<td><strong>强制</strong>（类型/父级/权限/必填域，r23 起）</td>
+<td>r17：<code>biz1</code> 自提 →
+<code>SUBMITTED</code>、<code>allowedActions=["submit"]</code>；r23：缺
+<code>domainIds</code> → <strong>400
+<code>VALIDATION_FAILED</code></strong>，<code>detail.field="domainIds"</code>（不再是
+500）</td>
 </tr>
 <tr>
 <td>2</td>
 <td><strong>需求工时评估初审</strong></td>
-<td>仅 <code>estimateDays</code> 字段 + 0.5 天精度校验 +
-父需求只读汇总</td>
-<td><strong>提示</strong>（无环节、无门）</td>
-<td><code>RequirementRules.checkDays</code> 只校验精度/父子；状态机无
-<code>ESTIMATING/ESTIMATED</code>；实测<strong>无工时</strong>的 RD
-<code>start_dev</code> → <strong>200</strong>、无工时的 PDR
-<code>schedule</code> → <strong>200</strong></td>
+<td>第五类审批单据 <code>WBS_ESTIMATE</code>（r26）+
+<code>schedule</code>/<code>start_dev</code> 前置门 + 改人天超 ±20% 派生
+<code>STALE</code></td>
+<td><strong>强制</strong>（r26 起）</td>
+<td>未过门 <code>PDR-0255</code> 调 <code>schedule</code> → <strong>409
+<code>ESTIMATE_NOT_APPROVED</code></strong>，detail 恰好三键；已通过单
+2.0 天改 2.5 天（+25%）→
+<code>status=STALE</code>、<code>allowedActions=[]</code>、<code>start_dev</code>
+→ <strong>409</strong>；夹具 11 张 APPROVED、0 在途</td>
 </tr>
 <tr>
 <td>3</td>
@@ -129,13 +146,15 @@ HTTP 探针；每条结论都带证据。 目的：回答两个问题——①
 <tr>
 <td>4</td>
 <td>拆解产品/研发需求</td>
-<td><code>POST /requirements/{id}/decompose</code>，只允许
-<code>BUS→PDR→RD</code>；动作码 <code>req.action.decompose</code></td>
-<td><strong>弱</strong>（只有类型约束，<strong>没有状态前置</strong>）</td>
-<td>实测：<code>BUS-0391</code> 处于
-<strong>SUBMITTED（未审批）</strong>，<code>pm</code> 直接
-<code>decompose</code> → <strong>201 生成 PDR-0149</strong>，并可立即
-<code>schedule</code></td>
+<td><code>POST /requirements/{id}/decompose</code> +
+父状态前置门（r23）；直建 RD 与 PUT 改父同一判定函数</td>
+<td><strong>强制</strong>（r23 起）</td>
+<td><code>SUBMITTED</code> 的 BUS 拆解 → <strong>409
+<code>PARENT_NOT_POOLED</code></strong>；<code>PENDING_ANALYSIS</code>
+的 PDR 下直建 RD → <strong>409
+<code>PARENT_NOT_SCHEDULED</code></strong>（detail 带
+<code>allowed:["SCHEDULED","IN_DEV"]</code>）；UI
+按钮禁用并写明「父需求尚未入池（当前 SUBMITTED，需 POOLED）」</td>
 </tr>
 <tr>
 <td>5</td>
@@ -180,8 +199,8 @@ Release、用例版本化、执行结果、通过率/覆盖率、失败转缺陷
 </tbody>
 </table>
 <h2 id="3-缺口清单按优先级">3. 缺口清单（按优先级）</h2>
-<h3 id="g1--未审批即可拆解p1管控缺口">G1 ·
-未审批即可拆解（P1，管控缺口）</h3>
+<h3 id="g1--未审批即可拆解p1管控缺口-white_check_mark-已由-r23-闭环">G1
+· 未审批即可拆解（P1，管控缺口）— ✅ 已由 r23 闭环</h3>
 <ul>
 <li>现象：<code>SUBMITTED</code>/<code>APPROVING</code>
 状态的需求可被直接拆出产品需求，等于<strong>绕过审批入池</strong>就能进入交付。</li>
@@ -193,8 +212,9 @@ Release、用例版本化、执行结果、通过率/覆盖率、失败转缺陷
 <code>SCHEDULED/IN_DEV</code>（产品或研发负责人已认领）。拒绝用 409 +
 稳定错误码 <code>PARENT_NOT_POOLED / PARENT_NOT_SCHEDULED</code>。</li>
 </ul>
-<h3 id="g2--工时评估初审没有环节也没有门p1管控缺口">G2 ·
-工时评估初审没有环节、也没有门（P1，管控缺口）</h3>
+<h3
+id="g2--工时评估初审没有环节也没有门p1管控缺口-white_check_mark-已由-r26-闭环">G2
+· 工时评估初审没有环节、也没有门（P1，管控缺口）— ✅ 已由 r26 闭环</h3>
 <ul>
 <li>现象：研发填个 <code>estimateDays</code>
 就完了；没填也能排期、也能开始开发。业务方看到的"预估人天"因此可能长期为空或被事后补。</li>
@@ -207,8 +227,9 @@ Release、用例版本化、执行结果、通过率/覆盖率、失败转缺陷
 为空或未初审通过 → 409
 <code>ESTIMATE_NOT_APPROVED</code>；父需求汇总口径不变（仍只读）。</li>
 </ul>
-<h3 id="g3--提报缺业务域返回-500p2缺陷">G3 · 提报缺业务域返回
-500（P2，缺陷）</h3>
+<h3
+id="g3--提报缺业务域返回-500p2缺陷-white_check_mark-已由-r23-闭环">G3 ·
+提报缺业务域返回 500（P2，缺陷）— ✅ 已由 r23 闭环</h3>
 <ul>
 <li>现象与证据：<code>POST /requirements</code> 不带
 <code>domainIds</code> → 500，日志
@@ -217,8 +238,10 @@ Release、用例版本化、执行结果、通过率/覆盖率、失败转缺陷
 并指明字段；同时补一条负向用例进
 <code>platform-test-negative</code>。</li>
 </ul>
-<h3 id="g4--厂商项目管理岗没有独立角色p2岗位缺口">G4 ·
-厂商"项目管理"岗没有独立角色（P2，岗位缺口）</h3>
+<h3
+id="g4--厂商项目管理岗没有独立角色p2岗位缺口-white_check_mark-已由-r24r25-闭环">G4
+· 厂商"项目管理"岗没有独立角色（P2，岗位缺口）— ✅ 已由 r24/r25
+闭环</h3>
 <ul>
 <li>现状：只有 <code>PMO</code>（域负责人）与"厂商负责人"（靠
 <code>vendor_id</code>
@@ -228,7 +251,7 @@ Release、用例版本化、执行结果、通过率/覆盖率、失败转缺陷
 <code>VENDOR_PM</code>（厂商项目经理），默认授权：本厂商需求查看、排期建议、交付物登记、测试计划参与；<strong>不给</strong>跨厂商查看与版本审批。走授权页配置，不改代码里的硬编码矩阵（r20
 起权限已数据驱动，新增角色成本低）。</li>
 </ul>
-<h2 id="4-补齐规划3-轮逐轮可验收">4. 补齐规划（3 轮，逐轮可验收）</h2>
+<h2 id="4-补齐规划3-轮均已完成">4. 补齐规划（3 轮，均已完成）</h2>
 <table>
 <thead>
 <tr>
@@ -263,8 +286,50 @@ RD → 409；缺域提报 → 400；正常链路不放宽</td>
 </tr>
 </tbody>
 </table>
-<p>排期建议：R-A 与 R-C 可并行（互不碰文件），R-B
-单独一轮（动状态机与审批引擎，改动面最大）。</p>
+<p>排期建议（历史）：R-A 与 R-C 可并行（互不碰文件），R-B
+单独一轮（动状态机与审批引擎，改动面最大）。<strong>实际执行顺序</strong>：R-A（r23）→
+R-C（r24/r25）→ R-B（r26）→ 契约补丁（r27）→ 门禁夹具（r28）。</p>
+<h2 id="45-闭环后的实测数字2026-11-18main--0127ca4">4.5
+闭环后的实测数字（2026-11-18，<code>main</code> =
+<code>0127ca4</code>）</h2>
+<table>
+<thead>
+<tr>
+<th>门禁</th>
+<th>本轮实测</th>
+<th>与缺口的关系</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>platform-verify</code></td>
+<td><strong>193/193</strong></td>
+<td>G1/G2 正向链路不倒退；新增「池查询不许直出状态机」静态检查</td>
+</tr>
+<tr>
+<td><code>platform-test-negative</code></td>
+<td><strong>130/130</strong>（干净重置下恒定）</td>
+<td>新增 4c（评估门六态 16 条）/ 4d（列表=详情 19 条）/ 7-8
+段自带夹具</td>
+</tr>
+<tr>
+<td><code>access-verify</code></td>
+<td><strong>206/206</strong></td>
+<td>G4：新增 <code>a6</code> 写按钮门禁、<code>a7</code> 评估门（静态 10
++ 运行时 6）</td>
+</tr>
+<tr>
+<td><code>rbac-verify</code></td>
+<td><strong>113/113</strong></td>
+<td>11 角色 × 168 格（第 11 角色 <code>VENDOR_PM</code>）</td>
+</tr>
+<tr>
+<td><code>platform-demo-reset</code></td>
+<td><strong>69/69</strong></td>
+<td>演示夹具含 11 张 APPROVED 评估单、厂商归属与 2 张演示报表</td>
+</tr>
+</tbody>
+</table>
 <h2 id="5-附本次核查跑过的探针">5. 附：本次核查跑过的探针</h2>
 <div class="sourceCode" id="cb1"><pre
 class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># G1：未审批需求直接拆解</span></span>
@@ -283,6 +348,13 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <code>BUS-0389/0391</code>、<code>PDR-0149</code>、<code>RD-1013/1014</code>
 等已在演示库中，重置即清。</p>
 </blockquote>
+<h2 id="6-复核命令任何人可重跑">6. 复核命令（任何人可重跑）</h2>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> platform-down <span class="kw">&amp;&amp;</span> <span class="fu">make</span> platform-up <span class="kw">&amp;&amp;</span> <span class="fu">bash</span> scripts/platform-demo-reset.sh   <span class="co"># 69/69</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/platform-verify.sh          <span class="co"># 193/193</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/platform-test-negative.sh   <span class="co"># 130/130（第 7/8 段自造夹具，不依赖环境待办）</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/access-verify.sh            <span class="co"># 206/206</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/rbac-verify.sh              <span class="co"># 113/113</span></span></code></pre></div>
 </div>
 </body>
 </html>
