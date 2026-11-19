@@ -249,3 +249,60 @@ make release-flow-upgrade    # 连跑两次 /internal/seed，定义/绑定/versi
 
 `release-flow-verify` 的 `--static-only` 只跑不连栈的契约检查（脚本语法/断言分母/Makefile/DEMO 文档/EXIT trap），
 用于改脚本时快速自检；正式门禁必须连栈跑满 32 条，**缺前置直接失败，不跳过**。
+
+---
+
+## 附 A. 实测记录（2026-11-19，main = 177389a，我自己跑过的）
+
+下面这段不是设计意图，是真跑出来的结果与踩到的坑，按顺序复现即可。
+
+### A.1 我跑通到哪一步
+
+| 步骤 | 结果 |
+|---|---|
+| 建版本（`releaseLevel=NORMAL`） | `201`，返回 `code=REL-1388`，`allowedActions=["lock","add_requirements","approval","milestone"]` |
+| 挂需求 + 填 MR/人天 | `200`（`releaseId` 随之写入需求行） |
+| 建计划 `TP-1364` | `201`，`status=PENDING_REVIEW` |
+| **批计划** | `admin` / 计划负责人 `200`；**`qa1` 403 `PLAN_APPROVE_FORBIDDEN`**、`tl1` 也 403（见 A.2） |
+| 启动 → 执行 PASS → 关轮次 → 完成 | 全部 `200`；执行 `201`，`executionId=12611`，轮次 `610` `CLOSED/PASS`，计划 `COMPLETED` |
+| 建报告 + 三签 | `qa1 → pm → tl1` 依次 `200`，最终 `status=SIGNED、approved=3/3`，每步回显 `pendingRole` |
+| 质量门评估 | `result=PASS`、`failedRules=[]`；**`snapshotId=0`**（见 A.3） |
+| 建发布单 `DEP-0724` | `201`，`status=DRAFT` |
+| 直接提交 | `409 RELEASE_NOT_LOCKED`（版本还是 `PLAN`）——**闸门有顺序** |
+| 先发起版本审批（`POST /releases/2199/approval`） | `201`，`instanceId=5365`、`nodeKeys=["n1","n2","n3"]`，版本转 `LOCKED` |
+| 再提交发布单 | `409 ADMISSION_FAILED`，`failed=["REQ_TEST_PASSED","REQ_APPROVALS_DONE","MR_FILLED","MAN_DAYS_FILLED"]`（逐项带 `fixHint`） |
+
+### A.2 三个必须知道的实操事实（和上面正文的假设不同）
+
+1. **批计划的人不是 qa1**：`POST /test-plans/{id}/approve` 只允许「计划负责人 / PMO / 管理层」；演示时把 `ownerId` 设成 `admin`（`1`）后用 `admin` 批，或换成真正的 PMO。qa1 只负责执行与登记结果。
+2. **用例列表路径是 `/api/deliver/testcases`**，不是 `/test-cases`。后者不返回 404，而是**挂住约 20 秒**（我实测 `curl` 15s 超时 0 字节）——如果照着错的路径调，看起来就像"服务挂了"。建议后续加一条 404 兜底或用例列表索引。
+3. **`POST /quality-gates/{releaseId}/evaluate` 返回的是"评审"结果**：`result=PASS` 但 `snapshotId=0`；真正落库的快照是在发布单侧链路里出现的（我这次是 `#727`、`#728`）。所以「版本链路第③段由 MISSING 变 PASS」要用**发布单建好之后**的 `GET /releases/{id}` 看，不要用 evaluate 的返回值判断。
+
+### A.3 这次演示卡在哪（也是有说服力的部分）
+
+`DEP-0724` 的 9 项准入实况：**通过 2 / 失败 4 / 关闭 3**。
+
+| # | 项 | 结果 | 原因 |
+|---|---|---|---|
+| 1 | `REQ_TEST_PASSED` | FAIL | 关联需求 `DEMO-R-12` 仍是 `TODO`，没到「测试通过」 |
+| 2 | `NO_OPEN_HIGH_DEFECT` | PASS | 无未关闭 P0/P1 |
+| 3 | `REQ_APPROVALS_DONE` | FAIL | 需求自身提报/评审审批未发起 |
+| 4 | `MR_FILLED` | FAIL | 需求未填 MR（演示数据里 12 条 `DEMO-R-*` 的 `mr_url` 全为空） |
+| 5 | `MAN_DAYS_FILLED` | FAIL | 实际人天未填（预估 2.0 已有） |
+| 6 | `QUALITY_GATE` | PASS | 5 条规则全过，快照 `#728` |
+| 7–9 | 构建 / Sonar / 制品 | CLOSED | 三个集成未接入，按设计自动关闭（不计 FAIL，也不冒充"已校验"） |
+
+也就是说：**测试计划、报告三签、质量门这三段已经全绿，"卡"在需求自身的流转与字段**——这正是联动该有的样子：版本侧再干净，需求没走到「测试通过」、MR 与人天没填，发布单一格都推不动。
+
+要把这条链走到 `PUBLISHED`，还差的是把一条 RD 走完「提报→评审→排期→开发→提测→测试通过→合入→完成」，再补 MR 与实际人天。注意 `DEMO-R-12` 是 `RD` 且 `TODO`，`submit`/`schedule` 直接返回 `409 ILLEGAL_TRANSITION`（RD 的动作名与 BUS/PDR 不同），演示前先确认该类型的动作名，或改用一条已到 `PENDING_TEST` 的需求。
+
+### A.4 复现命令（一段可粘）
+
+```bash
+make platform-up && make platform-seed && make platform-demo-reset
+# 建版本 → 挂需求 → 建计划 → admin 批计划 → 执行 → 关轮次 → 完成
+# 建报告 → qa1/pm/tl1 三签 → 建发布单 → 发起版本审批 → 提交发布单（会 409 ADMISSION_FAILED）
+bash scripts/release-flow-verify.sh          # 32/32，含上面这些顺序与负向
+```
+
+截图：`docs/teamflow/demo-shots/r30-release-chain.png`（版本详情四段链路 + 三级审批阶梯）、`docs/teamflow/demo-shots/r30-deploy-admission.png`（发布单 9 项准入明细 + 质量门 PASS 快照）。

@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DEMO · 发版分级审批链（r30 实测记录）</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:960px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}.toc>ul{margin-left:0}.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+td:first-child,th:first-child{white-space:nowrap}
+@media print{body{padding:0}.toc{break-inside:avoid}}
+h1.title{display:none}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="toc"><div class="toc-title">目录</div>
+<ul>
+<li><a href="#demo--发版分级审批链r30"
+id="toc-demo--发版分级审批链r30">DEMO · 发版分级审批链（r30）</a>
+<ul>
+<li><a href="#0-前置一次性" id="toc-0-前置一次性">0.
+前置（一次性）</a></li>
+<li><a href="#1-建一个常规版本normal-三级链"
+id="toc-1-建一个常规版本normal-三级链">1. 建一个「常规」版本（NORMAL
+三级链）</a></li>
+<li><a href="#2-把需求挂进版本" id="toc-2-把需求挂进版本">2.
+把需求挂进版本</a></li>
+<li><a href="#3-建测试计划并跑一轮-pass"
+id="toc-3-建测试计划并跑一轮-pass">3. 建测试计划并跑一轮 PASS</a></li>
+<li><a href="#4-测试报告与三签qa1--pm--tl1"
+id="toc-4-测试报告与三签qa1--pm--tl1">4. 测试报告与三签（qa1 → pm →
+tl1）</a></li>
+<li><a href="#5-评质量门pass-才放行" id="toc-5-评质量门pass-才放行">5.
+评质量门（PASS 才放行）</a></li>
+<li><a href="#6-建发布单含-9-项准入" id="toc-6-建发布单含-9-项准入">6.
+建发布单（含 9 项准入）</a></li>
+<li><a href="#7-发起审批并提交快照就地固化"
+id="toc-7-发起审批并提交快照就地固化">7.
+发起审批并提交：快照就地固化</a></li>
+<li><a href="#8-逐级审批发布单两级--版本三级--published"
+id="toc-8-逐级审批发布单两级--版本三级--published">8.
+逐级审批：发布单两级 → 版本三级 → PUBLISHED</a></li>
+<li><a href="#被拦链四条真拦不是灰按钮"
+id="toc-被拦链四条真拦不是灰按钮">被拦链（四条真拦，不是灰按钮）</a></li>
+<li><a href="#一键回归" id="toc-一键回归">一键回归</a></li>
+<li><a href="#附-a-实测记录2026-11-19main--177389a我自己跑过的"
+id="toc-附-a-实测记录2026-11-19main--177389a我自己跑过的">附 A.
+实测记录（2026-11-19，main = 177389a，我自己跑过的）</a></li>
+</ul></li>
+</ul>
+</div>
+<h1 id="demo--发版分级审批链r30">DEMO · 发版分级审批链（r30）</h1>
+<blockquote>
+<p>本文件是 r30「分级审批 + 四段同源链路 +
+不可变提交快照」的<strong>演示脚本</strong>，命令可直接粘贴执行。
+约束：演示与实现同账号、同路径、同端口（网关 8080 / req 8082 / deliver
+8083），不另起环境、不改数据。 截图位统一放在任务夹
+<code>docs/teamflow/20261118-r30-release-approval-chain/evidence/</code>，由
+QA 阶段补图。</p>
+</blockquote>
+<hr />
+<h2 id="0-前置一次性">0. 前置（一次性）</h2>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> platform-up                 <span class="co"># 栈：nacos + 网关 + req + deliver</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> platform-seed               <span class="co"># 种子：账号/域/演示数据 + r30 分级定义与 6 个绑定槽</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> platform-demo-reset         <span class="co"># 演示夹具复位（12 条需求链 + 不变量自检）</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/release-flow-upgrade.sh   <span class="co"># 可选：证明 /internal/seed 连跑两次计数不增</span></span></code></pre></div>
+<p>账号（密码统一 <code>Passw0rd!</code>，admin 为
+<code>Admin@12345</code>）：</p>
+<table>
+<thead>
+<tr>
+<th>账号</th>
+<th>角色</th>
+<th>在本链中的位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pm</code></td>
+<td>PRODUCT</td>
+<td>RELEASE 常规链第 1 级（产品经理会签）</td>
+</tr>
+<tr>
+<td><code>tl1</code></td>
+<td>PMO</td>
+<td>RELEASE 常规链第 2 级 / 发布单链第 1 级</td>
+</tr>
+<tr>
+<td><code>vendor1</code></td>
+<td>PMO（厂商）</td>
+<td>与 <code>tl1</code> <strong>同为</strong> PMO 会签人（ALL
+模式需两人都批）</td>
+</tr>
+<tr>
+<td><code>mgr1</code></td>
+<td>MGMT</td>
+<td>RELEASE 常规链第 3 级（管理层，ANY）</td>
+</tr>
+<tr>
+<td><code>admin</code></td>
+<td>PLATFORM_ADMIN</td>
+<td>发布单链第 2 级（平台管理员会签）</td>
+</tr>
+<tr>
+<td><code>qa1</code></td>
+<td>QA / TEST_LEAD</td>
+<td>测试报告三签第 1 签、计划执行人</td>
+</tr>
+</tbody>
+</table>
+<p>所有请求都带 <code>Authorization: Bearer &lt;token&gt;</code> 与
+<code>X-Tenant-Id: &lt;数字 tenantId&gt;</code>（网关按数字解析，传
+<code>t1</code> 会 403）。</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="va">BASE</span><span class="op">=</span>http://127.0.0.1:8080</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">login()</span> <span class="kw">{</span> <span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-X</span> POST <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/api/req/auth/login&quot;</span> <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="dt">\</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&quot;{</span><span class="dt">\&quot;</span><span class="st">tenantCode</span><span class="dt">\&quot;</span><span class="st">:</span><span class="dt">\&quot;</span><span class="st">t1</span><span class="dt">\&quot;</span><span class="st">,</span><span class="dt">\&quot;</span><span class="st">username</span><span class="dt">\&quot;</span><span class="st">:</span><span class="dt">\&quot;</span><span class="va">$1</span><span class="dt">\&quot;</span><span class="st">,</span><span class="dt">\&quot;</span><span class="st">password</span><span class="dt">\&quot;</span><span class="st">:</span><span class="dt">\&quot;</span><span class="va">$2</span><span class="dt">\&quot;</span><span class="st">}&quot;</span><span class="kw">;</span> <span class="kw">}</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="va">TOK_PM</span><span class="op">=</span><span class="va">$(</span><span class="fu">login</span> pm <span class="st">&#39;Passw0rd!&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .token<span class="va">)</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="va">TOK_TL1</span><span class="op">=</span><span class="va">$(</span><span class="fu">login</span> tl1 <span class="st">&#39;Passw0rd!&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .token<span class="va">)</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="va">TOK_V1</span><span class="op">=</span><span class="va">$(</span><span class="fu">login</span> vendor1 <span class="st">&#39;Passw0rd!&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .token<span class="va">)</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="va">TOK_MGR</span><span class="op">=</span><span class="va">$(</span><span class="fu">login</span> mgr1 <span class="st">&#39;Passw0rd!&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .token<span class="va">)</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="va">TOK_ADM</span><span class="op">=</span><span class="va">$(</span><span class="fu">login</span> admin <span class="st">&#39;Admin@12345&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .token<span class="va">)</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="va">TOK_QA</span><span class="op">=</span><span class="va">$(</span><span class="fu">login</span> qa1 <span class="st">&#39;Passw0rd!&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .token<span class="va">)</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="va">TID</span><span class="op">=</span><span class="va">$(</span><span class="fu">login</span> admin <span class="st">&#39;Admin@12345&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .tenantId<span class="va">)</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="fu">api()</span> <span class="kw">{</span> <span class="co"># api &lt;token&gt; &lt;METHOD&gt; &lt;path&gt; [json]</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>  <span class="bu">local</span> <span class="va">t</span><span class="op">=</span><span class="va">$1</span> <span class="va">m</span><span class="op">=</span><span class="va">$2</span> <span class="va">p</span><span class="op">=</span><span class="va">$3</span> <span class="va">d</span><span class="op">=</span><span class="va">${4</span><span class="op">:-</span><span class="va">}</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="kw">[[</span> <span class="ot">-n</span> <span class="st">&quot;</span><span class="va">$d</span><span class="st">&quot;</span> <span class="kw">]];</span> <span class="cf">then</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>    <span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-X</span> <span class="st">&quot;</span><span class="va">$m</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$BASE$p</span><span class="st">&quot;</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$t</span><span class="st">&quot;</span> <span class="at">-H</span> <span class="st">&quot;X-Tenant-Id: </span><span class="va">$TID</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>      <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="at">-d</span> <span class="st">&quot;</span><span class="va">$d</span><span class="st">&quot;</span> <span class="at">-w</span> <span class="st">&#39;\n%{http_code}\n&#39;</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>  <span class="cf">else</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>    <span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-X</span> <span class="st">&quot;</span><span class="va">$m</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$BASE$p</span><span class="st">&quot;</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$t</span><span class="st">&quot;</span> <span class="at">-H</span> <span class="st">&quot;X-Tenant-Id: </span><span class="va">$TID</span><span class="st">&quot;</span> <span class="at">-w</span> <span class="st">&#39;\n%{http_code}\n&#39;</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>  <span class="cf">fi</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a><span class="kw">}</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a><span class="co"># 演示夹具变量（platform-demo-reset 之后稳定存在；库参数与 scripts/lib.sh 一致：root/空密码）</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a><span class="fu">q()</span> <span class="kw">{</span> <span class="ex">mysql</span> <span class="at">-N</span> <span class="at">-e</span> <span class="st">&quot;</span><span class="va">$1</span><span class="st">&quot;</span> devops_platform<span class="kw">;</span> <span class="kw">}</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a><span class="va">DOMAIN</span><span class="op">=</span><span class="va">$(</span><span class="ex">q</span> <span class="st">&quot;SELECT id FROM biz_domain WHERE tenant_id=</span><span class="va">$TID</span><span class="st"> ORDER BY id LIMIT 1&quot;</span><span class="va">)</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a><span class="va">RD_ID</span><span class="op">=</span><span class="va">$(</span><span class="ex">q</span> <span class="st">&quot;SELECT id FROM requirement WHERE tenant_id=</span><span class="va">$TID</span><span class="st"> AND code=&#39;DEMO-R-08&#39; LIMIT 1&quot;</span><span class="va">)</span></span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a><span class="va">CASE_ID</span><span class="op">=</span><span class="va">$(</span><span class="ex">q</span> <span class="st">&quot;SELECT id FROM test_case WHERE tenant_id=</span><span class="va">$TID</span><span class="st"> ORDER BY id LIMIT 1&quot;</span><span class="va">)</span></span></code></pre></div>
+<blockquote>
+<p>下文 <code>→ 200</code> 指 http 状态；响应体用 <code>jq</code>
+取字段。演示只读取，不手工改库。</p>
+</blockquote>
+<hr />
+<h2 id="1-建一个常规版本normal-三级链">1. 建一个「常规」版本（NORMAL
+三级链）</h2>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="va">REL</span><span class="op">=</span><span class="va">$(</span><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> POST /api/req/releases <span class="st">&#39;{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;name&quot;:&quot;r30 演示-常规发版&quot;,&quot;domainId&quot;:&#39;&quot;</span><span class="va">$DOMAIN</span><span class="st">&quot;&#39;,&quot;gateMode&quot;:&quot;STRICT&quot;,</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;startDate&quot;:&quot;2026-11-18&quot;,&quot;endDate&quot;:&quot;2026-11-30&quot;,&quot;plannedReleaseDate&quot;:&quot;2026-12-02&quot;,</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;releaseLevel&quot;:&quot;NORMAL&quot;}&#39;</span> <span class="kw">|</span> <span class="fu">sed</span> <span class="st">&#39;$d&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .release.id<span class="va">)</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> GET <span class="st">&quot;/api/req/releases/</span><span class="va">$REL</span><span class="st">&quot;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;.release | {code,releaseLevel,releaseLevelLabel,status}&#39;</span></span></code></pre></div>
+<p>→
+<code>200</code>，<code>releaseLevel:"NORMAL"</code>、<code>releaseLevelLabel:"常规"</code>、<code>status:"PLAN"</code>；<code>approvalLevels</code>
+为空（未发起）。 <code>domainId</code>
+取演示域：<code>mysql -N -e "SELECT id FROM devops_platform.biz_domain LIMIT 1"</code>。</p>
+<p><strong>截图位 1</strong>：版本详情「概览」顶部四段链路（全
+MISSING）+ 侧栏等级「常规」。</p>
+<h2 id="2-把需求挂进版本">2. 把需求挂进版本</h2>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/req/releases/</span><span class="va">$REL</span><span class="st">/requirements&quot;</span> <span class="dt">\</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="st">&#39;{&quot;requirementIds&quot;:[&#39;&quot;</span><span class="va">$RD_ID</span><span class="st">&quot;&#39;]}&#39;</span></span></code></pre></div>
+<p>→ <code>200</code>；<code>RD_ID</code> 用
+<code>make platform-demo-reset</code> 后的 <code>DEMO-R-08</code>（已填
+MR/工时，能过 9 项准入）。 此时
+<code>flowChain.deployAdmission.status:"MISSING"</code>（还没有发布单），<code>testPlan.status:"MISSING"</code>。</p>
+<h2 id="3-建测试计划并跑一轮-pass">3. 建测试计划并跑一轮 PASS</h2>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="va">PLAN</span><span class="op">=</span><span class="va">$(</span><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_QA</span><span class="st">&quot;</span> POST /api/deliver/test-plans <span class="st">&#39;{</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;releaseId&quot;:&#39;&quot;</span><span class="va">$REL</span><span class="st">&quot;&#39;,&quot;name&quot;:&quot;r30 演示计划&quot;,&quot;ownerId&quot;:1,</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;windowStart&quot;:&quot;2026-11-18&quot;,&quot;windowEnd&quot;:&quot;2026-11-25&quot;,&quot;caseIds&quot;:[&#39;&quot;</span><span class="va">$CASE_ID</span><span class="st">&quot;&#39;],&quot;gateMode&quot;:&quot;STRICT&quot;}&#39;</span> <span class="dt">\</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="fu">sed</span> <span class="st">&#39;$d&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .plan.id<span class="va">)</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> a <span class="kw">in</span> submit-review approve start<span class="kw">;</span> <span class="cf">do</span> <span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_QA</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/deliver/test-plans/</span><span class="va">$PLAN</span><span class="st">/</span><span class="va">$a</span><span class="st">&quot;</span> <span class="op">&gt;</span>/dev/null<span class="kw">;</span> <span class="cf">done</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_QA</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/deliver/test-plans/</span><span class="va">$PLAN</span><span class="st">/execute&quot;</span> <span class="dt">\</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>  <span class="st">&#39;{&quot;caseId&quot;:&#39;&quot;</span><span class="va">$CASE_ID</span><span class="st">&quot;&#39;,&quot;result&quot;:&quot;PASS&quot;,&quot;note&quot;:&quot;r30 演示&quot;}&#39;</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="va">RID</span><span class="op">=</span><span class="va">$(</span><span class="ex">mysql</span> <span class="at">-N</span> <span class="at">-e</span> <span class="st">&quot;SELECT id FROM devops_platform.test_plan_round WHERE plan_id=</span><span class="va">$PLAN</span><span class="st"> AND active=1&quot;</span><span class="va">)</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_QA</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/deliver/test-plans/</span><span class="va">$PLAN</span><span class="st">/rounds/</span><span class="va">$RID</span><span class="st">/close&quot;</span> <span class="st">&#39;{&quot;conclusion&quot;:&quot;PASS&quot;,&quot;note&quot;:&quot;全通过&quot;}&#39;</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_QA</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/deliver/test-plans/</span><span class="va">$PLAN</span><span class="st">/complete&quot;</span></span></code></pre></div>
+<p>→ 计划 <code>APPROVED→IN_PROGRESS→COMPLETED</code>；版本详情的
+<code>flowChain.testPlan</code> 由 <code>MISSING</code> 变
+<code>PASS</code>，
+<code>allApproved:true</code>、<code>plans[0].conclusion:"PASS"</code>。</p>
+<p><strong>截图位 2</strong>：链路第①段「测试计划」由虚线的「暂无」翻成
+PASS。</p>
+<h2 id="4-测试报告与三签qa1--pm--tl1">4. 测试报告与三签（qa1 → pm →
+tl1）</h2>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="va">RPT</span><span class="op">=</span><span class="va">$(</span><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_QA</span><span class="st">&quot;</span> POST /api/deliver/test-reports <span class="dt">\</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  <span class="st">&#39;{&quot;scope&quot;:&quot;RELEASE&quot;,&quot;releaseId&quot;:&#39;&quot;</span><span class="va">$REL</span><span class="st">&quot;&#39;,&quot;note&quot;:&quot;r30 演示报告&quot;}&#39;</span> <span class="kw">|</span> <span class="fu">sed</span> <span class="st">&#39;$d&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .report.id<span class="va">)</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_QA</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/deliver/test-reports/</span><span class="va">$RPT</span><span class="st">/versions/1/signoff&quot;</span> <span class="st">&#39;{&quot;decision&quot;:&quot;APPROVE&quot;,&quot;comment&quot;:&quot;测试通过&quot;}&#39;</span> <span class="op">&gt;</span>/dev/null</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/deliver/test-reports/</span><span class="va">$RPT</span><span class="st">/versions/1/signoff&quot;</span> <span class="st">&#39;{&quot;decision&quot;:&quot;APPROVE&quot;,&quot;comment&quot;:&quot;产品确认&quot;}&#39;</span> <span class="op">&gt;</span>/dev/null</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_TL1</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/deliver/test-reports/</span><span class="va">$RPT</span><span class="st">/versions/1/signoff&quot;</span> <span class="st">&#39;{&quot;decision&quot;:&quot;APPROVE&quot;,&quot;comment&quot;:&quot;PMO 确认&quot;}&#39;</span> <span class="op">&gt;</span>/dev/null</span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_QA</span><span class="st">&quot;</span> GET <span class="st">&quot;/api/deliver/test-reports/</span><span class="va">$RPT</span><span class="st">/versions/1/signoff&quot;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;{status,conclusion,approved,total}&#39;</span></span></code></pre></div>
+<p>→
+<code>status:"SIGNED"</code>、<code>approved:3</code>、<code>total:3</code>；链路第②段
+<code>signoff.levels</code> 三行全绿。 签署顺序不可乱：<code>qa1</code>
+未签时 <code>pm</code> 签会 409/403（顺序锁）。</p>
+<p><strong>截图位 3</strong>：链路第②段「报告三签」三行阶梯 +
+侧栏审批进度。</p>
+<h2 id="5-评质量门pass-才放行">5. 评质量门（PASS 才放行）</h2>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="va">GATE</span><span class="op">=</span><span class="va">$(</span><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_QA</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/deliver/quality-gates/</span><span class="va">$REL</span><span class="st">/evaluate&quot;</span> <span class="dt">\</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  <span class="st">&#39;{&quot;deployOrderId&quot;:null,&quot;requirementIds&quot;:[&#39;&quot;</span><span class="va">$RD_ID</span><span class="st">&quot;&#39;]}&#39;</span><span class="va">)</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;</span><span class="va">$GATE</span><span class="st">&quot;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;{result,snapshotId,failedRules}&#39;</span></span></code></pre></div>
+<p>→ <code>result:"PASS"</code>、<code>failedRules:[]</code>；链路第③段
+<code>qualityGate.result:"PASS"</code>、<code>computedAt</code> 非空。
+门是<strong>只读快照</strong>：之后不再调用
+evaluate，链路与快照读的都是这一份。</p>
+<p><strong>截图位 4</strong>：链路第③段「质量门」PASS + 规则明细。</p>
+<h2 id="6-建发布单含-9-项准入">6. 建发布单（含 9 项准入）</h2>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="va">ORD</span><span class="op">=</span><span class="va">$(</span><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> POST /api/req/deploy-orders <span class="st">&#39;{</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;releaseId&quot;:&#39;&quot;</span><span class="va">$REL</span><span class="st">&quot;&#39;,&quot;env&quot;:&quot;PROD&quot;,</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;windowStart&quot;:&quot;2026-12-02T22:00:00+08:00&quot;,&quot;windowEnd&quot;:&quot;2026-12-03T02:00:00+08:00&quot;,</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;artifactVersion&quot;:&quot;r30-demo-1&quot;,&quot;rollbackPlan&quot;:&quot;回滚到 r29 镜像&quot;,&quot;impact&quot;:&quot;演示环境&quot;,</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;ownerId&quot;:1,&quot;steps&quot;:[{&quot;name&quot;:&quot;停流量&quot;,&quot;order&quot;:1},{&quot;name&quot;:&quot;部署&quot;,&quot;order&quot;:2},{&quot;name&quot;:&quot;回归&quot;,&quot;order&quot;:3}],</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;requirementIds&quot;:[&#39;&quot;</span><span class="va">$RD_ID</span><span class="st">&quot;&#39;]}&#39;</span> <span class="kw">|</span> <span class="fu">sed</span> <span class="st">&#39;$d&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .order.id<span class="va">)</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> GET <span class="st">&quot;/api/req/releases/</span><span class="va">$REL</span><span class="st">&quot;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span> <span class="dt">\</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;.flowChain.deployAdmission | {status,passedCount,failedCount,frozen,items:(.items|length)}&#39;</span></span></code></pre></div>
+<p>→ 准入 9
+项：<code>REQ_TEST_PASSED / NO_OPEN_HIGH_DEFECT / REQ_APPROVALS_DONE / MR_FILLED / MAN_DAYS_FILLED / QUALITY_GATE / BUILD_PASSED / SONAR_GATE_PASSED / ARTIFACT_VERIFIED</code>，<code>frozen:false</code>（DRAFT
+实时评估）。 链路第④段由 <code>MISSING</code> 变
+<code>PASS</code>；发布单详情侧的同一份清单在
+<code>GET /api/req/deploy-orders/$ORD</code> 的 <code>.admission</code>
+（<code>.admission.counts.passed/failed</code>、<code>.admission.items|length==9</code>）。</p>
+<p><strong>截图位 5</strong>：链路第④段「发布单准入」9 项明细 +
+<code>frozen:false</code> 印章。</p>
+<h2 id="7-发起审批并提交快照就地固化">7.
+发起审批并提交：快照就地固化</h2>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 7a 版本进入 LOCKED（此后等级/需求都不可改）</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/req/releases/</span><span class="va">$REL</span><span class="st">/approval&quot;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;{instanceId,nodeKeys}&#39;</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="co"># → {&quot;instanceId&quot;:N,&quot;nodeKeys&quot;:[&quot;n1&quot;,&quot;n2&quot;,&quot;n3&quot;]}</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 7b 提交发布单：闸门顺序 计划→LOCKED→准入→门→快照→审批</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/req/deploy-orders/</span><span class="va">$ORD</span><span class="st">/submit&quot;</span> <span class="st">&#39;{}&#39;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;{status}&#39;</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> GET <span class="st">&quot;/api/req/deploy-orders/</span><span class="va">$ORD</span><span class="st">&quot;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span> <span class="dt">\</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;.flowSnapshot | {round,payloadHash,changedSinceSubmit}&#39;</span></span></code></pre></div>
+<p>→ 提交
+<code>200</code>；<code>flowSnapshot.round:1</code>、<code>payloadHash</code>
+64 位小写 hex、<code>changedSinceSubmit:false</code>、
+<code>flowSnapshotHistory[{round:1,...}]</code>。回放：<code>GET /api/req/deploy-orders/$ORD/flow-snapshots/1</code>。
+提交后才产生
+<code>PENDING_APPROVAL</code>，发布单审批链（两级）此时才有待办。</p>
+<p><strong>截图位 6</strong>：发布单详情「提交回执」卡：第 1 轮 + 12 位
+hash + 段级「已变化」无印章。</p>
+<h2 id="8-逐级审批发布单两级--版本三级--published">8.
+逐级审批：发布单两级 → 版本三级 → PUBLISHED</h2>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">todo()</span> <span class="kw">{</span> <span class="ex">api</span> <span class="st">&quot;</span><span class="va">$1</span><span class="st">&quot;</span> GET <span class="st">&#39;/api/req/approvals/todo?page=1&amp;size=100&#39;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span> <span class="dt">\</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> <span class="at">--arg</span> b <span class="st">&quot;</span><span class="va">$2</span><span class="st">&quot;</span> <span class="at">--arg</span> t <span class="st">&quot;</span><span class="va">$3</span><span class="st">&quot;</span> <span class="at">--arg</span> n <span class="st">&quot;</span><span class="va">$4</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>      <span class="st">&#39;.items[] | select(.bizId==($b|tonumber) and .bizType==$t and .nodeKey==$n) | .taskId&#39;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span><span class="kw">;</span> <span class="kw">}</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="fu">approve()</span> <span class="kw">{</span> <span class="ex">api</span> <span class="st">&quot;</span><span class="va">$1</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/req/approvals/tasks/</span><span class="va">$2</span><span class="st">/actions&quot;</span> <span class="st">&#39;{&quot;action&quot;:&quot;APPROVE&quot;,&quot;comment&quot;:&quot;演示批准&quot;}&#39;</span> <span class="op">&gt;</span>/dev/null<span class="kw">;</span> <span class="kw">}</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 发布单 n1：PMO 会签（tl1 与 vendor1 都必须批）；n2：平台管理员</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a><span class="ex">approve</span> <span class="st">&quot;</span><span class="va">$TOK_TL1</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$(</span><span class="ex">todo</span> <span class="st">&quot;</span><span class="va">$TOK_TL1</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$ORD</span><span class="st">&quot;</span> REQ_DEPLOY n1<span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a><span class="ex">approve</span> <span class="st">&quot;</span><span class="va">$TOK_V1</span><span class="st">&quot;</span>  <span class="st">&quot;</span><span class="va">$(</span><span class="ex">todo</span> <span class="st">&quot;</span><span class="va">$TOK_V1</span><span class="st">&quot;</span>  <span class="st">&quot;</span><span class="va">$ORD</span><span class="st">&quot;</span> REQ_DEPLOY n1<span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a><span class="ex">approve</span> <span class="st">&quot;</span><span class="va">$TOK_ADM</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$(</span><span class="ex">todo</span> <span class="st">&quot;</span><span class="va">$TOK_ADM</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$ORD</span><span class="st">&quot;</span> REQ_DEPLOY n2<span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> GET <span class="st">&quot;/api/req/deploy-orders/</span><span class="va">$ORD</span><span class="st">&quot;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;{status:.order.status,levels:[.approvalLevels[].status]}&#39;</span></span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a><span class="co"># → status APPROVED，levels [&quot;APPROVED&quot;,&quot;APPROVED&quot;]</span></span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a><span class="co"># 版本 n1 pm → n2 PMO 会签（tl1 + vendor1）→ n3 管理层（ANY）</span></span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a><span class="ex">approve</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span>  <span class="st">&quot;</span><span class="va">$(</span><span class="ex">todo</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span>  <span class="st">&quot;</span><span class="va">$REL</span><span class="st">&quot;</span> RELEASE n1<span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a><span class="ex">approve</span> <span class="st">&quot;</span><span class="va">$TOK_TL1</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$(</span><span class="ex">todo</span> <span class="st">&quot;</span><span class="va">$TOK_TL1</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$REL</span><span class="st">&quot;</span> RELEASE n2<span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a><span class="ex">approve</span> <span class="st">&quot;</span><span class="va">$TOK_V1</span><span class="st">&quot;</span>  <span class="st">&quot;</span><span class="va">$(</span><span class="ex">todo</span> <span class="st">&quot;</span><span class="va">$TOK_V1</span><span class="st">&quot;</span>  <span class="st">&quot;</span><span class="va">$REL</span><span class="st">&quot;</span> RELEASE n2<span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a><span class="ex">approve</span> <span class="st">&quot;</span><span class="va">$TOK_MGR</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$(</span><span class="ex">todo</span> <span class="st">&quot;</span><span class="va">$TOK_MGR</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$REL</span><span class="st">&quot;</span> RELEASE n3<span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> GET <span class="st">&quot;/api/req/releases/</span><span class="va">$REL</span><span class="st">&quot;</span> <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span> <span class="dt">\</span></span>
+<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;{status:.release.status,levels:[.approvalLevels[].status]}&#39;</span></span></code></pre></div>
+<p>→ 版本 <code>PUBLISHED</code>，<code>approvalLevels</code> 三级全
+<code>APPROVED</code>（序号 n1/n2/n3 与节点名一一对应）。 每一步
+<code>NODE_APPROVED</code> 留痕都含 <code>nodeKey/nodeName/mode</code>
+三键（审批实例历史可查）。</p>
+<p><strong>截图位 7</strong>：版本详情审批阶梯三级全绿 + 状态
+<code>PUBLISHED</code>。 <strong>截图位 8</strong>：发布单详情两级审批 +
+快照卡仍可回放第 1 轮。</p>
+<hr />
+<h2 id="被拦链四条真拦不是灰按钮">被拦链（四条真拦，不是灰按钮）</h2>
+<p>演示前先复制一份现场（或用新版本号），以下每条都应看到<strong>具体错误码</strong>，而不是「静默通过」。</p>
+<h3 id="a-测试报告没签完--提交被门拦住409">A. 测试报告没签完 →
+提交被门拦住（409）</h3>
+<p>在上面的版本上重新生成一版报告（未签），再提交同一发布单的<strong>新单据</strong>：</p>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_QA</span><span class="st">&quot;</span> POST /api/deliver/test-reports <span class="st">&#39;{&quot;scope&quot;:&quot;RELEASE&quot;,&quot;releaseId&quot;:&#39;&quot;</span><span class="va">$REL</span><span class="st">&quot;&#39;,&quot;note&quot;:&quot;故意不签&quot;}&#39;</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="va">ORD2</span><span class="op">=</span><span class="va">$(</span><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> POST /api/req/deploy-orders <span class="st">&#39;{...同步骤 6，artifactVersion:&quot;r30-demo-2&quot;...}&#39;</span> <span class="kw">|</span> <span class="fu">sed</span> <span class="st">&#39;$d&#39;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .order.id<span class="va">)</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/req/deploy-orders/</span><span class="va">$ORD2</span><span class="st">/submit&quot;</span> <span class="st">&#39;{}&#39;</span></span></code></pre></div>
+<p>→
+<code>409</code>，<code>code:"QUALITY_GATE_FAILED"</code>，<code>detail.failedRules</code>
+含 <code>QG-02</code>（<code>REPORT_NOT_SIGNED</code>，若报告结论为
+CONDITIONAL 则是 <code>REPORT_CONDITIONAL_UNAPPROVED</code>）； 发布单仍
+<code>DRAFT</code>，<code>flow-snapshots</code> 计数
+<strong>0</strong>（拒绝发生在 capture 之前）。</p>
+<h3 id="b-紧急修复不写原因--400-且等级不变">B. 紧急修复不写原因 → 400
+且等级不变</h3>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_PM</span><span class="st">&quot;</span> PATCH <span class="st">&quot;/api/req/releases/</span><span class="va">$REL</span><span class="st">/level&quot;</span> <span class="st">&#39;{&quot;releaseLevel&quot;:&quot;EMERGENCY&quot;,&quot;emergencyReason&quot;:&quot;   &quot;}&#39;</span></span></code></pre></div>
+<p>→
+<code>400</code>，<code>code:"VALIDATION_FAILED"</code>，<code>detail.field:"emergencyReason"</code>；再查版本仍是原等级（写库前校验，不落半成品）。</p>
+<h3 id="c-越级审批--403任务仍-pending无-approve-留痕">C. 越级审批 →
+403（任务仍 PENDING，无 APPROVE 留痕）</h3>
+<p>版本发起后，<code>mgr1</code> 直接批 n2 的任务（此时该任务属
+<code>tl1</code>/<code>vendor1</code>）：</p>
+<div class="sourceCode" id="cb13"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="va">T</span><span class="op">=</span><span class="va">$(</span><span class="ex">todo</span> <span class="st">&quot;</span><span class="va">$TOK_TL1</span><span class="st">&quot;</span> <span class="st">&quot;</span><span class="va">$REL</span><span class="st">&quot;</span> RELEASE n2<span class="va">)</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a><span class="ex">api</span> <span class="st">&quot;</span><span class="va">$TOK_MGR</span><span class="st">&quot;</span> POST <span class="st">&quot;/api/req/approvals/tasks/</span><span class="va">$T</span><span class="st">/actions&quot;</span> <span class="st">&#39;{&quot;action&quot;:&quot;APPROVE&quot;,&quot;comment&quot;:&quot;越级&quot;}&#39;</span></span></code></pre></div>
+<p>→ <code>403</code>；该 task 仍 <code>PENDING</code>，实例历史里没有
+<code>APPROVE</code> 记录（<code>assertAssignee</code>
+在写历史之前）。</p>
+<h3 id="d-没有直接发布的后门">D. 没有「直接发布」的后门</h3>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-o</span> /dev/null <span class="at">-w</span> <span class="st">&#39;%{http_code}\n&#39;</span> <span class="at">-X</span> POST <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/api/req/releases/</span><span class="va">$REL</span><span class="st">/publish&quot;</span> <span class="dt">\</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOK_ADM</span><span class="st">&quot;</span> <span class="at">-H</span> <span class="st">&quot;X-Tenant-Id: </span><span class="va">$TID</span><span class="st">&quot;</span></span></code></pre></div>
+<p>→
+<code>404/405</code>（发布只能由最后一级审批回调触发；<code>release-flow-verify</code>
+S6 静态检索同款约束）。</p>
+<hr />
+<h2 id="一键回归">一键回归</h2>
+<div class="sourceCode" id="cb15"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> release-flow-verify     <span class="co"># S1..S6 32 条，PASS 必须等于 TOTAL；结束自动 demo-reset</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> release-flow-upgrade    <span class="co"># 连跑两次 /internal/seed，定义/绑定/version 不增（12 条）</span></span></code></pre></div>
+<p><code>release-flow-verify</code> 的 <code>--static-only</code>
+只跑不连栈的契约检查（脚本语法/断言分母/Makefile/DEMO 文档/EXIT trap），
+用于改脚本时快速自检；正式门禁必须连栈跑满 32
+条，<strong>缺前置直接失败，不跳过</strong>。</p>
+<hr />
+<h2 id="附-a-实测记录2026-11-19main--177389a我自己跑过的">附 A.
+实测记录（2026-11-19，main = 177389a，我自己跑过的）</h2>
+<p>下面这段不是设计意图，是真跑出来的结果与踩到的坑，按顺序复现即可。</p>
+<h3 id="a1-我跑通到哪一步">A.1 我跑通到哪一步</h3>
+<table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>建版本（<code>releaseLevel=NORMAL</code>）</td>
+<td><code>201</code>，返回
+<code>code=REL-1388</code>，<code>allowedActions=["lock","add_requirements","approval","milestone"]</code></td>
+</tr>
+<tr>
+<td>挂需求 + 填 MR/人天</td>
+<td><code>200</code>（<code>releaseId</code> 随之写入需求行）</td>
+</tr>
+<tr>
+<td>建计划 <code>TP-1364</code></td>
+<td><code>201</code>，<code>status=PENDING_REVIEW</code></td>
+</tr>
+<tr>
+<td><strong>批计划</strong></td>
+<td><code>admin</code> / 计划负责人
+<code>200</code>；<strong><code>qa1</code> 403
+<code>PLAN_APPROVE_FORBIDDEN</code></strong>、<code>tl1</code> 也
+403（见 A.2）</td>
+</tr>
+<tr>
+<td>启动 → 执行 PASS → 关轮次 → 完成</td>
+<td>全部 <code>200</code>；执行
+<code>201</code>，<code>executionId=12611</code>，轮次 <code>610</code>
+<code>CLOSED/PASS</code>，计划 <code>COMPLETED</code></td>
+</tr>
+<tr>
+<td>建报告 + 三签</td>
+<td><code>qa1 → pm → tl1</code> 依次 <code>200</code>，最终
+<code>status=SIGNED、approved=3/3</code>，每步回显
+<code>pendingRole</code></td>
+</tr>
+<tr>
+<td>质量门评估</td>
+<td><code>result=PASS</code>、<code>failedRules=[]</code>；<strong><code>snapshotId=0</code></strong>（见
+A.3）</td>
+</tr>
+<tr>
+<td>建发布单 <code>DEP-0724</code></td>
+<td><code>201</code>，<code>status=DRAFT</code></td>
+</tr>
+<tr>
+<td>直接提交</td>
+<td><code>409 RELEASE_NOT_LOCKED</code>（版本还是
+<code>PLAN</code>）——<strong>闸门有顺序</strong></td>
+</tr>
+<tr>
+<td>先发起版本审批（<code>POST /releases/2199/approval</code>）</td>
+<td><code>201</code>，<code>instanceId=5365</code>、<code>nodeKeys=["n1","n2","n3"]</code>，版本转
+<code>LOCKED</code></td>
+</tr>
+<tr>
+<td>再提交发布单</td>
+<td><code>409 ADMISSION_FAILED</code>，<code>failed=["REQ_TEST_PASSED","REQ_APPROVALS_DONE","MR_FILLED","MAN_DAYS_FILLED"]</code>（逐项带
+<code>fixHint</code>）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="a2-三个必须知道的实操事实和上面正文的假设不同">A.2
+三个必须知道的实操事实（和上面正文的假设不同）</h3>
+<ol type="1">
+<li><strong>批计划的人不是
+qa1</strong>：<code>POST /test-plans/{id}/approve</code>
+只允许「计划负责人 / PMO / 管理层」；演示时把 <code>ownerId</code> 设成
+<code>admin</code>（<code>1</code>）后用 <code>admin</code>
+批，或换成真正的 PMO。qa1 只负责执行与登记结果。</li>
+<li><strong>用例列表路径是
+<code>/api/deliver/testcases</code></strong>，不是
+<code>/test-cases</code>。后者不返回 404，而是<strong>挂住约 20
+秒</strong>（我实测 <code>curl</code> 15s 超时 0
+字节）——如果照着错的路径调，看起来就像"服务挂了"。建议后续加一条 404
+兜底或用例列表索引。</li>
+<li><strong><code>POST /quality-gates/{releaseId}/evaluate</code>
+返回的是"评审"结果</strong>：<code>result=PASS</code> 但
+<code>snapshotId=0</code>；真正落库的快照是在发布单侧链路里出现的（我这次是
+<code>#727</code>、<code>#728</code>）。所以「版本链路第③段由 MISSING 变
+PASS」要用<strong>发布单建好之后</strong>的
+<code>GET /releases/{id}</code> 看，不要用 evaluate 的返回值判断。</li>
+</ol>
+<h3 id="a3-这次演示卡在哪也是有说服力的部分">A.3
+这次演示卡在哪（也是有说服力的部分）</h3>
+<p><code>DEP-0724</code> 的 9 项准入实况：<strong>通过 2 / 失败 4 / 关闭
+3</strong>。</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>项</th>
+<th>结果</th>
+<th>原因</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>REQ_TEST_PASSED</code></td>
+<td>FAIL</td>
+<td>关联需求 <code>DEMO-R-12</code> 仍是
+<code>TODO</code>，没到「测试通过」</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>NO_OPEN_HIGH_DEFECT</code></td>
+<td>PASS</td>
+<td>无未关闭 P0/P1</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>REQ_APPROVALS_DONE</code></td>
+<td>FAIL</td>
+<td>需求自身提报/评审审批未发起</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>MR_FILLED</code></td>
+<td>FAIL</td>
+<td>需求未填 MR（演示数据里 12 条 <code>DEMO-R-*</code> 的
+<code>mr_url</code> 全为空）</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>MAN_DAYS_FILLED</code></td>
+<td>FAIL</td>
+<td>实际人天未填（预估 2.0 已有）</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>QUALITY_GATE</code></td>
+<td>PASS</td>
+<td>5 条规则全过，快照 <code>#728</code></td>
+</tr>
+<tr>
+<td>7–9</td>
+<td>构建 / Sonar / 制品</td>
+<td>CLOSED</td>
+<td>三个集成未接入，按设计自动关闭（不计 FAIL，也不冒充"已校验"）</td>
+</tr>
+</tbody>
+</table>
+<p>也就是说：<strong>测试计划、报告三签、质量门这三段已经全绿，"卡"在需求自身的流转与字段</strong>——这正是联动该有的样子：版本侧再干净，需求没走到「测试通过」、MR
+与人天没填，发布单一格都推不动。</p>
+<p>要把这条链走到 <code>PUBLISHED</code>，还差的是把一条 RD
+走完「提报→评审→排期→开发→提测→测试通过→合入→完成」，再补 MR
+与实际人天。注意 <code>DEMO-R-12</code> 是 <code>RD</code> 且
+<code>TODO</code>，<code>submit</code>/<code>schedule</code> 直接返回
+<code>409 ILLEGAL_TRANSITION</code>（RD 的动作名与 BUS/PDR
+不同），演示前先确认该类型的动作名，或改用一条已到
+<code>PENDING_TEST</code> 的需求。</p>
+<h3 id="a4-复现命令一段可粘">A.4 复现命令（一段可粘）</h3>
+<div class="sourceCode" id="cb16"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> platform-up <span class="kw">&amp;&amp;</span> <span class="fu">make</span> platform-seed <span class="kw">&amp;&amp;</span> <span class="fu">make</span> platform-demo-reset</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="co"># 建版本 → 挂需求 → 建计划 → admin 批计划 → 执行 → 关轮次 → 完成</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="co"># 建报告 → qa1/pm/tl1 三签 → 建发布单 → 发起版本审批 → 提交发布单（会 409 ADMISSION_FAILED）</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/release-flow-verify.sh          <span class="co"># 32/32，含上面这些顺序与负向</span></span></code></pre></div>
+<p>截图：<code>docs/teamflow/demo-shots/r30-release-chain.png</code>（版本详情四段链路
++
+三级审批阶梯）、<code>docs/teamflow/demo-shots/r30-deploy-admission.png</code>（发布单
+9 项准入明细 + 质量门 PASS 快照）。</p>
+</div>
+</body>
+</html>
