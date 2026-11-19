@@ -18,6 +18,8 @@ import type {
   DeployOrderRow,
   DeploySubmitResult,
   EstimateCreated,
+  FlowSnapshot,
+  FlowSnapshotSummary,
   GateDecision,
   GateItem,
   LoginPayload,
@@ -26,6 +28,7 @@ import type {
   NotificationRow,
   PageResponse,
   ReleaseDetail,
+  ReleaseLevel,
   ReleaseQualitySettings,
   ReleaseRow,
   RequirementCreated,
@@ -303,12 +306,35 @@ export function removeRequirementFromRelease(
 
 /**
  * 提交发布审批（POST /releases/{id}/approval）：审批通过后版本自动锁定。
- * 与 {@link lockRelease} 是两条入口；本端点返回实例与版本 id。
+ * 与 {@link lockRelease} 是两条入口；本端点返回实例与本次采用的流程定义（r30）。
  */
-export function requestReleaseApproval(
-  id: number | string,
-): Promise<{ instanceId: number; releaseId: number }> {
+export function requestReleaseApproval(id: number | string): Promise<{
+  instanceId: number
+  releaseId: number
+  definitionId?: number
+  definitionVersion?: number
+  nodeKeys?: string[]
+}> {
   return http.post(`${REQ}/releases/${id}/approval`)
+}
+
+export interface UpdateReleaseLevelPayload {
+  releaseLevel: ReleaseLevel
+  /** 紧急/回滚必填，1-500 字 */
+  emergencyReason?: string
+  /** 回滚必填：同租户可见且已通过/已成功的发布单号 */
+  previousDeployOrderCode?: string
+}
+
+/**
+ * 修改发布等级（PATCH /releases/{id}/level）。
+ * 仅 PLAN 且未发起审批时可改；400 的 detail.field 指出具体字段，409 RELEASE_LOCKED 表示已锁定。
+ */
+export function updateReleaseLevel(
+  id: number | string,
+  payload: UpdateReleaseLevelPayload,
+): Promise<ReleaseRow> {
+  return http.patch<ReleaseRow>(`${REQ}/releases/${id}/level`, payload)
 }
 
 /**
@@ -354,6 +380,16 @@ export function createDeployOrder(payload: {
 
 export function getDeployOrder(id: number | string): Promise<DeployOrderDetail> {
   return http.get<DeployOrderDetail>(`${REQ}/deploy-orders/${id}`)
+}
+
+/** 快照轮次（升序）：只读证据，没有写/删路由 */
+export function getDeployFlowSnapshots(id: number | string): Promise<FlowSnapshotSummary[]> {
+  return http.get<FlowSnapshotSummary[]>(`${REQ}/deploy-orders/${id}/flow-snapshots`)
+}
+
+/** 按轮次回放固化快照（404 SNAPSHOT_NOT_FOUND） */
+export function getDeployFlowSnapshot(id: number | string, round: number): Promise<FlowSnapshot> {
+  return http.get<FlowSnapshot>(`${REQ}/deploy-orders/${id}/flow-snapshots/${round}`)
 }
 
 export function evaluateAdmission(id: number | string): Promise<AdmissionSnapshot> {

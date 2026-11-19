@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   disableWorkflow,
@@ -39,6 +40,17 @@ interface EditorNode {
 const rows = ref<WorkflowDefinitionRow[]>([])
 const loading = ref(false)
 const error = ref<{ message: string; code?: string; status?: number } | null>(null)
+
+const router = useRouter()
+
+/**
+ * r30：发布等级的审批链绑定页（`/admin/flow-bindings`）不新增导航项与页面码
+ * （a3 的 pageCode 集合与 access 计数因此不变），入口就放在流程定义页顶部。
+ * 该页与本页同为 `workflow:manage`，能进本页即能进绑定页，不做二次按钮级门控。
+ */
+function openFlowBindings(): void {
+  void router.push('/admin/flow-bindings')
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -307,6 +319,7 @@ onMounted(load)
     <div class="adm-toolbar">
       <span class="adm-hint">发布即固化版本；修改已发布流程需新建定义产生 v+1，在途实例仍走旧版本。</span>
       <div class="adm-toolbar__spacer" />
+      <el-button @click="openFlowBindings">审批链绑定</el-button>
       <el-button link :loading="loading" @click="load">刷新</el-button>
       <el-button type="primary" @click="openCreate">新建流程</el-button>
     </div>

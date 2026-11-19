@@ -177,8 +177,13 @@ public class ApprovalEngine {
             cancelPendingAt(instance, node.key(), task.getId(), actor.userId(),
                     "或签节点已由他人处理，待办自动关闭");
         }
-        history(instance, task, ApprovalHistory.NODE_APPROVED, actor.userId(), null,
-                Map.of("nodeKey", node.key(), "mode", node.mode()));
+        // AC-2：留痕三键（nodeKey/nodeName/mode）。nodeName 是审计可回放的最小事实——
+        // 只存 nodeKey 时，节点定义改版后历史就再也读不出「当时批的是哪一级」。
+        Map<String, Object> approvedDetail = new LinkedHashMap<>();
+        approvedDetail.put("nodeKey", node.key());
+        approvedDetail.put("nodeName", node.name());
+        approvedDetail.put("mode", node.mode());
+        history(instance, task, ApprovalHistory.NODE_APPROVED, actor.userId(), null, approvedDetail);
         advance(instance, definition, node.next(), documentOf(instance), actor.userId());
     }
 

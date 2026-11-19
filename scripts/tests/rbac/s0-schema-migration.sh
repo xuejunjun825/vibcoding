@@ -131,8 +131,10 @@ check_eq "每个角色恰好 168 行（60+36+72 之外无缺口）" 0 "${THIN}" 
 
 # ---------------------------------------------------------------- 4. 迁移版本与全租户
 FLYWAY="$(one "SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1")"
-check_eq "Flyway 最新成功版本 = 13" 13 "${FLYWAY}" \
-    "V13__vendor_pm_role.sql 未执行（先 make platform-up）"
+# r30：V14__release_flow_chain.sql（分级审批绑定 + 提交快照）是当前最高版本；
+# 本条同时兜住「V13/V14 迁移没跑成功」——版本落后会让后续所有授权断言在错库上假绿。
+check_eq "Flyway 最新成功版本 = 14" 14 "${FLYWAY}" \
+    "V14__release_flow_chain.sql 未执行（先 make platform-up）"
 
 BAD_TENANTS="$(one "SELECT COUNT(*) FROM (
         SELECT t.id FROM sys_tenant t

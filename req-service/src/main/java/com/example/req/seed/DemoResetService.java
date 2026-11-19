@@ -162,6 +162,14 @@ public class DemoResetService {
         // 字段也得回到种子基线（与 DELETE_ORDER 同属 DemoFixture 一处拥有）。
         db.update(DemoFixture.RESTORE_KEPT_EXECUTOR_BASELINE, tenantId);
 
+        // 账号基线同理：门禁建的一次性账号若停在 ACTIVE，会污染按角色解析的审批人集合
+        // （r30 的 PMO/ALL 会签节点），让演示链与门禁都不可重复。只改 status，行与审计仍保留。
+        int disabledTempUsers = db.update(DemoFixture.DISABLE_GATE_TEMP_USERS, tenantId);
+        if (disabledTempUsers > 0) {
+            log.info("demo-reset: tenant={} 停用 {} 个门禁临时账号（回到可演示账号基线）",
+                    tenantCode, disabledTempUsers);
+        }
+
         restoreRoleGrants(tenantId);
 
         insertFixture(tenantId, refs);

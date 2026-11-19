@@ -5,11 +5,18 @@ import { ElMessage } from 'element-plus'
 import {
   deployStats,
   evaluateAdmission,
+  getDeployFlowSnapshot,
   getDeployOrder,
   recordExecution,
 } from '@/api/req'
 import { ApiError, http } from '@/api/client'
-import type { AdmissionCounts, AdmissionSnapshot, DeployOrderDetail, GateItem } from '@/api/types'
+import type {
+  AdmissionCounts,
+  AdmissionSnapshot,
+  DeployOrderDetail,
+  FlowSnapshot,
+  GateItem,
+} from '@/api/types'
 import {
   bindArtifact,
   getBoundArtifact,
@@ -25,6 +32,8 @@ import ArtifactSummaryCard from '@/components/integration/ArtifactSummaryCard.vu
 import ArtifactPickerDrawer from '@/components/integration/ArtifactPickerDrawer.vue'
 import PromoteDialog from '@/components/integration/PromoteDialog.vue'
 import ConclusionBar from '@/components/quality/ConclusionBar.vue'
+import ApprovalLevelList from '@/components/release/ApprovalLevelList.vue'
+import FlowSnapshotCard from '@/components/release/FlowSnapshotCard.vue'
 import { usePermission } from '@/composables/usePermission'
 import { formatDateTime, formatDuration, formatPercent } from '@/utils/format'
 import { messageOf } from '@/views/req/platform'
@@ -102,6 +111,9 @@ async function load(): Promise<void> {
   try {
     detail.value = await getDeployOrder(id.value)
     admission.value = detail.value.admission ?? null
+    // 重新拉详情后回到最新轮次：回放态只是视图，不跨刷新保留（避免看到旧轮次却以为是现状）
+    replaySnapshot.value = null
+    replayError.value = ''
     void loadArtifact()
     if (!admission.value) {
       await evaluate(true)
@@ -111,6 +123,40 @@ async function load(): Promise<void> {
     detail.value = null
   } finally {
     loading.value = false
+  }
+}
+
+/* ---------------- 分级审批与提交快照（r30） ---------------- */
+const LEVEL_LABELS: Record<string, string> = { NORMAL: '常规', EMERGENCY: '紧急', ROLLBACK: '回滚' }
+const approvalLevels = computed(() => detail.value?.approvalLevels ?? [])
+const flowSnapshotHistory = computed(() => detail.value?.flowSnapshotHistory ?? [])
+const deployLevelLabel = computed(() => LEVEL_LABELS[detail.value?.releaseLevel ?? ''] ?? '常规')
+
+const replaySnapshot = ref<FlowSnapshot | null>(null)
+const replayLoading = ref(false)
+const replayError = ref('')
+/** 回放态优先，其次详情里的最新快照 */
+const shownSnapshot = computed<FlowSnapshot | null>(
+  () => replaySnapshot.value ?? detail.value?.flowSnapshot ?? null,
+)
+
+/** 轮次回放：最新轮次就地读详情快照，其余轮次走只读 /flow-snapshots/{round} */
+async function loadSnapshotRound(round: number): Promise<void> {
+  if (!round) return
+  const latest = detail.value?.flowSnapshot?.round
+  if (latest != null && round === latest) {
+    replaySnapshot.value = null
+    replayError.value = ''
+    return
+  }
+  replayLoading.value = true
+  replayError.value = ''
+  try {
+    replaySnapshot.value = await getDeployFlowSnapshot(id.value, round)
+  } catch (err) {
+    replayError.value = messageOf(err)
+  } finally {
+    replayLoading.value = false
   }
 }
 
@@ -408,6 +454,7 @@ const legacyAdmission = computed(() => Boolean(admission.value?.legacy))
             <h1 class="page-head__title mono">{{ detail.code }}</h1>
             <StatusPill kind="deploy" :value="detail.status" />
             <span class="env-tag" :class="`env-${String(detail.env).toLowerCase()}`">{{ envLabel(detail.env) }}环境</span>
+            <span class="level-tag" title="等级继承自版本，发布单内不可修改">等级 {{ deployLevelLabel }}</span>
             <span class="artifact">制品 {{ detail.artifactVersion || '—' }}</span>
           </div>
           <p class="meta-line">
@@ -542,8 +589,15 @@ const legacyAdmission = computed(() => Boolean(admission.value?.legacy))
             @settled="evaluate(true)"
           />
           <section class="surface surface--pad side-block">
+            <h2 class="section-title">审批进度</h2>
+            <ApprovalLevelList :levels="approvalLevels" />
+          </section>
+
+          <section class="surface surface--pad side-block">
             <h2 class="section-title">发布基本信息</h2>
             <dl class="fields">
+              <dt>发布等级</dt>
+              <dd>{{ deployLevelLabel }}（继承版本）</dd>
               <dt>发布步骤</dt>
               <dd>{{ stepsText(detail.steps) }}</dd>
               <dt>回滚方案</dt>
@@ -573,6 +627,16 @@ const legacyAdmission = computed(() => Boolean(admission.value?.legacy))
             </template>
             <p v-else class="muted small">还没有登记执行结果；发布完成后回填，统计才会准确。</p>
           </section>
+
+          <FlowSnapshotCard
+            :snapshot="shownSnapshot"
+            :history="flowSnapshotHistory"
+            :loading="replayLoading"
+            :error="replayError"
+            :latest-round="detail.flowSnapshot?.round ?? null"
+            @replay="loadSnapshotRound"
+            @retry="loadSnapshotRound(shownSnapshot?.round ?? 0)"
+          />
 
           <section class="surface surface--pad side-block">
             <h2 class="section-title">本版本发布统计</h2>
@@ -722,6 +786,14 @@ const legacyAdmission = computed(() => Boolean(admission.value?.legacy))
   border-radius: var(--r-pill);
   background: var(--color-info-bg);
   color: var(--info-ink);
+}
+/* r30：等级继承自版本，只读展示（不在单据上提供修改入口） */
+.level-tag {
+  font-size: 11px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--text-body);
 }
 .env-prod {
   background: var(--color-danger-bg);

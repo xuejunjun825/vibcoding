@@ -125,6 +125,7 @@ if jq -e '(.rules[]? | select(.code=="QG-02") | .fixHint) | test("重新出具")
 else
     skip "QG-02 fixHint 文案不同（不阻塞，记录偏差）"
 fi
+q_lock_release "$REL2" || exit 1
 api_call POST "/api/req/deploy-orders/${DEP2}/submit" '{}'
 deny "digest 失效后提交 → 409 QUALITY_GATE_FAILED" 409 QUALITY_GATE_FAILED
 

@@ -5,7 +5,7 @@ SHELL := /bin/bash
         platform-up platform-down platform-web platform-verify platform-test-negative \
         platform-seed platform-unit platform-perf quality-verify quality-e2e integration-verify \
         collab-verify collab-perf access-verify rbac-verify analytics-i18n-verify platform-demo-reset \
-        wbs-backfill-verify
+        wbs-backfill-verify release-flow-verify release-flow-upgrade
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
@@ -98,6 +98,13 @@ platform-demo-reset: ## 单事务重建演示数据（12 需求链路 + 4 条不
 # ---- r29 存量回填 (20261118-r29) ----
 wbs-backfill-verify: ## 存量工时回填门禁 S1..S6 共 18 条（契约/生效/幂等/BUS/人天缺失/失败语义；先 make platform-up && platform-seed && platform-demo-reset）
 	@./scripts/wbs-backfill-verify.sh
+
+# ---- r30 发版分级审批链 (20261118-r30) ----
+release-flow-verify: ## 分级审批/四段链路/不可变快照门禁 S1..S6 共 32 条（先 make platform-up && platform-seed && platform-demo-reset）
+	@./scripts/release-flow-verify.sh
+
+release-flow-upgrade: ## 存量库幂等升级：连跑两次 /internal/seed，定义/绑定/version 不增（先 make platform-up）
+	@./scripts/release-flow-upgrade.sh
 
 clean: ## 清理 Maven 产物与运行态 pid（请先 make dev-down；保留 .nacos 缓存）
 	@bash -c 'source ./scripts/lib.sh; \

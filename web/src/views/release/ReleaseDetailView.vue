@@ -10,7 +10,9 @@ import {
   listReviews,
   removeRequirementFromRelease,
   requestReleaseApproval,
+  updateReleaseLevel,
 } from '@/api/req'
+import { ApiError } from '@/api/client'
 import { gateApi, releaseQualityApi } from '@/api/quality'
 import {
   getReleaseIntegration,
@@ -21,6 +23,7 @@ import type {
   GateDetail,
   GateSnapshot,
   ReleaseDetail,
+  ReleaseLevel,
   ReleaseQuality,
   ReleaseRow,
   RequirementRow,
@@ -31,6 +34,8 @@ import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PriorityDot from '@/components/PriorityDot.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import ApprovalLevelList from '@/components/release/ApprovalLevelList.vue'
+import FlowChainPanel from '@/components/release/FlowChainPanel.vue'
 import ConclusionBar from '@/components/quality/ConclusionBar.vue'
 import DigestChip from '@/components/quality/DigestChip.vue'
 import QualityGatePanel from '@/components/quality/QualityGatePanel.vue'
@@ -412,6 +417,100 @@ async function submitApproval(): Promise<void> {
   }
 }
 
+/* ---------------- 发版链路与分级审批（r30） ----------------
+ * flowChain / approvalLevels 全部来自 GET /releases/{id}（AC-8 一次拿全），本页不额外请求、不重算判定。
+ */
+const flowChain = computed(() => detail.value?.flowChain ?? null)
+const approvalLevels = computed(() => detail.value?.approvalLevels ?? [])
+const activeInstanceId = computed(() => detail.value?.activeInstanceId ?? null)
+const rejectedNodeName = computed(() => detail.value?.rejectedNodeName ?? '')
+const rejectReason = computed(() => detail.value?.rejectReason ?? '')
+const rejectedAt = computed(() => detail.value?.rejectedAt ?? null)
+
+const LEVEL_LABELS: Record<string, string> = { NORMAL: '常规', EMERGENCY: '紧急', ROLLBACK: '回滚' }
+const LEVEL_OPTIONS: Array<{ value: ReleaseLevel; label: string; hint: string }> = [
+  { value: 'NORMAL', label: '常规', hint: '按默认串行链推进，无需额外说明' },
+  { value: 'EMERGENCY', label: '紧急', hint: '加急发布：必须填写紧急原因（1-500 字）' },
+  { value: 'ROLLBACK', label: '回滚', hint: '回滚发布：必须填写原发布单号与原因' },
+]
+const levelLabel = computed(
+  () => release.value?.releaseLevelLabel || LEVEL_LABELS[release.value?.releaseLevel ?? ''] || '常规',
+)
+const canEditLevel = computed(
+  () => canEdit.value && release.value?.status === 'PLAN' && activeInstanceId.value == null,
+)
+const levelBlockReason = computed(() => {
+  if (release.value?.status !== 'PLAN') return '仅规划中的版本可修改发布等级'
+  if (activeInstanceId.value != null) return '审批已发起，等级随本次实例固定，不再可改'
+  if (!canEdit.value) return '需要权限：release.action.update'
+  return ''
+})
+
+const levelOpen = ref(false)
+const levelSaving = ref(false)
+const levelError = ref('')
+const levelFieldError = ref<Record<string, string>>({})
+const levelForm = ref<{
+  releaseLevel: ReleaseLevel
+  emergencyReason: string
+  previousDeployOrderCode: string
+}>({ releaseLevel: 'NORMAL', emergencyReason: '', previousDeployOrderCode: '' })
+
+function openLevelDialog(): void {
+  if (!canEditLevel.value) return
+  levelForm.value = {
+    releaseLevel: (release.value?.releaseLevel as ReleaseLevel) || 'NORMAL',
+    emergencyReason: release.value?.emergencyReason ?? '',
+    previousDeployOrderCode: release.value?.previousDeployOrderCode ?? '',
+  }
+  levelFieldError.value = {}
+  levelError.value = ''
+  levelOpen.value = true
+}
+
+async function saveLevel(): Promise<void> {
+  const form = levelForm.value
+  const errors: Record<string, string> = {}
+  const reason = form.emergencyReason.trim()
+  const prevCode = form.previousDeployOrderCode.trim()
+  if (form.releaseLevel !== 'NORMAL' && reason.length === 0) {
+    errors.emergencyReason = '紧急/回滚发布必须填写原因'
+  } else if (reason.length > 500) {
+    errors.emergencyReason = '原因最多 500 字'
+  }
+  if (form.releaseLevel === 'ROLLBACK' && prevCode.length === 0) {
+    errors.previousDeployOrderCode = '回滚发布必须填写原发布单号'
+  }
+  levelFieldError.value = errors
+  if (Object.keys(errors).length > 0) return
+
+  levelSaving.value = true
+  levelError.value = ''
+  try {
+    await updateReleaseLevel(releaseId.value, {
+      releaseLevel: form.releaseLevel,
+      emergencyReason: form.releaseLevel === 'NORMAL' ? undefined : reason,
+      previousDeployOrderCode: form.releaseLevel === 'ROLLBACK' ? prevCode : undefined,
+    })
+    levelSaving.value = false
+    levelOpen.value = false
+    ElMessage.success('发布等级已更新，审批链已切换到对应槽位')
+    await load()
+  } catch (err) {
+    levelSaving.value = false
+    if (err instanceof ApiError) {
+      const payload = err.detail as { field?: string } | null
+      if (payload?.field) {
+        levelFieldError.value = { [payload.field]: err.message }
+      } else {
+        levelError.value = err.message || '等级保存失败'
+      }
+    } else {
+      levelError.value = messageOf(err)
+    }
+  }
+}
+
 function openRequirement(row: RequirementRow): void {
   void router.push(requirementPath(row.id))
 }
@@ -439,6 +538,19 @@ function statusOfMilestone(status?: string): string {
           <div class="title-row">
             <h1 class="page-head__title">{{ release?.name ?? '版本详情' }}</h1>
             <StatusPill v-if="release" kind="release" :value="release.status" />
+            <button
+              v-if="release"
+              type="button"
+              class="level-chip"
+              :class="{ 'is-static': !canEditLevel }"
+              :disabled="!canEditLevel"
+              :title="canEditLevel ? '修改发布等级（决定审批链槽位）' : levelBlockReason"
+              @click="openLevelDialog"
+            >
+              <span class="level-chip__label">等级</span>
+              <span class="level-chip__value">{{ levelLabel }}</span>
+              <span v-if="canEditLevel" class="level-chip__edit">改</span>
+            </button>
             <span v-if="release?.gateMode" class="mode-tag" :class="{ 'is-loose': release.gateMode === 'LOOSE' }">
               {{ release.gateMode === 'LOOSE' ? '宽松门禁' : '严格门禁' }}
             </span>
@@ -492,6 +604,20 @@ function statusOfMilestone(status?: string): string {
         <button type="button" class="link" @click="actionError = ''">关闭</button>
       </div>
 
+      <div v-if="rejectReason || rejectedAt" class="reject-banner" role="alert">
+        <span class="reject-banner__badge">审批驳回</span>
+        <div class="reject-banner__body">
+          <p class="reject-banner__line">
+            在「{{ rejectedNodeName || '审批链' }}」被驳回{{ rejectReason ? `：${rejectReason}` : '（未填写原因）' }}
+          </p>
+          <p class="reject-banner__meta">
+            {{ rejectedAt ? formatDateTime(rejectedAt) : '' }}
+            <template v-if="detail?.rejectedBy"> · 处理人 #{{ detail.rejectedBy }}</template>
+            · 可调整内容后重新提交审批
+          </p>
+        </div>
+      </div>
+
       <nav class="release-tabs" role="tablist" aria-label="版本详情视图">
         <button
           type="button"
@@ -543,8 +669,9 @@ function statusOfMilestone(status?: string): string {
       </nav>
 
       <div v-if="activeTab === 'overview'" class="release-tab-panel">
+        <FlowChainPanel :chain="flowChain" :loading="loading" @retry="load" />
 
-      <div class="stats">
+        <div class="stats">
         <div class="stat">
           <span class="stat__label">需求总数</span>
           <span class="stat__value">{{ stats.total }}</span>
@@ -637,6 +764,14 @@ function statusOfMilestone(status?: string): string {
         </section>
 
         <aside class="column-side">
+          <section class="surface surface--pad side-block">
+            <div class="side-block__head">
+              <h2 class="section-title">审批进度</h2>
+              <span v-if="approvalLevels.length > 0" class="count-badge">{{ approvalLevels.length }} 级</span>
+            </div>
+            <ApprovalLevelList :levels="approvalLevels" :instance-id="activeInstanceId" />
+          </section>
+
           <section class="surface surface--pad side-block">
             <h2 class="section-title">里程碑</h2>
             <ul v-if="milestones.length > 0" class="milestones">
@@ -1026,9 +1161,60 @@ function statusOfMilestone(status?: string): string {
       </template>
     </el-dialog>
 
+    <el-dialog v-model="levelOpen" title="修改发布等级" width="520px" append-to-body>
+      <p class="dialog-hint">
+        等级决定发起审批时使用的绑定槽位；已发起审批的版本不可再改，改动不影响在途实例。
+      </p>
+      <el-radio-group v-model="levelForm.releaseLevel" class="level-options">
+        <el-radio v-for="opt in LEVEL_OPTIONS" :key="opt.value" :value="opt.value" class="level-option">
+          <span class="level-option__label">{{ opt.label }}</span>
+          <span class="level-option__hint">{{ opt.hint }}</span>
+        </el-radio>
+      </el-radio-group>
+
+      <div v-if="levelForm.releaseLevel !== 'NORMAL'" class="level-field">
+        <label class="level-field__label" for="level-reason">
+          原因 <span class="ink-danger" aria-hidden="true">*</span>
+        </label>
+        <el-input
+          id="level-reason"
+          v-model="levelForm.emergencyReason"
+          type="textarea"
+          :rows="3"
+          maxlength="500"
+          show-word-limit
+          placeholder="说明为什么需要紧急/回滚发布（1-500 字）"
+        />
+        <p v-if="levelFieldError.emergencyReason" class="field-error" role="alert">
+          {{ levelFieldError.emergencyReason }}
+        </p>
+      </div>
+
+      <div v-if="levelForm.releaseLevel === 'ROLLBACK'" class="level-field">
+        <label class="level-field__label" for="level-prev">
+          原发布单号 <span class="ink-danger" aria-hidden="true">*</span>
+        </label>
+        <el-input
+          id="level-prev"
+          v-model="levelForm.previousDeployOrderCode"
+          placeholder="如 DEP-20261118-000012（须已通过/已成功）"
+        />
+        <p v-if="levelFieldError.previousDeployOrderCode" class="field-error" role="alert">
+          {{ levelFieldError.previousDeployOrderCode }}
+        </p>
+      </div>
+
+      <p v-if="levelError" class="field-error" role="alert">{{ levelError }}</p>
+
+      <template #footer>
+        <el-button @click="levelOpen = false">取消</el-button>
+        <el-button type="primary" :loading="levelSaving" @click="saveLevel">保存</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="approvalOpen" title="提交发布审批" width="440px" append-to-body>
       <p class="dialog-hint">
-        提交后将按版本的审批流推进；审批通过前版本仍可调整需求范围，审批通过后自动锁定。
+        提交后将按「{{ levelLabel }}」等级的审批链逐级推进；审批通过前版本仍可调整需求范围，审批通过后自动锁定。
       </p>
       <ul class="dialog-impact">
         <li>审批人：由该业务域的发布审批流决定</li>
@@ -1468,5 +1654,142 @@ function statusOfMilestone(status?: string): string {
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text-title);
+}
+
+/* ---- r30 发布等级 / 驳回 / 等级编辑 ---- */
+.level-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--r-pill);
+  background: var(--bg-selected);
+  color: var(--color-primary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.level-chip:hover:not(:disabled) {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary-hover);
+}
+.level-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.level-chip.is-static,
+.level-chip:disabled {
+  cursor: not-allowed;
+  border-color: var(--border);
+  background: var(--bg-hover);
+  color: var(--text-muted-aa);
+}
+.level-chip__label {
+  color: inherit;
+  opacity: 0.8;
+  font-size: 11px;
+}
+.level-chip__value {
+  font-weight: 600;
+}
+.level-chip__edit {
+  padding-left: 4px;
+  border-left: 1px solid currentColor;
+  font-size: 11px;
+}
+.reject-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--r-card);
+  background: var(--color-danger-bg);
+  color: var(--danger-ink);
+}
+.reject-banner__badge {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--r-cell);
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 600;
+}
+.reject-banner__body {
+  min-width: 0;
+}
+.reject-banner__line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+.reject-banner__meta {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--danger-ink);
+  opacity: 0.85;
+}
+.side-block__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.level-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 12px;
+  width: 100%;
+}
+.level-option {
+  display: flex;
+  align-items: flex-start;
+  height: auto;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+}
+.level-option.is-checked {
+  border-color: var(--color-primary);
+  background: var(--bg-selected);
+}
+.level-option :deep(.el-radio__label) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal;
+}
+.level-option__label {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-title);
+}
+.level-option__hint {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted-aa);
+}
+.level-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.level-field__label {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-body);
+}
+.field-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--danger-ink);
 }
 </style>

@@ -98,6 +98,7 @@ if jq -e '[.rules[]? | select(.code=="QG-03") | .status] | index("WAIVED") != nu
 else
     fail "QG-03 未标记 WAIVED（实际: $(jq -c '.rules[]? | select(.code=="QG-03")' <<<"$GATE_JSON")）"
 fi
+q_lock_release "$REL" || exit 1
 api_call POST "/api/req/deploy-orders/${DEP}/submit" '{}'
 deny "硬红线未过时提交 → 409 QUALITY_GATE_FAILED" 409 QUALITY_GATE_FAILED
 if jq -e '[(.detail.failedRules // [])[] | if type=="object" then .code else . end] | index("QG-04") != null' <<<"$HTTP_BODY" >/dev/null; then

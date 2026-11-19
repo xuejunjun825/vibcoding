@@ -12,9 +12,14 @@ import com.example.req.approval.ApprovalEngine;
 import com.example.req.approval.ApprovalException;
 import com.example.req.approval.ApprovalInstance;
 import com.example.req.approval.ApprovalInstanceRepository;
+import com.example.req.approval.ApprovalLevelProjector;
 import com.example.req.approval.ApproverDirectory;
 import com.example.req.approval.StartApproval;
+import com.example.req.approval.WorkflowRegistry;
 import com.example.req.requirement.RequirementRepository;
+import com.example.req.release.FlowBindingService;
+import com.example.req.release.FlowChainService;
+import com.example.req.release.FlowSnapshotService;
 import com.example.req.release.ReleaseEntity;
 import com.example.req.release.ReleaseRepository;
 import com.example.req.release.ReleaseService;
@@ -100,7 +105,10 @@ class DeployOrderFlowTest {
         service = new DeployOrderService(repository, orderRequirementRepository, requirementRepository,
                 releaseRepository, releaseService, releaseReviewService, admissionEvaluator,
                 mock(DeployPlanGuard.class), codeGenerator, auditService,
-                notificationWriter, approverDirectory, instanceRepository, new ObjectMapper(), provider);
+                notificationWriter, approverDirectory, instanceRepository, new ObjectMapper(), provider,
+                mock(FlowChainService.class), mock(FlowSnapshotService.class),
+                mock(FlowBindingService.class), mock(WorkflowRegistry.class),
+                projector());
 
         order = new DeployOrderEntity();
         order.setId(ORDER_ID);
@@ -117,6 +125,8 @@ class DeployOrderFlowTest {
         when(release.getName()).thenReturn("2026-12 生产版本");
         when(release.getDomainId()).thenReturn(3L);
         when(release.getTenantId()).thenReturn(TENANT);
+        // r30：提交要求版本已 LOCKED（AC-14），本用例集测的是发布单自身的闸门。
+        when(release.getStatus()).thenReturn(ReleaseService.STATUS_LOCKED);
 
         when(repository.findByIdAndTenantId(ORDER_ID, TENANT)).thenReturn(Optional.of(order));
         when(releaseService.requireVisible(RELEASE_ID)).thenReturn(release);
@@ -132,6 +142,14 @@ class DeployOrderFlowTest {
     @AfterEach
     void tearDown() {
         TenantContext.clear();
+    }
+
+    /** detail 里要用到逐级审批投影；本用例集不测阶梯内容，给一个"空阶梯"的桩即可。 */
+    private static ApprovalLevelProjector projector() {
+        ApprovalLevelProjector projector = mock(ApprovalLevelProjector.class);
+        when(projector.mount(anyLong(), anyString(), anyLong()))
+                .thenReturn(new ApprovalLevelProjector.Mount(null, List.of()));
+        return projector;
     }
 
     private static DeployViews.AdmissionResult result(boolean allPassed) {

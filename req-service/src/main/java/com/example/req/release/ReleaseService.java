@@ -8,7 +8,17 @@ import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.DataScope;
 import com.example.platform.contract.ScopeTier;
 import com.example.req.approval.ApprovalEngine;
+import com.example.req.approval.ApprovalHistory;
+import com.example.req.approval.ApprovalHistoryRepository;
+import com.example.req.approval.ApprovalInstance;
+import com.example.req.approval.ApprovalInstanceRepository;
+import com.example.req.approval.ApprovalLevelProjector;
+import com.example.req.approval.ApprovalTask;
+import com.example.req.approval.ApprovalTaskRepository;
+import com.example.req.approval.ApprovalViews;
 import com.example.req.approval.StartApproval;
+import com.example.req.approval.WorkflowDefinition;
+import com.example.req.approval.WorkflowRegistry;
 import com.example.req.requirement.RequirementEntity;
 import com.example.req.requirement.RequirementErrors;
 import com.example.req.requirement.RequirementRepository;
@@ -21,6 +31,7 @@ import com.example.req.requirement.RequirementViews.ReleaseDetail;
 import com.example.req.requirement.RequirementViews.ReleaseStats;
 import com.example.req.requirement.RequirementViews.ReleaseView;
 import com.example.req.requirement.RequirementViews.View;
+import jakarta.persistence.EntityManager;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,11 +62,17 @@ public class ReleaseService {
     public static final String STATUS_PUBLISHED = "PUBLISHED";
     public static final String STATUS_CANCELLED = "CANCELLED";
 
+    /**
+     * 列表/详情共用的行投影。r30 追加三列（等级 + 两个必填项）：
+     * 版本行与等级同源，前端不必为「这一行是常规还是紧急」再发一次请求。
+     */
     private static final String COLUMNS = """
             r.id AS id, r.code AS code, r.name AS name, r.domain_id AS domain_id, r.status AS status,
             r.start_date AS start_date, r.end_date AS end_date,
             r.planned_release_date AS planned_release_date, r.gate_mode AS gate_mode,
-            r.locked_at AS locked_at, r.released_at AS released_at
+            r.locked_at AS locked_at, r.released_at AS released_at,
+            r.release_level AS release_level, r.emergency_reason AS emergency_reason,
+            r.previous_deploy_order_code AS previous_deploy_order_code
             """;
 
     private final ReleaseRepository releaseRepository;
@@ -68,6 +85,27 @@ public class ReleaseService {
     private final AuditService auditService;
     private final ObjectProvider<ApprovalEngine> approvalEngine;
     private final ReleasePublishCascade publishCascade;
+    /** r30：等级必填项校验（创建/改等级/发起审批三处共用）。 */
+    private final ReleaseLevelValidator levelValidator;
+    /** r30：6 槽绑定 → 该等级生效的 definitionId。 */
+    private final FlowBindingService flowBindings;
+    /** r30：四段链路聚合（deliver 事实 + 本地准入段），详情唯一来源。 */
+    private final FlowChainService flowChains;
+    /** r30：逐级审批投影（与发布单详情共用同一推导）。 */
+    private final ApprovalLevelProjector approvalLevels;
+    /** r30：发起审批后回 `{definitionId, definitionVersion, nodeKeys}` 需要读定义。 */
+    private final WorkflowRegistry workflows;
+    private final ApprovalInstanceRepository approvalInstances;
+    private final ApprovalHistoryRepository approvalHistories;
+    private final ApprovalTaskRepository approvalTasks;
+
+    /**
+     * release 的 r30 新列（等级/必填项/驳回五列）不在 {@link ReleaseEntity} 里——
+     * 那个实体与它的迁移是既有资产，本需求的边界只到 ReleaseService。所以这些列走
+     * {@link EntityManager} 原生 SQL 读写：{@link ScopedJdbc} 只读，而 release 包被 lint L9
+     * 禁止直接持有 JDBC 模板（见 scripts/tests/lint.sh 的 allow_re 白名单）。
+     */
+    private final EntityManager entityManager;
 
     public ReleaseService(ReleaseRepository releaseRepository,
                           ReleaseRequirementRepository releaseRequirementRepository,
@@ -78,7 +116,16 @@ public class ReleaseService {
                           CodeGenerator codeGenerator,
                           AuditService auditService,
                           ObjectProvider<ApprovalEngine> approvalEngine,
-                          ReleasePublishCascade publishCascade) {
+                          ReleasePublishCascade publishCascade,
+                          ReleaseLevelValidator levelValidator,
+                          FlowBindingService flowBindings,
+                          FlowChainService flowChains,
+                          ApprovalLevelProjector approvalLevels,
+                          WorkflowRegistry workflows,
+                          ApprovalInstanceRepository approvalInstances,
+                          ApprovalHistoryRepository approvalHistories,
+                          ApprovalTaskRepository approvalTasks,
+                          EntityManager entityManager) {
         this.releaseRepository = releaseRepository;
         this.releaseRequirementRepository = releaseRequirementRepository;
         this.milestoneRepository = milestoneRepository;
@@ -89,6 +136,15 @@ public class ReleaseService {
         this.auditService = auditService;
         this.approvalEngine = approvalEngine;
         this.publishCascade = publishCascade;
+        this.levelValidator = levelValidator;
+        this.flowBindings = flowBindings;
+        this.flowChains = flowChains;
+        this.approvalLevels = approvalLevels;
+        this.workflows = workflows;
+        this.approvalInstances = approvalInstances;
+        this.approvalHistories = approvalHistories;
+        this.approvalTasks = approvalTasks;
+        this.entityManager = entityManager;
     }
 
     // ------------------------------------------------------------------ create
@@ -111,6 +167,9 @@ public class ReleaseService {
         if (cmd.startDate() != null && cmd.endDate() != null && cmd.endDate().isBefore(cmd.startDate())) {
             throw RequirementErrors.validation("endDate 不能早于 startDate");
         }
+        // r30：等级与两个必填项在写库前校验（AC-5/AC-7），校验失败版本行不产生。
+        ReleaseLevelValidator.Validated level = levelValidator.validate(scope.tenantId(),
+                cmd.releaseLevel(), cmd.emergencyReason(), cmd.previousDeployOrderCode());
 
         ReleaseEntity entity = new ReleaseEntity();
         entity.setTenantId(scope.tenantId());
@@ -125,9 +184,13 @@ public class ReleaseService {
         entity.setCreatedBy(scope.userId());
         entity.setUpdatedBy(scope.userId());
         ReleaseEntity saved = releaseRepository.save(entity);
+        // 等级列是原生 UPDATE 写的，必须先落 INSERT 再改同一行。
+        releaseRepository.flush();
+        writeLevel(saved.getId(), scope.tenantId(), level);
         auditService.record("CREATE", BIZ_TYPE, saved.getId(), Map.of(
-                "code", saved.getCode(), "domainId", cmd.domainId(), "gateMode", gateMode));
-        return toView(saved);
+                "code", saved.getCode(), "domainId", cmd.domainId(), "gateMode", gateMode,
+                "releaseLevel", level.level()));
+        return toView(saved, flowState(scope.tenantId(), saved.getId()));
     }
 
     // ------------------------------------------------------------------- query
@@ -163,8 +226,16 @@ public class ReleaseService {
                 .findByTenantIdAndReleaseIdOrderByPlannedDateAsc(release.getTenantId(), id)
                 .stream().map(m -> new MilestoneView(m.getId(), m.getName(), m.getPlannedDate(), m.getStatus()))
                 .toList();
-        return new ReleaseDetail(toView(release), requirements, groups(requirements),
-                stats(requirements, release), riskItems(requirements, release), milestones);
+        // r30：AC-8 要求「一次 GET 拿全」。四段链路只由 T2 的 FlowChainService 聚合（此处不拼段），
+        // 逐级审批只由 ApprovalLevelProjector 投影（版本与发布单共用），驳回痕迹读本单五列。
+        ApprovalLevelProjector.Mount mount = approvalLevels.mount(release.getTenantId(), BIZ_TYPE, id);
+        FlowChainViews.FlowChain chain = flowChains.assemble(id);
+        FlowState state = flowState(release.getTenantId(), id);
+        return new ReleaseDetail(toView(release, state), requirements, groups(requirements),
+                stats(requirements, release), riskItems(requirements, release), milestones,
+                mount.activeInstanceId(), mount.levels(), chain,
+                state.rejectedNodeKey(), state.rejectedNodeName(), state.rejectedBy(),
+                state.rejectedAt(), state.rejectReason());
     }
 
     // ---------------------------------------------------------------- membership
@@ -246,8 +317,14 @@ public class ReleaseService {
 
     // --------------------------------------------------------------- approval
 
+    /**
+     * 发起审批：等级槽位 → definitionId → 既有引擎（执行语义一点不动）。
+     *
+     * <p>发起前按落库值再校验一次（AC-5「两处校验」的第二处）：等级可能在创建后被 PATCH 改过，
+     * 而紧急原因/回滚单号的有效性会随时间变化（回滚源单据可能被改状态）。</p>
+     */
     @Transactional
-    public long startApproval(long id) {
+    public StartResult startApproval(long id) {
         DataScope scope = TenantContext.require();
         ReleaseEntity release = requireVisible(id);
         if (STATUS_PUBLISHED.equals(release.getStatus()) || STATUS_CANCELLED.equals(release.getStatus())) {
@@ -258,19 +335,60 @@ public class ReleaseService {
         if (engine == null) {
             throw RequirementErrors.validation("审批引擎未就绪");
         }
+        FlowState state = flowState(scope.tenantId(), id);
+        ReleaseLevelValidator.Validated level = levelValidator.validate(scope.tenantId(),
+                state.releaseLevel(), state.emergencyReason(), state.previousDeployOrderCode());
+        // 等级 → 槽位 → definitionId：绑定不存在时回退默认链，仍解析不到即 409 WORKFLOW_NOT_CONFIGURED。
+        long definitionId = flowBindings.requireDefinitionId(scope.tenantId(), BIZ_TYPE, level.level());
+        WorkflowRegistry.ResolvedWorkflow resolved = workflows.byId(definitionId);
+
         Map<String, Object> attributes = new LinkedHashMap<>();
         attributes.put("domainId", release.getDomainId());
         attributes.put("total", requirementsOf(release).size());
         attributes.put("gateMode", release.getGateMode());
+        attributes.put("releaseLevel", level.level());
+        if (level.emergencyReason() != null) {
+            attributes.put("emergencyReason", level.emergencyReason());
+        }
+        if (level.previousDeployOrderCode() != null) {
+            attributes.put("previousDeployOrderCode", level.previousDeployOrderCode());
+        }
         long instanceId = engine.start(new StartApproval(BIZ_TYPE, id, null, release.getDomainId(),
-                attributes, null, null)).id();
+                attributes, definitionId, null)).id();
         release.setStatus(STATUS_LOCKED);
         release.setLockedAt(LocalDateTime.now());
         release.setUpdatedBy(scope.userId());
         releaseRepository.save(release);
+        // 新的提交意图：上一轮的驳回痕迹不再代表本次提交。
+        clearRejection(id, scope.tenantId());
+        List<String> nodeKeys = resolved == null ? List.of() : resolved.definition().nodes().stream()
+                .filter(WorkflowDefinition.Node::isApproval)
+                .map(WorkflowDefinition.Node::key)
+                .toList();
         auditService.record("RELEASE_APPROVAL_START", BIZ_TYPE, id, Map.of(
-                "instanceId", instanceId, "status", STATUS_LOCKED));
-        return instanceId;
+                "instanceId", instanceId, "status", STATUS_LOCKED,
+                "releaseLevel", level.level(), "definitionId", definitionId));
+        return new StartResult(instanceId, id, definitionId,
+                resolved == null ? null : resolved.version(), nodeKeys);
+    }
+
+    /** 改等级（PATCH /releases/{id}/level）：只允许编辑窗口内，写前校验，审计带 before/after。 */
+    @Transactional
+    public ReleaseView updateLevel(long id, UpdateLevel cmd) {
+        DataScope scope = TenantContext.require();
+        ReleaseEntity release = requireVisible(id);
+        FlowState before = flowState(scope.tenantId(), id);
+        if (!STATUS_PLAN.equals(release.getStatus()) || release.getLockedAt() != null
+                || approvalInstances.findFirstByTenantIdAndBizTypeAndBizIdAndActiveFlag(
+                        scope.tenantId(), BIZ_TYPE, id, ApprovalInstance.ACTIVE).isPresent()) {
+            throw RequirementErrors.releaseLocked(id);
+        }
+        ReleaseLevelValidator.Validated after = levelValidator.validate(scope.tenantId(),
+                cmd.releaseLevel(), cmd.emergencyReason(), cmd.previousDeployOrderCode());
+        writeLevel(id, scope.tenantId(), after);
+        auditService.record("RELEASE_LEVEL_UPDATE", BIZ_TYPE, id, Map.of(
+                "before", before.levelMap(), "after", after.asMap()));
+        return toView(release);
     }
 
     // ---------------------------------------------------------------- publish
@@ -308,7 +426,12 @@ public class ReleaseService {
         return toView(release);
     }
 
-    /** 审批驳回/撤回：单据回到 PLAN，保留成员与里程碑（D3：不回退需求状态）。 */
+    /**
+     * 审批驳回/撤回：单据回到 PLAN，保留成员与里程碑（D3：不回退需求状态）。
+     *
+     * <p>r30 追加：把「卡在哪一级、谁驳回的、为什么」落到 release 五列，重提时清空——
+     * 这样详情页不必再猜最近的驳回属于哪一轮。</p>
+     */
     @Transactional
     public ReleaseView onApprovalRejected(long id, String reason) {
         DataScope scope = TenantContext.require();
@@ -320,6 +443,7 @@ public class ReleaseService {
         release.setLockedAt(null);
         release.setUpdatedBy(scope.userId());
         releaseRepository.save(release);
+        writeRejection(id, scope.tenantId(), reason);
         auditService.record("RELEASE_APPROVAL_REJECT", BIZ_TYPE, id, Map.of(
                 "status", STATUS_PLAN, "reason", Objects.requireNonNullElse(reason, "")));
         return toView(release);
@@ -513,10 +637,16 @@ public class ReleaseService {
     }
 
     private ReleaseView toView(ReleaseEntity entity) {
+        return toView(entity, flowState(entity.getTenantId(), entity.getId()));
+    }
+
+    private ReleaseView toView(ReleaseEntity entity, FlowState state) {
         return new ReleaseView(entity.getId(), entity.getCode(), entity.getName(), entity.getDomainId(),
                 entity.getStatus(), entity.getStartDate(), entity.getEndDate(),
                 entity.getPlannedReleaseDate(), entity.getGateMode(), entity.getLockedAt(),
-                entity.getReleasedAt(), actionsOf(entity.getStatus()));
+                entity.getReleasedAt(), actionsOf(entity.getStatus()),
+                state.releaseLevel(), ReleaseLevel.label(state.releaseLevel()),
+                state.emergencyReason(), state.previousDeployOrderCode());
     }
 
     private List<String> actionsOf(String status) {
@@ -549,11 +679,160 @@ public class ReleaseService {
                         com.example.req.requirement.Rows.object(row, "locked_at")),
                 com.example.req.requirement.Rows.toDateTime(
                         com.example.req.requirement.Rows.object(row, "released_at")),
-                actions);
+                actions,
+                levelOf(row),
+                ReleaseLevel.label(levelOf(row)),
+                com.example.req.requirement.Rows.str(row, "emergency_reason"),
+                com.example.req.requirement.Rows.str(row, "previous_deploy_order_code"));
+    }
+
+    private static String levelOf(Map<String, Object> row) {
+        return ReleaseLevel.normalise(com.example.req.requirement.Rows.str(row, "release_level"));
+    }
+
+    // ------------------------------------------------------------ r30 flow state
+
+    /**
+     * release 行的 r30 新列。{@link com.example.req.release.ReleaseEntity} 不承载这些列
+     * （既有实体与迁移不改），因此用原生 SQL 一读一写；读写都显式带 tenant_id，
+     * 与 {@link ScopedJdbc} 的租户隔离同口径。
+     */
+    private FlowState flowState(long tenantId, long releaseId) {
+        List<?> rows = entityManager.createNativeQuery("""
+                        SELECT release_level, emergency_reason, previous_deploy_order_code,
+                               rejected_node_key, rejected_node_name, rejected_by, rejected_at, reject_reason
+                        FROM `release` WHERE tenant_id = :tenantId AND id = :id
+                        """)
+                .setParameter("tenantId", tenantId)
+                .setParameter("id", releaseId)
+                .getResultList();
+        if (rows.isEmpty()) {
+            return new FlowState(ReleaseLevel.NORMAL, null, null, null, null, null, null, null);
+        }
+        Object[] row = (Object[]) rows.getFirst();
+        return new FlowState(ReleaseLevel.normalise(str(row[0])), str(row[1]), str(row[2]),
+                str(row[3]), str(row[4]), num(row[5]), time(row[6]), str(row[7]));
+    }
+
+    private void writeLevel(long releaseId, long tenantId, ReleaseLevelValidator.Validated level) {
+        entityManager.createNativeQuery("""
+                        UPDATE `release`
+                        SET release_level = :level, emergency_reason = :reason,
+                            previous_deploy_order_code = :previous
+                        WHERE tenant_id = :tenantId AND id = :id
+                        """)
+                .setParameter("level", level.level())
+                .setParameter("reason", level.emergencyReason())
+                .setParameter("previous", level.previousDeployOrderCode())
+                .setParameter("tenantId", tenantId)
+                .setParameter("id", releaseId)
+                .executeUpdate();
+    }
+
+    private void clearRejection(long releaseId, long tenantId) {
+        entityManager.createNativeQuery("""
+                        UPDATE `release`
+                        SET rejected_node_key = NULL, rejected_node_name = NULL, rejected_by = NULL,
+                            rejected_at = NULL, reject_reason = NULL
+                        WHERE tenant_id = :tenantId AND id = :id
+                        """)
+                .setParameter("tenantId", tenantId)
+                .setParameter("id", releaseId)
+                .executeUpdate();
+    }
+
+    /**
+     * 驳回痕迹回填：卡在哪一级从投影里取（与详情同一份推导），谁/何时/为什么取最后一条 REJECT 留痕。
+     * 没有实例或没有 REJECT 历史时保持 NULL——撤回也要能解释，所以 reason 优先用回调带来的文本。
+     */
+    private void writeRejection(long releaseId, long tenantId, String reason) {
+        ApprovalInstance instance = approvalInstances
+                .findFirstByTenantIdAndBizTypeAndBizIdOrderByIdDesc(tenantId, BIZ_TYPE, releaseId)
+                .orElse(null);
+        if (instance == null) {
+            return;
+        }
+        ApprovalHistory rejected = null;
+        for (ApprovalHistory history : approvalHistories.findByInstanceIdOrderByIdAsc(instance.getId())) {
+            if (ApprovalHistory.REJECT.equals(history.getAction())) {
+                rejected = history;
+            }
+        }
+        String nodeKey = null;
+        String nodeName = null;
+        for (FlowChainViews.ApprovalLevel level : approvalLevels.project(instance.getId())) {
+            if (FlowChainViews.LEVEL_REJECTED.equals(level.status())) {
+                nodeKey = level.nodeKey();
+                nodeName = level.nodeName();
+            }
+        }
+        String comment = reason == null || reason.isBlank()
+                ? (rejected == null ? null : rejected.getComment())
+                : reason;
+        entityManager.createNativeQuery("""
+                        UPDATE `release`
+                        SET rejected_node_key = :nodeKey, rejected_node_name = :nodeName,
+                            rejected_by = :by, rejected_at = :at, reject_reason = :reason
+                        WHERE tenant_id = :tenantId AND id = :id
+                        """)
+                .setParameter("nodeKey", nodeKey)
+                .setParameter("nodeName", nodeName)
+                .setParameter("by", rejected == null ? null : rejected.getOperatorId())
+                .setParameter("at", rejected == null ? null : rejected.getCreatedAt())
+                .setParameter("reason", comment)
+                .setParameter("tenantId", tenantId)
+                .setParameter("id", releaseId)
+                .executeUpdate();
+    }
+
+    private static String str(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private static Long num(Object value) {
+        return value instanceof Number number ? number.longValue() : null;
+    }
+
+    /**
+     * 原生查询的时间列：MySQL DATETIME 在 Hibernate 6 的 {@code Object[]} 结果里是
+     * {@link LocalDateTime}（不是旧版的 {@code java.sql.Timestamp}）。只判 Timestamp 会让
+     * {@code rejectedAt} 恒为 null——库里明明有值，详情却说没驳回时间（D-7）。
+     */
+    private static LocalDateTime time(Object value) {
+        if (value instanceof LocalDateTime dateTime) {
+            return dateTime;
+        }
+        if (value instanceof java.sql.Timestamp timestamp) {
+            return timestamp.toLocalDateTime();
+        }
+        if (value instanceof java.time.OffsetDateTime offset) {
+            return offset.toLocalDateTime();
+        }
+        return null;
+    }
+
+    /** release 行的 r30 状态列（等级/必填项/驳回五列）。 */
+    private record FlowState(String releaseLevel, String emergencyReason, String previousDeployOrderCode,
+                             String rejectedNodeKey, String rejectedNodeName, Long rejectedBy,
+                             LocalDateTime rejectedAt, String rejectReason) {
+
+        Map<String, Object> levelMap() {
+            return Map.of("releaseLevel", releaseLevel);
+        }
+    }
+
+    /** 发起审批的回执：谁被解析成审批链，前端才能直接跳进去（AC-1 的可核对口径）。 */
+    public record StartResult(long instanceId, long releaseId, long definitionId,
+                              Integer definitionVersion, List<String> nodeKeys) {
+    }
+
+    /** 改等级入参（三字段与创建同源，NORMAL 时后两个忽略）。 */
+    public record UpdateLevel(String releaseLevel, String emergencyReason, String previousDeployOrderCode) {
     }
 
     /** 创建版本入参。 */
     public record CreateRelease(String name, Long domainId, LocalDate startDate, LocalDate endDate,
-                                LocalDate plannedReleaseDate, String gateMode) {
+                                LocalDate plannedReleaseDate, String gateMode,
+                                String releaseLevel, String emergencyReason, String previousDeployOrderCode) {
     }
 }

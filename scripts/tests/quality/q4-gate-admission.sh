@@ -45,6 +45,8 @@ GATE_RESULT="$(jq -r '.result' <<<"$GATE_JSON")"
 if [[ "$GATE_RESULT" == "FAIL" ]]; then pass "门禁求值 FAIL"; else fail "无报告时门禁应为 FAIL（实际 ${GATE_RESULT}）" "QG-01 覆盖 100% + 已会签 RELEASE 报告"; fi
 if jq -e '.rules[]? | select(.code=="QG-01" and .status=="FAIL")' <<<"$GATE_JSON" >/dev/null; then pass "QG-01 FAIL（报告缺失/未签）"; else fail "QG-01 未 FAIL" "规则状态必须是 FAIL，页面靠它渲染修复指引"; fi
 if jq -e '.snapshotId == 0' <<<"$GATE_JSON" >/dev/null; then pass "页面预评估不固化快照（snapshotId=0）"; else fail "预评估却固化了快照" "只有内部端点/提交时才固化"; fi
+# r30：submit 前置「版本必须 LOCKED」，本段要验的是质量门，故先把版本锁住。
+q_lock_release "$REL" || exit 1
 api_call POST "/api/req/deploy-orders/${DEP}/submit" '{}'
 deny "门禁 FAIL 时提交 → 409 QUALITY_GATE_FAILED" 409 QUALITY_GATE_FAILED
 expect_jq "409 带 failedRules" '.detail.failedRules | length > 0' 'true'
@@ -140,6 +142,7 @@ db_q "UPDATE test_report_version SET signed_at = NOW(3) WHERE report_id=${RPT}" 
 api_call PATCH "/api/req/releases/${REL}/quality-settings" '{"reportValidityDays":7}'
 
 section "q4 · 绕过网关直连 req-service 同样拦截 + 强制放行退役"
+q_lock_release "$REL2" || exit 1
 api_direct POST "$REQ_URL" "/deploy-orders/${DEP2}/submit" '{}' \
     -H "Authorization: Bearer ${API_TOKEN}" -H "X-Tenant-Id: ${API_TENANT}"
 deny "直连 8082 提交同样 409（服务端重算，不信任网关）" 409 QUALITY_GATE_FAILED

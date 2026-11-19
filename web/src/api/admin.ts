@@ -6,6 +6,7 @@ import { http } from './client'
 import type {
   ApiClientRow,
   AuditRow,
+  FlowBindingSlot,
   GrantInput,
   GrantSaveResult,
   MetricDefinition,
@@ -202,6 +203,27 @@ export function publishWorkflow(id: number | string): Promise<WorkflowDefinition
 
 export function disableWorkflow(id: number | string): Promise<void> {
   return http.post<void>(`${ADMIN}/workflows/${id}/disable`)
+}
+
+/* ---------------- 发布等级流程绑定（r30，复用 workflow:manage） ----------------
+ * 6 个槽 = bizType(RELEASE/REQ_DEPLOY) × releaseLevel(NORMAL/EMERGENCY/ROLLBACK)。
+ * DELETE 是「恢复默认」：服务端删掉绑定行，解析回落到默认定义，不复制默认 id。
+ */
+
+export function listFlowBindings(): Promise<FlowBindingSlot[]> {
+  return http.get<FlowBindingSlot[]>(`${ADMIN}/flow-bindings`)
+}
+
+export function saveFlowBinding(
+  bizType: string,
+  level: string,
+  definitionId: number,
+): Promise<FlowBindingSlot> {
+  return http.put<FlowBindingSlot>(`${ADMIN}/flow-bindings/${bizType}/${level}`, { definitionId })
+}
+
+export function resetFlowBinding(bizType: string, level: string): Promise<FlowBindingSlot> {
+  return http.del<FlowBindingSlot>(`${ADMIN}/flow-bindings/${bizType}/${level}`)
 }
 
 export function listApiClients(

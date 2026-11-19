@@ -157,6 +157,15 @@
   --perm-half: #c77700; /* 半选琥珀点 */
   --perm-lock: #86909c; /* 锁图标（装饰，不承载文字） */
 
+  /* ---- r30 发版链路：四段传送带 + 审批阶梯 + 快照回执（DESIGN §5，只增不改） ---- */
+  /* 段卡竖向 128 内容 + 上下 16 padding = 132，四段等高；min-height 用本令牌 */
+  --h-chain-seg: 132px;
+  --h-level-row: 44px; /* 审批级别行：序号 + 等级名 + 印章一行放得下 */
+  --w-hash: 132px; /* 快照 hash 行：# + 12 hex ≈ 94 + 复制按钮 16 + gap 4 */
+  /* 另有 --w-node-key / --h-seg-grid 两条在 DESIGN §5 登记但实现复核后未被引用
+     （级别序号列在 ApprovalLevelList 内按 24px 内联、快照四小格用 minmax(0,1fr)），
+     按「不落无用令牌」不在此声明；若后续真要用，从 DESIGN §5 取值补在这里。 */
+
   /* ---- 字体 ---- */
   --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

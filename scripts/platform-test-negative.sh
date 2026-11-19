@@ -483,6 +483,13 @@ section "9) 准入 FAIL 直接 submit → 409；10) 强制放行已退役 → 40
 api_call POST /api/req/releases "{\"name\":\"neg-rel-${RUN_TAG}\",\"domainId\":${DOMAIN1},\"startDate\":\"2026-11-01\",\"endDate\":\"2026-11-30\",\"plannedReleaseDate\":\"2026-12-05\",\"gateMode\":\"STRICT\"}"
 REL="$(jget_ "$HTTP_BODY" '.id')"
 api_call POST /api/req/releases/${REL}/requirements "{\"requirementIds\":[${RD_ID}]}"
+# r30：submit 新增「版本必须 LOCKED」前置（DeployOrderService.requireReleaseLocked）。
+# 本段要验的是第 6 项质量门，不是锁定闸门，所以先发起版本审批把 REL 锁住；
+# 只看 HTTP 码，不计入断言数（失败会由下一条 QUALITY_GATE_FAILED 的期望值暴露）。
+api_call POST "/api/req/releases/${REL}/approval"
+[[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "201" ]] || \
+    fail "9) 夹具版本发起审批失败（HTTP ${HTTP_CODE}），锁定前置未建立" \
+        "版本必须是 PLAN 且需求已挂；否则 submit 会先撞 RELEASE_NOT_LOCKED 而不是质量门"
 api_call POST /api/req/deploy-orders "$(jq -cn --argjson r "$REL" --argjson q "$RD_ID" '{releaseId:$r,env:"UAT",windowStart:"2026-12-02T10:00:00+08:00",windowEnd:"2026-12-02T12:00:00+08:00",artifactVersion:"neg",steps:[{name:"发布",order:1}],rollbackPlan:"回滚",impact:"无",ownerId:1,requirementIds:[$q]}')"
 DEP="$(jget_ "$HTTP_BODY" '.id')"
 api_call POST "/api/req/deploy-orders/${DEP}/submit"

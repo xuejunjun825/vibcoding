@@ -6,6 +6,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import com.example.req.release.FlowChainViews;
+import com.example.req.release.ReleaseLevel;
+
 /** 需求对外视图（记录型 DTO，Controller 直接序列化）。 */
 public final class RequirementViews {
 
@@ -73,15 +76,50 @@ public final class RequirementViews {
                               long childCount, long doneCount) {
     }
 
+    /**
+     * 版本详情（r30 起还带分级、逐级审批与四段链路）。
+     *
+     * <p>为什么把 {@code flowChain / approvalLevels / rejected*} 直接挂在这个既有记录上，
+     * 而不是另开 {@code GET /releases/{id}/flow}：AC-8 要求「一次 GET 版本详情拿全」，
+     * 另开接口会让前端出现两个 loading 态，也让「详情与链路来自不同时刻」成为可能
+     * （面板显示 PASS、审批却已因链路过期被驳回）。</p>
+     *
+     * <p>{@code activeInstanceId} 只指向<b>在途</b>实例；驳回后它为 null，但
+     * {@code approvalLevels} 仍是最后一次实例的投影（AC-3 要看到“被哪一级驳回”）。</p>
+     */
     public record ReleaseDetail(ReleaseView release, List<View> requirements,
                                 List<ParentGroup> groups, ReleaseStats stats, List<View> riskItems,
-                                List<MilestoneView> milestones) {
+                                List<MilestoneView> milestones,
+                                Long activeInstanceId,
+                                List<FlowChainViews.ApprovalLevel> approvalLevels,
+                                FlowChainViews.FlowChain flowChain,
+                                String rejectedNodeKey, String rejectedNodeName, Long rejectedBy,
+                                LocalDateTime rejectedAt, String rejectReason) {
     }
 
+    /**
+     * 版本行：等级与两个必填项跟着行一起返回（列表/详情/PATCH 三处同源）。
+     *
+     * <p>{@code releaseLevelLabel} 由后端给中文（AC-5「中文标签由后端统一」），
+     * 前端不再维护等级字典；{@code emergencyReason/previousDeployOrderCode} 恒返回，
+     * 由前端按等级决定是否展示，避免「字段缺失」与「值为空」两种空在组件里要写两套分支。</p>
+     */
     public record ReleaseView(Long id, String code, String name, Long domainId, String status,
                               LocalDate startDate, LocalDate endDate, LocalDate plannedReleaseDate,
                               String gateMode, LocalDateTime lockedAt, LocalDateTime releasedAt,
-                              List<String> allowedActions) {
+                              List<String> allowedActions,
+                              String releaseLevel, String releaseLevelLabel,
+                              String emergencyReason, String previousDeployOrderCode) {
+
+        /** 老调用点兼容：不带等级字段时按常规发布展示。 */
+        public ReleaseView(Long id, String code, String name, Long domainId, String status,
+                           LocalDate startDate, LocalDate endDate, LocalDate plannedReleaseDate,
+                           String gateMode, LocalDateTime lockedAt, LocalDateTime releasedAt,
+                           List<String> allowedActions) {
+            this(id, code, name, domainId, status, startDate, endDate, plannedReleaseDate, gateMode,
+                    lockedAt, releasedAt, allowedActions, ReleaseLevel.NORMAL,
+                    ReleaseLevel.label(ReleaseLevel.NORMAL), null, null);
+        }
     }
 
     public record MilestoneView(Long id, String name, LocalDate plannedDate, String status) {
