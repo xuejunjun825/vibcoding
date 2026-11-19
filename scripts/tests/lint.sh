@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 静态门禁（回归防线）：把修复轮确认过的缺陷「类」变成可执行断言，`make lint` 调用。
 # 每条断言都对应一个真实发生过的缺陷，修复前必红、修复后必绿；不启动任何服务。
-#   L1 所有脚本 `bash -n` 语法通过
+#   L1 所有脚本 `bash -n` 语法通过，且 `source` 的目标真实存在（r34 D-1：子目录模块把
+#      相对路径写成 `pwd)/lib.sh`，实际指向不存在的 scripts/lib/lib.sh，失败只报一行错并继续）
 #   L2 脚本内禁止 `$VAR` 紧跟非 ASCII 字节：中文全角标点会被 set -u 并入变量名，
 #      使错误路径提示变成 "unbound variable"（D1 的类，修复前 5 处）
 #   L3 公共逻辑单点：own_jvm_pids / kill_own_jvms / chain_ok 只允许在 lib.sh 定义一次（D5）
@@ -27,21 +28,56 @@ run_check() {
     fi
 }
 
-# ---- L1 语法 ----
+# ---- L1 语法 + source 目标存在 ----
 syntax_ok() {
     local f
-    for f in "$ROOT"/scripts/*.sh "$ROOT"/scripts/tests/*.sh \
+    for f in "$ROOT"/scripts/*.sh "$ROOT"/scripts/lib/*.sh "$ROOT"/scripts/tests/*.sh \
              "$ROOT"/scripts/tests/platform/*.sh "$ROOT"/scripts/tests/rbac/*.sh; do
         [[ -e "$f" ]] || continue
         bash -n "$f" || { echo "语法错误: $f"; return 1; }
     done
 }
 
+# r34 D-1 的类：脚本写在子目录里（scripts/lib/*.sh）仍按「同级」拼 source 路径，写成
+# `pwd)/lib.sh` → 实际指向 scripts/lib/lib.sh（不存在）。bash 对 source 失败只在退化路径上
+# 报一行错并继续执行，于是 lib.sh 的 db_q/db_count/platform_login 全缺失，直到某个函数调用
+# 才炸——修一次错路径不够，要把「source 目标必须存在」变成静态断言。
+source_targets_ok() {
+    local f d line base mid rel midrel target bad=0
+    # `source "$(cd "$(dirname "${BASH_SOURCE[0]}")<mid>" && pwd)/<rel>"`
+    local re='\)([^"]*)"[[:space:]]*&&[[:space:]]*pwd\)/([^"]+)"'
+    for f in "$ROOT"/scripts/*.sh "$ROOT"/scripts/lib/*.sh "$ROOT"/scripts/tests/*.sh \
+             "$ROOT"/scripts/tests/platform/*.sh "$ROOT"/scripts/tests/rbac/*.sh; do
+        [[ -e "$f" ]] || continue
+        d="$(cd "$(dirname "$f")" && pwd)"
+        while IFS= read -r line; do
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue  # 头部/示例注释里的 source 不算调用
+            [[ "$line" == *BASH_SOURCE* && "$line" == *'pwd)/'* ]] || continue
+            [[ "$line" =~ $re ]] || continue
+            mid="${BASH_REMATCH[1]}"
+            rel="${BASH_REMATCH[2]}"
+            # 变量拼接、或正则/占位符形态（如本文件的断言模板）不静态判定
+            midrel="$mid$rel"
+            [[ "$midrel" == *'$'* || "$midrel" == *'['* || "$midrel" == *'('* ]] && continue
+            base="$(cd "${d}${mid}" 2>/dev/null && pwd || true)"
+            [[ -n "$base" ]] || { echo "source 相对路径不可解析: ${f#"$ROOT"/} (${mid})"; bad=1; continue; }
+            target="${base}/${rel}"
+            if [[ ! -e "$target" ]]; then
+                echo "source 目标不存在: ${f#"$ROOT"/} -> ${target#"$ROOT"/}"
+                bad=1
+            fi
+        done < <(grep -E '(^|[^A-Za-z_])source[[:space:]]|BASH_SOURCE' "$f" 2>/dev/null || true)
+    done
+    return "$bad"
+}
+
+syntax_and_sources_ok() { syntax_ok && source_targets_ok; }
+
 # ---- L2 裸变量名 + 全角标点（set -u 把全角字节并入变量名） ----
 no_bare_var_before_wide_char() {
     local hits
     hits="$(LC_ALL=C grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' \
-        "$ROOT"/scripts/*.sh "$ROOT"/scripts/tests/*.sh "$ROOT"/scripts/tests/platform/*.sh 2>/dev/null || true)"
+        "$ROOT"/scripts/*.sh "$ROOT"/scripts/lib/*.sh "$ROOT"/scripts/tests/*.sh "$ROOT"/scripts/tests/platform/*.sh 2>/dev/null || true)"
     if [[ -n "$hits" ]]; then
         echo "以下行在 \${VAR} 后紧跟非 ASCII 字节，请改为 \$ 花括号形式:"
         echo "$hits"
@@ -498,7 +534,7 @@ readonly_permission_overview() {
 }
 
 log "静态门禁：脚本语法 / 变量插值 / 单点实现 / 错误提示 / 文档一致性"
-run_check "L1 所有脚本 bash -n 语法通过" syntax_ok
+run_check "L1 所有脚本 bash -n 语法通过且 source 目标存在" syntax_and_sources_ok
 run_check "L2 无 \$VAR 紧跟全角标点（防 set -u 吞变量名）" no_bare_var_before_wide_char
 run_check "L3 own_jvm_pids 仅在 lib.sh 定义" defined_once_in_lib own_jvm_pids
 run_check "L3 kill_own_jvms 仅在 lib.sh 定义" defined_once_in_lib kill_own_jvms

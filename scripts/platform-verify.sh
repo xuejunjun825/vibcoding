@@ -6,6 +6,10 @@
 #   * 失败立即打印「修复:」提示，末尾 PASS==TOTAL 守卫（少跑一条也是失败）。
 set -uo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+# r34：夹具生命周期（退出复位 + 基线断言）只有一份实现，见 scripts/lib/gate-fixture.sh——
+# 过去本脚本没有 trap，自建夹具留在演示租户里，后跑的门禁看到的是脏数据。
+# shellcheck source=lib/gate-fixture.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gate-fixture.sh"
 
 TOTAL=0
 PASS=0
@@ -120,6 +124,10 @@ tenant_id() {
 db_count_req() { db_count "$1" "tenant_id=$(tenant_id)"; }
 
 # =====================================================================
+GATE_FIXTURE_TENANT_CODE="$T1_TENANT"
+# 起跑自愈 + 注册唯一 EXIT/INT/TERM 陷阱：必须在 require_stack 登录之前（复位可能重建种子账号）。
+req_ready || { err "req-service 未就绪，修复: make platform-up"; exit 1; }
+gate_fixture_begin || { err "gate-fixture 起跑失败（见上方 [gate] 输出）"; exit 1; }
 section "AC-1 多租户：建租户预置、隔离、缺头/跨租户拒绝"
 require_stack
 DOMAIN1="$(db_q "SELECT id FROM biz_domain WHERE tenant_id=$(tenant_id) ORDER BY id LIMIT 1")"
@@ -251,18 +259,18 @@ BUS_ID="$(jget "$HTTP_BODY" '.id')"
 BUS_CODE="$(jget "$HTTP_BODY" '.code')"
 expect_num "BUS 编号形如 BUS-####" "$(grep -cE '^BUS-[0-9]{4,}$' <<<"$BUS_CODE")" eq 1 "CodeGenerator 前缀/补零不对"
 
-# r23 前置门：拆解/直建 PDR 要求父 BUS 已入池（POOLED）。新建的 BUS_ID 只用于类型/状态断言，
-# PDR 改挂种子 POOLED BUS（BUS-0001）并立刻排期，后续 RD 创建才不会被 409 PARENT_NOT_SCHEDULED 拦住。
-SEED_POOLED_BUS="$(db_q "SELECT id FROM requirement WHERE tenant_id=$(tenant_id)
-                         AND type='BUS' AND status='POOLED' ORDER BY id LIMIT 1")"
-[[ -n "$SEED_POOLED_BUS" ]] || SEED_POOLED_BUS="$BUS_ID"      # 兜底：让下一条断言红并带提示
-create_req PDR "验证-产品需求-${RUN_TAG}" "$SEED_POOLED_BUS"
+# r34：PDR 的父改成本轮自建的 BUS——先真实走完 submit→会签→review→会签把它推到 POOLED
+# （RequirementRules.REQUIRED_POOLED 的硬前置），不再借种子 BUS-0001，也不再「按状态查一条」。
+# 这样 PDR/RD 都落在本轮 GATE_TAG 上，退出即被 gate-fixture 复位；池化步骤只 fail 不计数。
+gate_pool_bus "$BUS_ID" "verify 父链 BUS" \
+    || { err "自建 BUS 未池化，PDR 无法挂父（RequirementRules.REQUIRED_POOLED）"; exit 1; }
+create_req PDR "验证-产品需求-${RUN_TAG}" "$BUS_ID"
 expect "创建 PDR（父=BUS[POOLED]）201" 201
 PDR_ID="$(jget "$HTTP_BODY" '.id')"
 # r26：排期前先通过工时评估（新门），否则 schedule 恒 409 ESTIMATE_NOT_APPROVED。
 approve_estimate "$PDR_ID" 2 || warn "PDR 工时评估未就绪：后续 schedule 会被评估门拦住"
 api_call POST "/api/req/requirements/${PDR_ID}/actions" '{"action":"schedule"}'
-[[ "$HTTP_CODE" == "200" ]] || warn "PDR 排期失败（HTTP ${HTTP_CODE}）：后续 RD 创建会 409 PARENT_NOT_SCHEDULED，确认已 make platform-seed（BUS-0001 POOLED）"
+[[ "$HTTP_CODE" == "200" ]] || warn "PDR 排期失败（HTTP ${HTTP_CODE}）：后续 RD 创建会 409 PARENT_NOT_SCHEDULED，先看 approve_estimate 的失败行"
 
 create_req RD "验证-研发需求-${RUN_TAG}" "$BUS_ID"
 expect "RD 直接挂 BUS 下 → 400（层级必须 BUS→PDR→RD）" 400
