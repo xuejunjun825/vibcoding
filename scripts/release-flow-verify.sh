@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # release-flow-verify.sh — r30 发版分级审批链 + 不可变链路快照门禁（AC-20）。
 #
-# 32 条断言，六组：
+# 40 条断言，七组：
 #   S1 绑定与等级（6）       6 个槽可读、NORMAL 三级 / REQ_DEPLOY 两级、换绑只影响新单、
 #                           reset 回默认、非法等级 400 detail.field、非管理员 403
 #   S2 正常链（7）           逐级建待办、NODE_APPROVED 三键留痕、中间态 LOCKED、
@@ -15,15 +15,18 @@
 #   S6 回归与卫生（2）       无发布路由 / 快照表无 UPDATE·DELETE；提交区间 BASE..HEAD 内
 #                           7 个 *pom.xml 与 web/package.json·web/pnpm-lock.yaml 无 diff，
 #                           迁移只允许 0/1 条新增 V14（M/D/其它 A 即红）；判据自检 1 正 3 反同场执行
+#   S7 演示夹具到 PUBLISHED（8） 夹具就绪 → 版本测试 TEST_PASSED → 三签 → 清空 MR 的 409
+#                           （failedRules 恰 [MR_FILLED]）→ 恢复后提交 200 + 第 1 轮快照
+#                           + 四段同源 → QG-01/02/03 全 PASS → 发布单两级 → 版本三级 PUBLISHED
 #
 # 用法：
 #   bash scripts/release-flow-verify.sh                # 全量（需 make platform-up 已起栈必、已 demo-reset）
-#   bash scripts/release-flow-verify.sh --static-only  # 不连栈，只查脚本/文档/契约自洽（8 条）
+#   bash scripts/release-flow-verify.sh --static-only  # 不连栈，只查脚本/文档/契约自洽（9 条）
 #
 # 约定（与 wbs-backfill-verify 一致）：
-#   - 脚本自声明 RELEASE_FLOW_TOTAL=32，CASE 必须等于 TOTAL，缺一条就是红；
+#   - 脚本自声明 RELEASE_FLOW_TOTAL=40，CASE 必须等于 TOTAL，缺一条就是红；
 #   - 前置缺失（栈没起、种子账号不在）直接 die，不 skip（r28 教训：条件跳过=假绿）；
-#   - 第 32 条只读 git 对象库（BASE..HEAD），工作树脏不影响结论；基线默认 main，
+#   - 第 40 条只读 git 对象库（BASE..HEAD），工作树脏不影响结论；基线默认 main，
 #     RELEASE_FLOW_BASE_REF 可覆盖，解析失败判红而不回退 HEAD；
 #   - S1 开头幂等复位六个绑定槽（setup，不计数）；EXIT trap 复位演示数据（RELEASE_FLOW_SKIP_RESET=1 可跳过）。
 set -uo pipefail
@@ -33,7 +36,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${ROOT}/scripts/lib.sh"
 set +e
 
-RELEASE_FLOW_TOTAL=32
+RELEASE_FLOW_TOTAL=40
 CASE=0
 PASS=0
 FAIL=0
@@ -479,15 +482,22 @@ static_checks() {
     else
         s_fail "release-flow-upgrade.sh 缺失或语法错误" "补齐 scripts/release-flow-upgrade.sh"
     fi
-    if [[ "$(grep -c '^RELEASE_FLOW_TOTAL=32$' "${ROOT}/scripts/release-flow-verify.sh")" == "1" ]]; then
-        s_pass "脚本自声明 RELEASE_FLOW_TOTAL=32（AC-20 的分母唯一）"
+    if [[ "$(grep -c '^RELEASE_FLOW_TOTAL=40$' "${ROOT}/scripts/release-flow-verify.sh")" == "1" ]]; then
+        s_pass "脚本自声明 RELEASE_FLOW_TOTAL=40（AC-20 的分母唯一）"
     else
-        s_fail "RELEASE_FLOW_TOTAL 不是 32 或重复声明" "断言数变化必须同步 TECHNICAL §7.2"
+        s_fail "RELEASE_FLOW_TOTAL 不是 40 或重复声明" "断言数变化必须同步 TECHNICAL §7.2"
     fi
-    if [[ "$(grep -cE '^section "S[1-6] ' "${ROOT}/scripts/release-flow-verify.sh")" == "6" ]]; then
-        s_pass "六组断言 S1–S6 均有 section 标记"
+    if [[ "$(grep -cE '^section "S[1-7] ' "${ROOT}/scripts/release-flow-verify.sh")" == "7" ]]; then
+        s_pass "七组断言 S1–S7 均有 section 标记"
     else
-        s_fail "S1–S6 分组标记缺失" "每组一个 section，便于失败定位"
+        s_fail "S1–S7 分组标记缺失" "每组一个 section，便于失败定位"
+    fi
+    # r32：S7 的 8 条叙述全部由命名函数实现（s7_reset + 8 个断言函数），函数被删而调用点
+    # 还在会静默变成「空过」；这里数定义数，确保 9 个都在。
+    if [[ "$(grep -cE '^s7_[a-z_]+\(\) \{' "${ROOT}/scripts/release-flow-verify.sh")" == "10" ]]; then
+        s_pass "S7 十个函数齐备（1 个自愈 reset + 1 个建链 + 8 条断言）"
+    else
+        s_fail "S7 函数数不为 10" "s7_reset + s7_fixture_ready/build_chain/version_test_to_test_passed/report_signoff/negative_mr/submit_and_chain/quality_gate/order_levels/release_levels"
     fi
     if grep -q '^release-flow-verify:' "${ROOT}/Makefile" && grep -q '^release-flow-upgrade:' "${ROOT}/Makefile"; then
         s_pass "Makefile 暴露 release-flow-verify / release-flow-upgrade 两个薄封装"
@@ -499,12 +509,20 @@ static_checks() {
     else
         s_fail "help 注释缺失" "每个目标上方一行 ## 说明，与既有目标同风格"
     fi
-    if [[ -f "${ROOT}/docs/teamflow/DEMO-RELEASE-FLOW.md" ]] \
-        && [[ "$(grep -cE '^## [1-8]\. ' "${ROOT}/docs/teamflow/DEMO-RELEASE-FLOW.md")" == "8" ]] \
-        && grep -q '^## 被拦链' "${ROOT}/docs/teamflow/DEMO-RELEASE-FLOW.md"; then
-        s_pass "DEMO-RELEASE-FLOW.md 8 步正常链 + 被拦链齐备"
+    local doc="${ROOT}/docs/teamflow/DEMO-RELEASE-FLOW.md" a3=""
+    [[ -f "$doc" ]] && a3="$(awk '/^### A\.3 /{f=1} /^### A\.4 /{f=0} f' "$doc")"
+    # r32/AC-10：A.3 是「全绿跑通」的取证段，必须自带 PUBLISHED 落库字段、released_at、两阶梯留痕、
+    # 409 负向；只剩标题而把证据全散在 A.1，读者按 A.3 复现时看不到验收依据（D-1 的成因）。
+    if [[ -f "$doc" ]] \
+        && [[ "$(grep -cE '^## [1-8]\. ' "$doc")" == "8" ]] \
+        && grep -q '^## 被拦链' "$doc" \
+        && grep -q 'PUBLISHED' <<<"$a3" \
+        && grep -q 'released_at' <<<"$a3" \
+        && grep -q 'wf_history' <<<"$a3" \
+        && grep -q '409' <<<"$a3"; then
+        s_pass "DEMO-RELEASE-FLOW.md 8 步 + 被拦链 + A.3 取证（PUBLISHED / released_at / 留痕 / 409）齐备"
     else
-        s_fail "演示文档缺步骤或被拦链" "按 TECHNICAL §7.4：8 步 + 三条被拦链"
+        s_fail "演示文档缺步骤、被拦链或 A.3 取证" "A.3 必须含 PUBLISHED 落库、released_at、wf_history 留痕与 409 负向（AC-10/D-1）"
     fi
     if grep -q 'trap cleanup EXIT' "${ROOT}/scripts/release-flow-verify.sh" \
         && grep -q 'platform-demo-reset.sh' "${ROOT}/scripts/release-flow-verify.sh"; then
@@ -1109,6 +1127,286 @@ else
         "${HYGIENE_BRIEF:-无判据输出} | ${SELF_BRIEF:-无自检输出} —— AC-23：只认 BASE..HEAD；pom/lockfile 不得改；迁移只允许新增 V14；自检必须 1 正 3 反"
 fi
 
+# --------------------------------------------------------------------------- S7
+# r32：把「演示夹具 → 版本测试 → 三签 → 质量门 → 发布单准入 → 发布单两级 → 版本三级 → PUBLISHED」
+# 一次跑到终态。数据不自己造，只消费演示夹具（platform-demo-reset 的产物）——夹具就是给演示
+# 准备的那条链，门禁若另造一套，演示手册会与门禁悄悄分叉，而分叉正是 AC-4 想防的事。
+section "S7 演示夹具到 PUBLISHED"
+
+S7_R04=""
+S7_REL=""
+S7_PLAN=""
+S7_RPT=""
+S7_ORDER=""
+S7_C03=""
+S7_C04=""
+S7_ERR=""
+S7_MR_URL="https://git.example.com/mr/r32-e2e"
+
+# 自愈：S1–S5 会把演示库改成各种中间态（驳回、锁定、临时版本），S7 只认 reset 后的干净起点。
+# 跳过开关只给调试用，跳过时数据不对依旧判红——不提供「跳过=通过」的路径。
+s7_reset() {
+    if [[ "${RELEASE_FLOW_SKIP_RESET:-0}" == "1" ]]; then
+        printf '  \033[1;33m注意\033[0m RELEASE_FLOW_SKIP_RESET=1：S7 不自愈 reset，数据须已是演示态\n'
+        return 0
+    fi
+    if bash "${ROOT}/scripts/platform-demo-reset.sh" >/dev/null 2>&1; then
+        return 0
+    fi
+    printf '  \033[1;31mS7 自愈 reset 失败\033[0m：手动执行 bash scripts/platform-demo-reset.sh 看首个 FAIL\n'
+    return 1
+}
+
+# [S7-1] 夹具就绪：一条已交付的待测 RD + 一条走完真实两级会签的业务提报。
+s7_fixture_ready() {
+    S7_R04="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TID} AND code='DEMO-R-04'")"
+    local rd bus
+    rd="$(db_q "SELECT CONCAT_WS('|',
+            IF(status='PENDING_TEST',1,0),
+            IF(mr_url='${S7_MR_URL}',1,0),
+            IF(actual_days >= 2,1,0))
+        FROM requirement WHERE tenant_id=${TID} AND id=${S7_R04:-0}")"
+    bus="$(db_q "SELECT CONCAT_WS('|',
+            IF(r.status='POOLED',1,0),
+            IF((SELECT COUNT(*) FROM wf_instance i WHERE i.tenant_id=${TID}
+                 AND i.biz_id=r.id AND i.status='APPROVED'
+                 AND i.biz_type IN ('REQ_SUBMIT','REQ_REVIEW')) = 2,1,0))
+        FROM requirement r WHERE r.tenant_id=${TID} AND r.code='DEMO-R-01'")"
+    if [[ "$rd" == "1|1|1" && "$bus" == "1|1" ]]; then
+        pass "演示夹具就绪：R-04 待测且带 MR/实际人天；R-01 两级会签均 APPROVED 且净状态 POOLED"
+    else
+        fail "演示夹具不符（R-04=${rd:-<行缺失>}, R-01=${bus:-<行缺失>}）" \
+            "先 bash scripts/platform-demo-reset.sh；Tx3 失败会整体回滚，日志里第一条 409 就是原因"
+    fi
+}
+
+# 建演示版本并跑到 test_pass：版本只挂 R-04（QG-01 要 100% 覆盖率），计划只放它的两条用例，
+# 且两条都必须执行——STRICT 版本 QG-03 要 100%，RoundService.close 对未执行用例直接 409。
+s7_build_chain() {
+    local body rnd c owner
+    # 夹具把 R-04 挂在 DEMO-REL-1 上（11 条需求，QG-01 只有 5/11=45%，永远过不了质量门）。
+    # 演示版本必须独占 R-04：先从原版本摘掉，再建版本挂进来 → 1 需求 2 用例 = 100% 覆盖率。
+    owner="$(db_q "SELECT release_id FROM requirement WHERE tenant_id=${TID} AND id=${S7_R04}")"
+    if [[ -n "$owner" ]]; then
+        as_user pm
+        api_call DELETE "/api/req/releases/${owner}/requirements/${S7_R04}" ''
+        as_admin
+        [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "204" ]] || {
+            S7_ERR="从版本 ${owner} 摘除 R-04 失败 ${HTTP_CODE} $(printf '%s' "$HTTP_BODY" | head -c 160)"
+            return 1
+        }
+    fi
+    S7_REL="$(create_release "r32-演示版本-${TAG}" NORMAL)"
+    [[ -n "$S7_REL" ]] || { S7_ERR="建版本失败 $(printf '%s' "$HTTP_BODY" | head -c 140)"; return 1; }
+    attach_req "$S7_REL" "$S7_R04"
+    [[ "$HTTP_CODE" == "200" ]] || { S7_ERR="挂需求失败 ${HTTP_CODE} $(printf '%s' "$HTTP_BODY" | head -c 140)"; return 1; }
+    S7_C03="$(db_q "SELECT id FROM test_case WHERE tenant_id=${TID} AND code='DEMO-C-03'")"
+    S7_C04="$(db_q "SELECT id FROM test_case WHERE tenant_id=${TID} AND code='DEMO-C-04'")"
+    [[ -n "$S7_C03" && -n "$S7_C04" ]] || { S7_ERR="演示用例 DEMO-C-03/04 缺失"; return 1; }
+    body="$(jq -cn --argjson r "$S7_REL" --arg n "r32-演示计划-${TAG}" --argjson a "$S7_C03" --argjson b "$S7_C04" \
+        '{releaseId:$r, name:$n, ownerId:1, windowStart:"2026-11-20", windowEnd:"2026-11-27",
+          caseIds:[$a,$b], gateMode:"STRICT"}')"
+    api_call POST /api/deliver/test-plans "$body"
+    S7_PLAN="$(jqv '.plan.id // .id // empty' "$HTTP_BODY")"
+    [[ -n "$S7_PLAN" ]] || { S7_ERR="建计划失败 ${HTTP_CODE} $(printf '%s' "$HTTP_BODY" | head -c 140)"; return 1; }
+
+    start_release "$S7_REL" >/dev/null
+    [[ "$START_CODE" == "200" || "$START_CODE" == "201" ]] || { S7_ERR="发起版本审批失败 ${START_CODE} $(printf '%s' "$HTTP_BODY" | head -c 160)"; return 1; }
+
+    api_call POST "/api/deliver/test-plans/${S7_PLAN}/submit-review" '{}'
+    api_call POST "/api/deliver/test-plans/${S7_PLAN}/approve" '{"comment":"r32 演示"}'
+    api_call POST "/api/deliver/test-plans/${S7_PLAN}/start" '{}'
+    for c in "$S7_C03" "$S7_C04"; do
+        api_call POST "/api/deliver/test-plans/${S7_PLAN}/execute" \
+            "$(jq -cn --argjson c "$c" '{caseId:$c,result:"PASS",note:"r32 演示"}')"
+    done
+    # R-04 已在 PENDING_TEST（夹具走完了提报→评审→排期→开发→提测），所以这里只剩 test_pass；
+    # 再往前调 start_dev/submit_test 只会 409 ILLEGAL_TRANSITION，等于用失败换一个假前置。
+    act "$S7_R04" test_pass
+    [[ "$HTTP_CODE" == "200" ]] || { S7_ERR="test_pass 失败 ${HTTP_CODE} $(printf '%s' "$HTTP_BODY" | head -c 160)"; return 1; }
+    rnd="$(db_q "SELECT id FROM test_plan_round WHERE plan_id=${S7_PLAN} AND active=1")"
+    [[ -n "$rnd" ]] || { S7_ERR="计划没有活动轮次"; return 1; }
+    api_call POST "/api/deliver/test-plans/${S7_PLAN}/rounds/${rnd}/close" '{"conclusion":"PASS","note":"r32 演示"}'
+    api_call POST "/api/deliver/test-plans/${S7_PLAN}/complete" '{}'
+
+    S7_RPT="$(create_report "$S7_REL" "r32 演示报告")"
+    [[ -n "$S7_RPT" ]] || { S7_ERR="建报告失败 ${HTTP_CODE}"; return 1; }
+    sign_report "$S7_RPT" 1 qa1 || { S7_ERR="qa1 签署失败"; return 1; }
+    sign_report "$S7_RPT" 1 pm || { S7_ERR="pm 签署失败"; return 1; }
+    sign_report "$S7_RPT" 1 tl1 || { S7_ERR="tl1 签署失败"; return 1; }
+
+    S7_ORDER="$(create_order "$S7_REL" "$S7_R04")"
+    [[ -n "$S7_ORDER" ]] || { S7_ERR="建发布单失败 ${HTTP_CODE} $(printf '%s' "$HTTP_BODY" | head -c 140)"; return 1; }
+    return 0
+}
+
+# [S7-2] 版本测试走到 TEST_PASSED：需求状态、轮次执行数、版本覆盖率三件事一起看。
+s7_version_test_to_test_passed() {
+    local st round cov
+    st="$(db_q "SELECT status FROM requirement WHERE tenant_id=${TID} AND id=${S7_R04}")"
+    round="$(db_q "SELECT CONCAT_WS('|', exec_total, exec_passed, IF(conclusion='PASS',1,0))
+        FROM test_plan_round WHERE plan_id=${S7_PLAN:-0} ORDER BY round_no DESC LIMIT 1")"
+    cov="$(db_q "SELECT CONCAT(
+            (SELECT COUNT(DISTINCT c.requirement_id) FROM test_plan_case pc
+               JOIN test_case c ON c.id=pc.case_id JOIN test_plan p ON p.id=pc.plan_id
+              WHERE p.release_id=${S7_REL:-0}),
+            '/',
+            (SELECT COUNT(*) FROM release_requirement WHERE release_id=${S7_REL:-0}))")"
+    if [[ "$st" == "TEST_PASSED" && "$round" == "2|2|1" && "$cov" == "1/1" ]]; then
+        pass "演示需求跑到 TEST_PASSED；轮次 2/2 全 PASS 且结论 PASS；版本覆盖率 1/1（QG-01 的前置）"
+    else
+        fail "版本测试链不符（status=${st:-?}, round=${round:-?}, coverage=${cov:-?}）" \
+            "STRICT 版本要求用例全执行；覆盖率分母来自 release_requirement，分子只认本版本内被计划覆盖的需求"
+    fi
+}
+
+# [S7-3] 报告三签（qa1/pm/tl1），从版本 flowChain 读签署事实，不另判人数。
+s7_report_signoff() {
+    local approved total
+    api_call GET "/api/req/releases/${S7_REL}"
+    approved="$(jqv '.flowChain.signoff.approved' "$HTTP_BODY")"
+    total="$(jqv '.flowChain.signoff.total' "$HTTP_BODY")"
+    if [[ "$approved" == "3" && "$total" == "3" ]]; then
+        pass "报告三签齐全：flowChain.signoff = 3/3（qa1 + pm + tl1）"
+    else
+        fail "三签不符（approved=${approved:-?}, total=${total:-?}, report=${S7_RPT:-?}）" \
+            "签署必须按角色各一次：qa1/pm/tl1，且签名落在当前版本上（改版会 stale）"
+    fi
+}
+
+# [S7-8] 负向：版本已 LOCKED 后清空 MR，提交必须 409 且 failedRules 恰为 [MR_FILLED]，不落快照。
+# 编号按 AC-12（负向是第 8 条），执行上必须先于 [S7-5]：一次提交通过后就再没有「未提交」的单可拦。
+# 必须传 mrUrl:""——RequirementService.deliver 只在非 null 时写库，传 null 清不掉。
+s7_negative_mr() {
+    local before after code failed
+    before="$(db_q "SELECT COUNT(*) FROM deploy_flow_snapshot WHERE deploy_order_id=${S7_ORDER:-0}")"
+    api_call POST "/api/req/requirements/${S7_R04}/deliver" '{"mrUrl":""}'
+    if [[ "$HTTP_CODE" != "200" ]]; then
+        fail "清空 MR 失败（HTTP ${HTTP_CODE}）" "mrUrl 传空串而不是 null；需求此时应仍可写（非终态）"
+        return
+    fi
+    submit_order "$S7_ORDER"
+    code="$HTTP_CODE"
+    failed="$(jqv '[.detail.failed[]?] | join(",")' "$HTTP_BODY")"
+    after="$(db_q "SELECT COUNT(*) FROM deploy_flow_snapshot WHERE deploy_order_id=${S7_ORDER:-0}")"
+    if [[ "$code" == "409" && "$failed" == "MR_FILLED" && "$before" == "$after" ]]; then
+        pass "清空 MR 后提交 → 409，failedRules 恰为 [MR_FILLED]，快照数不变（${before}→${after}）"
+    else
+        fail "MR 闸门不符（code=${code:-?}, failed=${failed:-<空>}, snapshots=${before}→${after}）" \
+            "准入按闸门顺序判：MR 缺失只报 MR_FILLED；拒绝必须发生在 capture 之前"
+    fi
+}
+
+# [S7-5] 恢复 MR → 提交 200，落第 1 轮快照，hash 是完整 sha256，四段链路同源。
+s7_submit_and_chain() {
+    local round hash hist segs
+    api_call POST "/api/req/requirements/${S7_R04}/deliver" "{\"mrUrl\":\"${S7_MR_URL}\"}"
+    [[ "$HTTP_CODE" == "200" ]] || { fail "恢复 MR 失败（HTTP ${HTTP_CODE}）" "与上一条同一入口，只是 mrUrl 非空"; return; }
+    submit_order "$S7_ORDER"
+    local sub_code="$HTTP_CODE"
+    api_call GET "/api/req/deploy-orders/${S7_ORDER}"
+    round="$(jqv '.flowSnapshot.round' "$HTTP_BODY")"
+    hash="$(jqv '.flowSnapshot.payloadHash' "$HTTP_BODY")"
+    hist="$(jqv '.flowSnapshotHistory | length' "$HTTP_BODY")"
+    api_call GET "/api/req/releases/${S7_REL}"
+    segs="$(jqv '[.flowChain.testPlan,.flowChain.signoff,.flowChain.qualityGate,.flowChain.deployAdmission]
+        | map(select(. != null and .status != null)) | length' "$HTTP_BODY")"
+    if [[ "$sub_code" == "200" && "$round" == "1" && "$hash" =~ ^[0-9a-f]{64}$ \
+        && "${hist:-0}" -ge 1 && "$segs" == "4" ]]; then
+        pass "恢复 MR 后提交 200：第 1 轮快照 payloadHash=${hash:0:12}…（64 hex），版本 flowChain 四段齐全"
+    else
+        fail "提交/快照不符（submit=${sub_code}, round=${round:-?}, hash=${hash:-?}, history=${hist:-?}, segs=${segs:-?}）" \
+            "提交成功才 capture；四段来自同一投影（FlowChainService），不得二次判定"
+    fi
+}
+
+# [S7-4] 质量门：QG-01/02/03 均为 PASS，且 QG-01 的 actual 是 100%（覆盖率这一条是本轮关键）。
+s7_quality_gate() {
+    local snap qg01 qg02 qg03 actual
+    api_call GET "/api/req/releases/${S7_REL}"
+    snap="$(jqv '.flowChain.qualityGate.snapshotId // empty' "$HTTP_BODY")"
+    if [[ -z "$snap" ]]; then
+        fail "版本 flowChain 没有 qualityGate.snapshotId" "质量门在提交时冻结快照；没快照=门没跑"
+        return
+    fi
+    api_call GET "/api/deliver/quality-gates/snapshots/${snap}"
+    qg01="$(jqv '[.rules[]? | select(.code=="QG-01") | .status] | join(",")' "$HTTP_BODY")"
+    qg02="$(jqv '[.rules[]? | select(.code=="QG-02") | .status] | join(",")' "$HTTP_BODY")"
+    qg03="$(jqv '[.rules[]? | select(.code=="QG-03") | .status] | join(",")' "$HTTP_BODY")"
+    actual="$(jqv '[.rules[]? | select(.code=="QG-01") | .actual] | join(",")' "$HTTP_BODY")"
+    # actual 是人读文案（"需求覆盖 100%（1/1） · 报告 v1 已会签"），只认其中的 100%——
+    # 用前缀匹配会永远红，等于把「覆盖率」这条换成「文案格式」这条。
+    if [[ "$qg01" == "PASS" && "$qg02" == "PASS" && "$qg03" == "PASS" && "$actual" == *"100%"* ]]; then
+        pass "质量门快照 ${snap}：QG-01/QG-02/QG-03 全 PASS，QG-01 覆盖率 actual=${actual}"
+    else
+        fail "质量门不符（snap=${snap}, QG01=${qg01:-?}, QG02=${qg02:-?}, QG03=${qg03:-?}, actual=${actual:-?}）" \
+            "QG-01 分母只数本版本 release_requirement；演示版本必须只挂 R-04，否则覆盖率永远到不了 100%"
+    fi
+}
+
+# [S7-7] 发布单两级：n1（tl1/vendor1）→ n2（admin），走完 APPROVED，序列 APPROVED,APPROVED。
+s7_order_levels() {
+    local levels seq status inst n2
+    api_call GET "/api/req/deploy-orders/${S7_ORDER}"
+    levels="$(jqv '.approvalLevels | length' "$HTTP_BODY")"
+    seq="$(jqv '[.approvalLevels[].status] | join(",")' "$HTTP_BODY")"
+    approve_biz "$S7_ORDER" REQ_DEPLOY >/dev/null
+    inst="$(db_q "SELECT id FROM wf_instance WHERE tenant_id=${TID} AND biz_type='REQ_DEPLOY' AND biz_id=${S7_ORDER} ORDER BY id DESC LIMIT 1")"
+    n2="$(db_q "SELECT COUNT(*) FROM wf_task WHERE instance_id=${inst:-0} AND node_key='n2'")"
+    api_call GET "/api/req/deploy-orders/${S7_ORDER}"
+    status="$(jqv '.order.status // .status' "$HTTP_BODY")"
+    seq="$(jqv '[.approvalLevels[].status] | join(",")' "$HTTP_BODY")"
+    if [[ "$levels" == "2" && "${n2:-0}" -ge 1 && "$status" == "APPROVED" && "$seq" == "APPROVED,APPROVED" ]]; then
+        pass "发布单两级链：2 级、n2 任务真实创建、逐级通过后 APPROVED（序列 APPROVED,APPROVED）"
+    else
+        fail "发布单两级链不符（levels=${levels:-?}, n2Tasks=${n2:-0}, status=${status:-?}, seq=${seq:-?}）" \
+            "REQ_DEPLOY 绑定「发布单审批-两级」；n1 通过才推 n2，别在 n1 就写终态"
+    fi
+}
+
+# [S7-8] 版本三级（pm → tl1/vendor1 → mgr1）到 PUBLISHED：PUBLISHED 只能由末级审批回调写。
+s7_release_levels() {
+    local before after status released at
+    before="$(release_field "$S7_REL" '.release.status')"
+    approve_biz "$S7_REL" RELEASE >/dev/null
+    after="$(release_field "$S7_REL" '.release.status')"
+    released="$(release_field "$S7_REL" '.release.releasedAt')"
+    at="$(release_field "$S7_REL" '.approvalLevels | length')"
+    if [[ "$before" == "LOCKED" && "$after" == "PUBLISHED" && -n "$released" && "$at" == "3" ]]; then
+        pass "版本三级审批：LOCKED → PUBLISHED，releasedAt=${released}，approvalLevels=3"
+    else
+        fail "版本发布不符（before=${before:-?}, after=${after:-?}, releasedAt=${released:-<空>}, levels=${at:-?}）" \
+            "ReleaseApprovalCallback 只在最后一级 publish；中间级只能写 LOCKED"
+    fi
+}
+
+S7_BUILD_OK=1
+if s7_reset; then
+    s7_fixture_ready
+    # 建链失败时不再逐条复跑断言：7 条一律记红并带上同一个原因，
+    # 这样断言数恒为 8（分母 40 才守得住），失败原因也只有一个、不会散成一堆二次报错。
+    if s7_build_chain; then
+        # 执行顺序：S7-8（负向）先于 S7-5（成功提交）——一次提交通过后就再没有「未提交」的发布单可拦；
+        # 编号仍是 AC-12 的 S7-1..S7-8（质量门是 S7-4、提交快照是 S7-5）。
+        s7_version_test_to_test_passed
+        s7_report_signoff
+        s7_negative_mr
+        s7_submit_and_chain
+        s7_quality_gate
+        s7_order_levels
+        s7_release_levels
+    else
+        S7_BUILD_OK=0
+        for _ in 1 2 3 4 5 6 7; do
+            fail "S7 前置链未建成（${S7_ERR:-未知}）" "先看 s7_build_chain 的报错；缺用例/缺审批人/R-04 仍挂在别的版本都会停在这里"
+        done
+    fi
+else
+    for _ in 1 2 3 4 5 6 7 8; do
+        fail "S7 自愈 reset 失败，无法开始演示链" "先 make platform-demo-reset 全绿（74/74）再跑门禁"
+    done
+fi
+
 # --------------------------------------------------------------------------- 汇总
 printf '\nRELEASE_FLOW_TOTAL=%d CASE=%d PASS=%d FAIL=%d\n' "$RELEASE_FLOW_TOTAL" "$CASE" "$PASS" "$FAIL"
 SUMMARY_FILE="${REPORT_DIR}/summary-${TAG}.txt"
@@ -1128,5 +1426,5 @@ if ((FAIL > 0)); then
     printf '\033[1;31m有 %d 条断言失败\033[0m\n' "$FAIL"
     exit 1
 fi
-printf '\033[1;32m全部 32 条通过：分级绑定、四段链路、不可变快照与三道闸门均成立\033[0m\n'
+printf '\033[1;32m全部 40 条通过：分级绑定、四段链路、不可变快照、三道闸门与演示链到 PUBLISHED 均成立\033[0m\n'
 exit 0

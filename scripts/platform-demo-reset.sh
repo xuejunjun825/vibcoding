@@ -16,6 +16,9 @@
 #      查库只能证明数据在，ScopeSql 放不放行只有真登录才证得了；空值一律判失败，不许退化成永真。
 #   7. r26：工时评估门不能把演示卡死。重置在 Tx2 走审批引擎给 11 条非 BUS 需求各建一张**已通过**的
 #      评估单（发起=需求负责人、审批=域负责人，不绕过引擎的 assignee 校验），本脚本复核 11 / 0 / 11。
+#   8. r32：演示链要能演到 PUBLISHED。Tx3 真跑 R-01 的提报/复核两级会签并经 deliver 写 R-04 的
+#      MR 与人天；本脚本新增 4 条落库断言（R-04 六字段 / 两单 APPROVED 与引擎产物形态 / 计划覆盖），
+#      断言数 70 → 74，既有计数口径（12/1/12/10/4/11 等）一条不降。
 #
 # 不进 make test / platform-up / platform-seed（AC-14）：重置会删掉业务实例数据，
 # 只能由人（或演示前的一次手工动作）触发。
@@ -31,9 +34,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 FAIL=0
 CASE=0
-# 本脚本固定 70 项断言（r26 起 66 → 69；r30 加账号基线 1 项 → 70）。断言只增：新增/删除断言时同步改这里，
-# 末尾会校验实际执行数 == 声明数，漂移直接红——否则「70/70」会变成一句没人维护的祝福。
-TOTAL_CHECKS=70
+# 本脚本固定 74 项断言（r26 起 66 → 69；r30 加账号基线 1 项 → 70；r32 演示链 4 项 → 74）。断言只增：
+# 新增/删除断言时同步改这里，末尾会校验实际执行数 == 声明数，漂移直接红——否则「74/74」会变成一句没人维护的祝福。
+TOTAL_CHECKS=74
 FAIL_TRANSPORT=0
 FAIL_API=0
 FAIL_ASSERT=0
@@ -44,6 +47,16 @@ mkdir -p "$(run_log_dir)"
 
 pass() { CASE=$((CASE + 1)); printf '  \033[1;32mPASS\033[0m [%02d] %s\n' "$CASE" "$1"; }
 fail() { CASE=$((CASE + 1)); FAIL=$((FAIL + 1)); printf '  \033[1;31mFAIL\033[0m [%02d] %s\n' "$CASE" "$1"; printf '       修复: %s\n' "$2"; }
+
+# r32：演示链的 4 条断言共用的一行式判据（名称 / 期望 / 实际）。
+# 实际值取不到时按空串比 —— 行缺失必须判红，不能因为「没查到」而静默通过。
+check() {
+    local label="$1" want="$2" got="${3:-}"
+    [[ "${got}" == "${want}" ]] \
+        && pass "${label}: ${got}" \
+        || fail "${label}: 实际 ${got:-<空>}，期望 ${want}" \
+            "核对 DemoFixture / DemoApprovalFixture 与本轮 demo-reset 日志（Tx3 失败会整体回滚）"
+}
 
 section() { # section <1-based index>：打印段头，供失败清单定位「断在第几段」
     SECTION_IDX="$1"
@@ -134,6 +147,10 @@ fi
 DEMO_REPORTS=('需求状态分布' '厂商交付概览')
 DEMO_REPORT_NAMES_SQL="'${DEMO_REPORTS[0]}','${DEMO_REPORTS[1]}'"
 DEMO_REPORT_NAMES_EXPECTED="$(jq -rn --args '$ARGS.positional | sort | join(",")' --args "${DEMO_REPORTS[@]}")"
+
+# r32 演示链（AC-1/AC-2/AC-3）：夹具写入的 MR 地址。服务端 DemoFixture.MR_URL 是另一份
+# （跨进程只能各写一份），两侧同值即可；改地址必须两边一起改，否则演示文档的示例链接会与实际库不一致。
+DEMO_MR_URL="https://git.example.com/mr/r32-e2e"
 
 # ---------------------------------------------------------------- 调用
 
@@ -226,6 +243,62 @@ check_count gateResidue    0 "门禁 RUN_TAG 残留（wf_definition/test_module/
 check_count estimateApproved     11 "已通过工时评估单 = 11（4 PDR + 7 RD）"
 check_count estimatePending       0 "在途工时评估单 = 0（演示里的门全部放行）"
 check_count estimateRequirements 11 "有生效评估单的需求 = 11（不重复建单）"
+
+# r32：演示链要跑到 PUBLISHED，夹具必须把「已交付的待测 RD + 已两级会签通过的 BUS」造出来。
+# 只查库不查接口：这四件事都是落库结果（wf_instance 的章、requirement 的字段、计划用例行），
+# 接口文案会漂，库内事实不会。每项都拼成「条件位」串，行缺失 → 空串 → 必须判红。
+#
+# 判据与 PRD AC-1/AC-2/AC-3 一一对应：
+#   1) R-04 六字段——类型/状态/所属版本/MR/预估/实际，取值只认 DemoFixture.MR_URL 同一个地址；
+#   2) 提报单——APPROVED 且带真实 wf_definition 行、有会签落章、两个实例流水合计 ≥4 条
+#      （直插 wf_* 的假夹具给不出这些行，也不会带 approver_id）；
+#   3) 复核单——APPROVED、会签落章，且净状态回到 POOLED（评审通过后的合法态）；
+#   4) 计划覆盖——限定 DEMO-REL-1 的计划，覆盖 R-04 的 DEMO-C-03/04 两条用例。
+R04_SHAPE="$(db_q "SELECT CONCAT_WS('|',
+        IF(type='RD',1,0),
+        IF(status='PENDING_TEST',1,0),
+        IF(release_id=(SELECT id FROM \`release\` WHERE tenant_id=${TENANT_ID} AND code='DEMO-REL-1'),1,0),
+        IF(mr_url='${DEMO_MR_URL}',1,0),
+        IF(estimate_days=2.0,1,0),
+        IF(actual_days BETWEEN 1.5 AND 2.0,1,0))
+    FROM requirement WHERE tenant_id=${TENANT_ID} AND code='DEMO-R-04'")"
+check "R-04 六字段（类型/状态/版本/MR/预估/实际）" "1|1|1|1|1|1" "${R04_SHAPE}"
+
+R01_SUBMIT_SHAPE="$(db_q "SELECT CONCAT_WS('|',
+        IF(i.status='APPROVED',1,0),
+        IF(d.id IS NOT NULL,1,0),
+        IF((SELECT COUNT(*) FROM wf_history h
+              JOIN wf_instance i2 ON i2.id=h.instance_id
+              JOIN requirement r2 ON r2.id=i2.biz_id
+             WHERE h.tenant_id=${TENANT_ID} AND r2.code='DEMO-R-01'
+               AND i2.biz_type IN ('REQ_SUBMIT','REQ_REVIEW')) >= 4,1,0),
+        IF((SELECT COUNT(*) FROM wf_task t WHERE t.instance_id=i.id
+              AND t.status='APPROVED' AND t.approver_id IS NOT NULL) >= 1,1,0))
+    FROM wf_instance i
+    LEFT JOIN wf_definition d ON d.id=i.definition_id
+    JOIN requirement r ON r.id=i.biz_id
+    WHERE i.tenant_id=${TENANT_ID} AND r.code='DEMO-R-01' AND i.biz_type='REQ_SUBMIT'
+      AND i.status='APPROVED' ORDER BY i.id DESC LIMIT 1")"
+check "R-01 提报单 APPROVED（真实定义行/落章/流水≥4 条）" "1|1|1|1" "${R01_SUBMIT_SHAPE}"
+
+R01_REVIEW_SHAPE="$(db_q "SELECT CONCAT_WS('|',
+        IF(i.status='APPROVED',1,0),
+        IF(r.status='POOLED',1,0),
+        IF((SELECT COUNT(*) FROM wf_task t WHERE t.instance_id=i.id
+              AND t.status='APPROVED' AND t.approver_id IS NOT NULL) >= 1,1,0))
+    FROM wf_instance i JOIN requirement r ON r.id=i.biz_id
+    WHERE i.tenant_id=${TENANT_ID} AND r.code='DEMO-R-01' AND i.biz_type='REQ_REVIEW'
+      AND i.status='APPROVED' ORDER BY i.id DESC LIMIT 1")"
+check "R-01 复核单 APPROVED、落章、净状态 POOLED" "1|1|1" "${R01_REVIEW_SHAPE}"
+
+PLAN_CODES="$(db_q "SELECT GROUP_CONCAT(DISTINCT c.code ORDER BY c.code)
+    FROM test_plan p
+    JOIN \`release\` rel ON rel.id=p.release_id
+    JOIN test_plan_case pc ON pc.plan_id=p.id
+    JOIN test_case c ON c.id=pc.case_id
+    JOIN requirement r ON r.id=pc.requirement_id
+    WHERE p.tenant_id=${TENANT_ID} AND rel.code='DEMO-REL-1' AND r.code='DEMO-R-04'")"
+check "DEMO-REL-1 计划覆盖 R-04 的两条用例（DEMO-C-03/04）" "DEMO-C-03,DEMO-C-04" "${PLAN_CODES}"
 
 NOTIFY="$(printf '%s' "${C1}" | jq -r '.notifications // empty')"
 [[ -n "${NOTIFY}" && "${NOTIFY}" -eq 4 ]] \
