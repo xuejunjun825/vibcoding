@@ -9,6 +9,10 @@
 # 绿色 = 非法路径确实走不通；不是"接口返回 200 但界面拦住了"。
 set -uo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+# r34：夹具生命周期（退出复位 + 基线断言）只有一份实现，见 scripts/lib/gate-fixture.sh。
+# 过去本脚本没有 trap：所有 neg-* 夹具留在演示租户里，后跑的门禁就得多看一堆脏数据。
+# shellcheck source=lib/gate-fixture.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gate-fixture.sh"
 
 TOTAL=0; PASS=0; FAIL=0; FAILED_LINES=""
 RUN_TAG="$(date +%H%M%S)"
@@ -41,6 +45,11 @@ jget_() { printf '%s' "$1" | jq -r "$2" 2>/dev/null || true; }
 
 req_ready || { err "req-service 未就绪，修复: make platform-up"; exit 1; }
 deliver_ready || { err "deliver-service 未就绪，修复: make platform-up"; exit 1; }
+
+GATE_FIXTURE_TENANT_CODE="$TENANT"
+GATE_FIXTURE_USERS="pm tl1 vendor1 mgr1 admin qa1 po1"
+# 起跑自愈 + 注册唯一 EXIT/INT/TERM 陷阱：必须在登录之前（复位可能重建种子账号）。
+gate_fixture_begin || { err "gate-fixture 起跑失败（见上方 [gate] 输出）"; exit 1; }
 
 api_call POST /api/req/auth/login "{\"tenantCode\":\"${TENANT}\",\"username\":\"${ADMIN_USER}\",\"password\":\"${ADMIN_PASS}\"}"
 [[ "$HTTP_CODE" == "200" ]] || { err "管理员登录失败，修复: make platform-seed"; exit 1; }
@@ -93,9 +102,30 @@ API_TOKEN="$ADMIN_TOKEN"
 
 # ---------------------------------------------------------------- 3
 section "3) PATCH 带 status → 400；4) RD 跳步 → 409"
-# r23 前置门：RD 只能挂 SCHEDULED/IN_DEV 的 PDR，取父必须按状态过滤（PDR-0001=SCHEDULED）。
-PDR_ID="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TID} AND type='PDR' AND status IN ('SCHEDULED','IN_DEV') ORDER BY id LIMIT 1")"
-[[ -n "$PDR_ID" ]] || { err "种子里没有 SCHEDULED/IN_DEV 的 PDR，RD 无法挂父：make platform-seed"; exit 1; }
+# ---- r34：父链自建（不再「按状态取第一条 PDR」）----
+# 旧写法在干净态取到的是种子 DEMO-R-02 的 PDR，于是负向夹具的子需求挂在演示需求上，
+# 把 DEMO-R-02 的汇总人天从 5.0 推到 6.5、评估单被 20% 阈值判 STALE——后跑的门禁于是看到
+# 与前一个门禁不同的世界（顺序依赖的真正来源）。自建 BUS→POOLED→PDR 后，写入只落在本轮
+# GATE_TAG 上，退出即被 gate-fixture 复位，两个门禁互不可见。
+# 夹具步骤一律「只 fail 不计数」：分母只统计断言，不能被建链步骤挤动。
+api_call POST /api/req/requirements "{\"type\":\"BUS\",\"title\":\"gate-${GATE_TAG}-BUS\",\"domainIds\":[$DOMAIN1]}"
+GATE_NEG_BUS="$(jget_ "$HTTP_BODY" '.id')"
+[[ -n "$GATE_NEG_BUS" && "$GATE_NEG_BUS" != "null" ]] \
+    || { err "建负向父链 BUS 失败：$(printf '%s' "$HTTP_BODY" | head -c 200)"; exit 1; }
+gate_pool_bus "$GATE_NEG_BUS" "negative 父链 BUS" \
+    || { err "负向父链 BUS 未入池（PDR 只能挂 POOLED 的 BUS）"; exit 1; }
+api_call POST /api/req/requirements "{\"type\":\"PDR\",\"title\":\"gate-${GATE_TAG}-PDR\",\"parentId\":${GATE_NEG_BUS},\"domainIds\":[$DOMAIN1]}"
+PDR_ID="$(jget_ "$HTTP_BODY" '.id')"
+[[ -n "$PDR_ID" && "$PDR_ID" != "null" ]] \
+    || { err "建负向父链 PDR 失败：$(printf '%s' "$HTTP_BODY" | head -c 200)"; exit 1; }
+api_call POST "/api/req/requirements/${PDR_ID}/estimate" '{"estimateDays":2,"note":"r34 负向门禁父链 PDR"}'
+[[ "$HTTP_CODE" == "201" ]] \
+    || { err "负向父链 PDR 提交评估失败（HTTP ${HTTP_CODE}）：$(printf '%s' "$HTTP_BODY" | head -c 200)"; exit 1; }
+gate_approve_biz "$PDR_ID" WBS_ESTIMATE \
+    || { err "负向父链 PDR 评估未通过（审批待办为空或同意失败）"; exit 1; }
+api_call POST "/api/req/requirements/${PDR_ID}/actions" '{"action":"schedule"}'
+[[ "$HTTP_CODE" == "200" ]] \
+    || { err "负向父链 PDR 排期失败（HTTP ${HTTP_CODE}）：$(printf '%s' "$HTTP_BODY" | head -c 200)"; exit 1; }
 api_call POST /api/req/requirements "{\"type\":\"RD\",\"title\":\"neg-sm-${RUN_TAG}\",\"parentId\":${PDR_ID},\"domainIds\":[$DOMAIN1],\"priority\":\"P2\",\"expectedDeliveryDate\":\"2026-12-31\"}"
 RD_ID="$(jget_ "$HTTP_BODY" '.id')"
 [[ -n "$RD_ID" && "$RD_ID" != "null" ]] || { err "创建负向夹具 RD 失败: $(printf '%s' "$HTTP_BODY" | head -c 200)"; exit 1; }

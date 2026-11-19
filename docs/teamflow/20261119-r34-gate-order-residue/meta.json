@@ -1,0 +1,7 @@
+{
+  "reqId": "req-34",
+  "runId": "tf-mwnefs38-150e8l",
+  "title": "修门禁之间的顺序依赖：先跑 scripts/release-flow-verify.sh 会在种子 PDR（DEMO-R-02）下遗留 3 条子需求（RD-18",
+  "mode": "tech",
+  "createdAt": 1795083617916
+}

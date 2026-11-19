@@ -32,12 +32,17 @@
 #   - 前置缺失（栈没起、种子账号不在）直接 die，不 skip（r28 教训：条件跳过=假绿）；
 #   - S6 的提交区间断言只读 git 对象库（BASE..HEAD），工作树脏不影响结论；基线默认 main，
 #     RELEASE_FLOW_BASE_REF 可覆盖，解析失败判红而不回退 HEAD；
-#   - S1 开头幂等复位六个绑定槽（setup，不计数）；EXIT trap 复位演示数据（RELEASE_FLOW_SKIP_RESET=1 可跳过）。
+#   - S1 开头幂等复位六个绑定槽（setup，不计数）；夹具生命周期（退出复位 + 基线断言）交给
+#     scripts/lib/gate-fixture.sh：复位失败或基线不干净会置红，RELEASE_FLOW_SKIP_RESET=1 只跳过复位、不算通过。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib.sh
 source "${ROOT}/scripts/lib.sh"
+# r34：夹具生命周期与「干净基线」的唯一实现在共享钩子里——本脚本只声明「我用了它」，
+# 复位/基线断言失败一律置红（过去 cleanup 把 demo-reset 的退出码降级成 WARN，顺序依赖就出在那）。
+# shellcheck source=lib/gate-fixture.sh
+source "${ROOT}/scripts/lib/gate-fixture.sh"
 set +e
 
 RELEASE_FLOW_TOTAL=44
@@ -56,6 +61,8 @@ REPORT_DIR="${RUN_DIR:-${ROOT}/.run}/release-flow"
 FAIL_LOG=""
 TAG="$(date +%m%d%H%M%S)"
 T1_TENANT="${T1_TENANT:-t1}"
+GATE_FIXTURE_TENANT_CODE="$T1_TENANT"
+[[ "${RELEASE_FLOW_SKIP_RESET:-0}" == "1" ]] && GATE_FIXTURE_SKIP_TEARDOWN=1
 ADMIN_USER="admin"
 ADMIN_PASS="Admin@12345"
 USER_PASS="Passw0rd!"
@@ -323,16 +330,8 @@ build_positive_chain() {
     return 0
 }
 
-cleanup() {
-    trap - EXIT
-    if ((STATIC_ONLY == 0)) && [[ "$FIXTURES_SET" == "1" && "${RELEASE_FLOW_SKIP_RESET:-0}" != "1" ]]; then
-        printf '\n\033[1;36m== 复位演示数据（make platform-demo-reset） ==\033[0m\n'
-        bash "${ROOT}/scripts/platform-demo-reset.sh" >/dev/null 2>&1
-        rc=$?
-        ((rc == 0)) || printf '  \033[1;33mWARN\033[0m demo-reset 退出码 %s（不影响本次断言）\n' "$rc"
-    fi
-}
-trap cleanup EXIT
+# 复位/退出不需要本地 cleanup：gate_fixture_begin 注册的 EXIT/INT/TERM 陷阱负责
+# 「复位 + 基线断言 + 保留原退出码」，本脚本不再自己 trap（避免双 trap 互相覆盖）。
 
 # --------------------------------------------------------------------------- 第 32 条判据与夹具自愈
 # r31：提交卫生判据必须是「提交区间的纯函数」——入参只有 git 引用，出参只有 0|1 与
@@ -549,11 +548,20 @@ static_checks() {
     else
         s_fail "演示文档缺步骤、被拦链或 A.3 取证" "A.3 必须含 PUBLISHED 落库、released_at、wf_history 留痕与 409 负向（AC-10/D-1）"
     fi
-    if grep -q 'trap cleanup EXIT' "${ROOT}/scripts/release-flow-verify.sh" \
-        && grep -q 'platform-demo-reset.sh' "${ROOT}/scripts/release-flow-verify.sh"; then
-        s_pass "EXIT trap 复位演示数据（RELEASE_FLOW_SKIP_RESET=1 可跳过）"
+    # r34：夹具生命周期收敛到 scripts/lib/gate-fixture.sh——三门口禁都只声明「我用了它」，
+    # 复位与基线断言在这个共享实现里（失败置红），不再有 >/dev/null 2>&1 + WARN 降级的静默复位。
+    # 注意自匹配：把 demo-reset 脚本名拆进变量再拼正则，否则这条判据会命中它自己这一行。
+    local demo_script='platform-demo-reset'
+    local warn_needle='不影响本次''断言'
+    if grep -q 'lib/gate-fixture.sh' "${ROOT}/scripts/release-flow-verify.sh" \
+        && grep -q 'gate_fixture_begin' "${ROOT}/scripts/release-flow-verify.sh" \
+        && grep -q 'gate_fixture_reset "S7 起跑"' "${ROOT}/scripts/release-flow-verify.sh" \
+        && ! grep -qE "bash [^ ]*${demo_script}\.sh\" >/dev/null" "${ROOT}/scripts/release-flow-verify.sh" \
+        && ! grep -q "${warn_needle}" "${ROOT}/scripts/release-flow-verify.sh" \
+        && ! grep -qE '^trap cleanup EXIT' "${ROOT}/scripts/release-flow-verify.sh"; then
+        s_pass "夹具走共享钩子 lib/gate-fixture.sh（EXIT 复位 + 基线断言，失败置红；无静默 reset）"
     else
-        s_fail "缺 EXIT trap / demo-reset" "夹具污染会让下一次门禁从脏数据开始"
+        s_fail "未接入共享钩子 / 仍有静默 reset" "门禁必须 source scripts/lib/gate-fixture.sh 并调 gate_fixture_begin；清理失败只能置红"
     fi
 
     printf '\nRELEASE_FLOW_STATIC_TOTAL=%d PASS=%d FAIL=%d\n' "$s_case" $((s_case - s_fail)) "$s_fail"
@@ -596,6 +604,10 @@ DOMAIN_ID="$(db_q "SELECT id FROM biz_domain WHERE tenant_id=${TID} ORDER BY id 
 MODULE_ID="$(db_q "SELECT id FROM test_module WHERE tenant_id=${TID} ORDER BY id LIMIT 1")"
 [[ -n "$MODULE_ID" ]] || MODULE_ID=1
 ANY_REQ="$(db_q "SELECT id FROM requirement WHERE tenant_id=${TID} ORDER BY id LIMIT 1")"
+
+# r34：从这里开始本次运行独占演示租户——begin 先自愈脏基线（非夹具需求 > 0 时复位），
+# 再注册唯一 EXIT/INT/TERM 陷阱；必须在登录之前，因为复位可能重建种子账号。
+gate_fixture_begin || die "gate-fixture 起跑失败（见上方 [gate] 输出）"
 
 platform_login "$T1_TENANT" "$ADMIN_USER" "$ADMIN_PASS" >/dev/null 2>&1 \
     || die "admin 登录失败 —— 检查种子账号 admin/${ADMIN_PASS}"
@@ -1175,11 +1187,8 @@ s7_reset() {
         printf '  \033[1;33m注意\033[0m RELEASE_FLOW_SKIP_RESET=1：S7 不自愈 reset，数据须已是演示态\n'
         return 0
     fi
-    if bash "${ROOT}/scripts/platform-demo-reset.sh" >/dev/null 2>&1; then
-        return 0
-    fi
-    printf '  \033[1;31mS7 自愈 reset 失败\033[0m：手动执行 bash scripts/platform-demo-reset.sh 看首个 FAIL\n'
-    return 1
+    # r34：复位实现只有一份（共享钩子）；它成功打一行 [gate]，失败把 demo-reset 的末尾 20 行打出来。
+    gate_fixture_reset "S7 起跑"
 }
 
 # [S7-1] 夹具就绪：一条已交付的待测 RD + 一条走完真实两级会签的业务提报。
@@ -1428,7 +1437,7 @@ if s7_reset; then
     fi
 else
     for _ in 1 2 3 4 5 6 7 8; do
-        fail "S7 自愈 reset 失败，无法开始演示链" "先 make platform-demo-reset 全绿（74/74）再跑门禁"
+        fail "S7 自愈 reset 失败，无法开始演示链" "先 make platform-demo-reset 全绿（75/75）再跑门禁"
     done
 fi
 

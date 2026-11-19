@@ -34,9 +34,10 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 FAIL=0
 CASE=0
-# 本脚本固定 74 项断言（r26 起 66 → 69；r30 加账号基线 1 项 → 70；r32 演示链 4 项 → 74）。断言只增：
-# 新增/删除断言时同步改这里，末尾会校验实际执行数 == 声明数，漂移直接红——否则「74/74」会变成一句没人维护的祝福。
-TOTAL_CHECKS=74
+# 本脚本固定 75 项断言（r26 起 66 → 69；r30 加账号基线 1 项 → 70；r32 演示链 4 项 → 74；
+# r34 加「非夹具需求 0 条」1 项 → 75）。断言只增：
+# 新增/删除断言时同步改这里，末尾会校验实际执行数 == 声明数，漂移直接红——否则「75/75」会变成一句没人维护的祝福。
+TOTAL_CHECKS=75
 FAIL_TRANSPORT=0
 FAIL_API=0
 FAIL_ASSERT=0
@@ -312,6 +313,16 @@ DEMO_REQS="$(db_count requirement "tenant_id = ${TENANT_ID} AND code LIKE 'DEMO-
 [[ "${DEMO_REQS}" == "12" ]] \
     && pass "库内 DEMO-R-* 需求 12 行" \
     || fail "库内 DEMO-R-* 需求 ${DEMO_REQS} 行，期望 12" "重置未把所有固定行插入（看服务日志）"
+
+# r34：干净基线不只是「12 条演示需求齐」，还得「没有别的东西」。三个写 t1 的门禁
+# （release-flow-verify / platform-verify / platform-test-negative）过去把夹具挂在种子需求上，
+# 复位又不保证成功，于是「谁先跑」决定了后一个门禁看到的数据。非夹具需求恒 0 是顺序无关的前提：
+# 任何门禁的自建夹具都必须只在本次 GATE_TAG 下、并在退出时被复位掉。
+NON_FIXTURE_REQS="$(db_count requirement "tenant_id = ${TENANT_ID} AND code NOT LIKE 'DEMO-R-%'")"
+[[ "${NON_FIXTURE_REQS}" == "0" ]] \
+    && pass "库内非夹具需求 0 行（门禁夹具不得留在演示租户）" \
+    || fail "库内非夹具需求 ${NON_FIXTURE_REQS} 行，期望 0" \
+            "残留来自某个门禁的夹具：它必须自建 GATE_TAG 并靠 gate-fixture 的退出复位清掉，不能挂在种子上"
 
 SUPPLY_REQS="$(db_count requirement "tenant_id = ${TENANT_ID} AND origin_org_id IN (SELECT id FROM sys_org WHERE tenant_id = ${TENANT_ID} AND code = 'SUPPLY')")"
 [[ "${SUPPLY_REQS}" == "8" ]] \
@@ -720,14 +731,14 @@ CUSTOM_ROLES_DB="$(db_count sys_role "tenant_id = ${TENANT_ID} AND builtin = 0")
 # ---------------------------------------------------------------- 结果
 
 if (( CASE != TOTAL_CHECKS )); then
-    err "断言数漂移: 实际执行 ${CASE} 项，声明 ${TOTAL_CHECKS} 项——增删断言时必须同步 TOTAL_CHECKS，否则 57/57 口径失效"
+    err "断言数漂移: 实际执行 ${CASE} 项，声明 ${TOTAL_CHECKS} 项——增删断言时必须同步 TOTAL_CHECKS，否则 75/75 口径失效"
     exit 1
 fi
 if (( FAIL > 0 )); then
     err "platform-demo-reset: ${CASE} 项中 ${FAIL} 项失败（transport ${FAIL_TRANSPORT} / api ${FAIL_API} / assert ${FAIL_ASSERT}）"
     err "失败分类：transport = 栈或网络层（先 make platform-up 后重跑）；api = 接口语义；assert = 数据未回演示态"
     err "提示：assert 类若只有个别计数偏移（如需求 16 条、test_strategy 1 行），先确认没有第二个写者"
-    err "      在同一条演示栈上并发（另一次 reset/seed/门禁探针）——重置本身幂等，独占重跑即应回到 57/57"
+    err "      在同一条演示栈上并发（另一次 reset/seed/门禁探针）——重置本身幂等，独占重跑即应回到 75/75"
     err "重跑: bash scripts/platform-demo-reset.sh"
     exit 1
 fi
