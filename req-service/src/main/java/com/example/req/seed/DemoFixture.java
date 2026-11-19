@@ -1,5 +1,6 @@
 package com.example.req.seed;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +35,15 @@ public final class DemoFixture {
     public static final String RELEASE_CODE = "DEMO-REL-1";
     public static final String SPRINT_NAME = "演示迭代-1";
     public static final String PLAN_NAME = "演示回归计划";
+
+    /**
+     * r32 演示交付：演示链要跑到 PUBLISHED，RD 的 MR 与实际人天是发布会话准入的第 4/5 项。
+     *
+     * <p>地址与工时只在这里收口一次——夹具、{@link DemoApprovalFixture} 与
+     * {@code docs/teamflow/DEMO-RELEASE-FLOW.md} 引用同一份，避免「文档写 A、库里是 B」。</p>
+     */
+    public static final String MR_URL = "https://git.example.com/mr/r32-e2e";
+    public static final BigDecimal ACTUAL_DAYS = new BigDecimal("2.0");
 
     /** 期望计数（AC-13）：服务自检与脚本渲染计数表共用同一组数字。 */
     public static final long REQUIREMENT_COUNT = 12;
@@ -367,10 +377,15 @@ public final class DemoFixture {
      * {@code requirement.release_id = releaseId}（本表的 inRelease 列）与
      * {@code release_requirement} 一行（{@link DemoResetService} 插入时按同一个布尔值派生），
      * 不用 UPDATE 补关系。总数仍是 12 条需求 / 12 条用例，变的只是「哪些进了版本」。</p>
+     *
+     * <p>r32：{@code DEMO-R-01} 的初始态改成 {@code SUBMITTED}，由 {@link DemoApprovalFixture}（Tx3）
+     * 走真实动作链 submit → 会签 → review_start → 会签 把它推回 {@code POOLED}。种子里的审批流水
+     * 因此是「真跑出来的」，而不是直插 {@code wf_*} 拼出来的假夹具；净状态与 r31 之前一致
+     * （POOLED 的 BUS 仍是可拆解的父需求），下游门禁的前置条件不变。</p>
      */
     private static final String[][] REQUIREMENTS = {
             {"DEMO-R-01", "BUS", "", "ORD", "supplyOrg", "po1", "", "", "采购订单协同（业务提报）",
-                    "P1", "POOLED", "20", "-12", "8", "1"},
+                    "P1", "SUBMITTED", "20", "-12", "8", "1"},
             {"DEMO-R-02", "PDR", "DEMO-R-01", "ORD", "supplyOrg", "pm", "po1", "",
                     "采购订单移动审批", "P1", "SCHEDULED", "8", "-10", "4", "1"},
             {"DEMO-R-03", "RD", "DEMO-R-02", "ORD", "supplyOrg", "pm", "dev1", "",

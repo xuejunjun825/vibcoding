@@ -84,6 +84,7 @@ public class DemoResetService {
     private final NamedParameterJdbcTemplate namedJdbc;
     private final RbacSeeder rbacSeeder;
     private final DemoEstimateFixture estimates;
+    private final DemoApprovalFixture approvals;
     private final TransactionTemplate transactions;
     private final boolean enabled;
     private final String tenantCode;
@@ -92,6 +93,7 @@ public class DemoResetService {
                             NamedParameterJdbcTemplate namedJdbc,
                             RbacSeeder rbacSeeder,
                             DemoEstimateFixture estimates,
+                            DemoApprovalFixture approvals,
                             PlatformTransactionManager transactionManager,
                             @Value("${platform.seed.enabled:false}") boolean enabled,
                             @Value("${platform.tenant:" + DemoFixture.TENANT_CODE + "}") String tenantCode) {
@@ -99,6 +101,7 @@ public class DemoResetService {
         this.namedJdbc = namedJdbc;
         this.rbacSeeder = rbacSeeder;
         this.estimates = estimates;
+        this.approvals = approvals;
         this.transactions = new TransactionTemplate(transactionManager);
         this.enabled = enabled;
         this.tenantCode = tenantCode == null || tenantCode.isBlank()
@@ -134,6 +137,16 @@ public class DemoResetService {
         // 混进 Tx1 会让下面这次 counts() 读到 0 张单，自检直接误报。
         Integer seeded = transactions.execute(status -> estimates.seedDemo());
         merged.putAll(estimateCounts());
+
+        // Tx3：审批链与交付事实（JPA/审批引擎）。同样必须独立成段：它要读 Tx1 的裸 JDBC 行
+        // （需求 id）并让引擎按 assignee 校验逐单落章，与前面两段混在一个事务里就分不清
+        // 「哪一段留下了半成品」。夹具自证失败会抛 409，本段整体回滚。
+        transactions.execute(status -> {
+            approvals.seed();
+            return null;
+        });
+        merged.putAll(approvalCounts());
+
         List<String> violations = estimateViolations(merged);
         if (!violations.isEmpty()) {
             throw new ApiException(409, "DEMO_RESET_INVARIANT",
@@ -183,6 +196,21 @@ public class DemoResetService {
                     "演示数据不变量不满足（已整体回滚）：" + String.join("；", violations), Map.of());
         }
         log.info("demo-reset: tenant={} 业务数据重建完成 counts={}", tenantCode, counts);
+        return counts;
+    }
+
+    /** r32：审批夹具的两项可见计数（同样只报「实测行数」，不掺派生量）。 */
+    private Map<String, Long> approvalCounts() {
+        long tenantId = tenantId();
+        Map<String, Long> counts = new LinkedHashMap<>();
+        counts.put("demoApprovalApproved", db.count(
+                "SELECT COUNT(*) FROM wf_instance i JOIN requirement r ON r.id = i.biz_id"
+                        + " WHERE i.tenant_id = ? AND r.tenant_id = ? AND r.code = 'DEMO-R-01'"
+                        + " AND i.biz_type IN ('REQ_SUBMIT','REQ_REVIEW') AND i.status = 'APPROVED'",
+                tenantId, tenantId));
+        counts.put("demoMrRequirements", db.count(
+                "SELECT COUNT(*) FROM requirement WHERE tenant_id = ? AND mr_url = ?",
+                tenantId, DemoFixture.MR_URL));
         return counts;
     }
 
