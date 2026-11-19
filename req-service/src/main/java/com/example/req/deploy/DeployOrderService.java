@@ -4,6 +4,7 @@ import com.example.platform.common.audit.AuditService;
 import com.example.platform.common.code.CodeGenerator;
 import com.example.platform.common.error.ApiException;
 import com.example.platform.common.notify.NotificationWriter;
+import com.example.platform.contract.quality.GateRuleBuckets;
 import com.example.platform.contract.quality.GateSnapshot;
 import com.example.req.approval.ApprovalEngine;
 import com.example.req.approval.ApprovalException;
@@ -429,7 +430,11 @@ public class DeployOrderService {
         }
 
         private static String message(DeployViews.GateEvidence gate) {
-            List<String> codes = gate.failedRules().stream().map(rule -> rule.code()).toList();
+            // r33：只列 FAIL。GateEvidence.failedRules() 仍按 !passed() 过滤（含 SKIPPED），
+            // 直接用它会把「本轮未启用」的 QG-05 写成未通过规则，与门禁 reason「1 条门规则未通过」自相矛盾。
+            List<String> codes = GateRuleBuckets.of(gate.rules()).failedRules().stream()
+                    .map(rule -> rule.code())
+                    .toList();
             String tail = codes.isEmpty() ? gate.result() : String.join("、", codes);
             return "发布质量门未通过（快照 #" + gate.snapshotId() + "）：" + tail;
         }
@@ -447,9 +452,12 @@ public class DeployOrderService {
             }
             detail.put("result", gate.result());
             detail.put("hash", gate.hash());
-            detail.put("failedRules", gate.failedRules());
-            detail.put("openP0P1", gate.rules() == null ? List.of() : gate.rules().stream()
-                    .filter(rule -> !rule.passed())
+            GateRuleBuckets buckets = GateRuleBuckets.of(gate.rules());
+            detail.put("failedRules", buckets.failedRules());
+            // r33：跳过单列。旧快照的 failedRules 里混着 SKIPPED，前端按 rule.status 分桶读，
+            // 这里给出新口径的独立列表，避免调用方再从 failedRules 反推「哪条其实没跑」。
+            detail.put("skippedRules", buckets.skippedRules());
+            detail.put("openP0P1", buckets.failedRules().stream()
                     .map(GateSnapshot.GateRuleResult::code)
                     .toList());
             detail.put("items", items);

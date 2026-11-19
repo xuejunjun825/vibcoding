@@ -13,6 +13,7 @@ import StatusPill from '@/components/StatusPill.vue'
 import DigestChip from '@/components/quality/DigestChip.vue'
 import QualityRuleCard from '@/components/quality/QualityRuleCard.vue'
 import WaiverBadge from '@/components/quality/WaiverBadge.vue'
+import { bucketGateRules, gateCountLabel } from '@/components/release/qualityGateBuckets'
 import type { GateItem, GateRuleResult, WaiverRow } from '@/api/types'
 
 interface GateRuleInput {
@@ -94,20 +95,12 @@ const ruleList = computed<
     lastEvaluatedAt: rule.lastEvaluatedAt,
   })),
 )
-const failedRules = computed(() =>
-  ruleList.value.filter((rule) => String(rule.status).toUpperCase() === 'FAIL'),
-)
-const passedCount = computed(
-  () =>
-    ruleList.value.filter((rule) => {
-      const status = String(rule.status).toUpperCase()
-      return status === 'PASS' || status === 'WAIVED' || status === 'SKIPPED'
-    }).length,
-)
+/** 规则四态切三桶（r33）：SKIPPED 既不计入通过也不进分母，与服务端 GateRuleBuckets 同源 */
+const gateBuckets = computed(() => bucketGateRules(ruleList.value))
 const failedCount = computed(
   () =>
     gateItems.value.filter((item) => !item.passed).length ||
-    failedRules.value.length,
+    gateBuckets.value.failed,
 )
 const waiverByRule = computed(() => {
   const map = new Map<string, WaiverRow>()
@@ -139,9 +132,9 @@ function itemHasGateRules(item: GateItem): boolean {
       <h3 class="gate-panel__title">{{ title || (mode === 'gate' ? '质量门规则' : '发布准入检查') }}</h3>
       <StatusPill v-if="mode === 'gate'" kind="gate" :value="result || 'NOT_EVALUATED'" />
       <template v-if="mode === 'gate'">
-        <span class="gate-panel__count">
-          规则 {{ passedCount }}/{{ ruleList.length }} 通过
-          <template v-if="failedRules.length"> · {{ failedRules.length }} 条未通过</template>
+        <span v-if="gateBuckets.total" class="gate-panel__count">
+          规则 {{ gateCountLabel(gateBuckets) }}
+          <template v-if="gateBuckets.failed"> · {{ gateBuckets.failed }} 条未通过</template>
         </span>
         <span v-if="preview" class="gate-panel__preview">预览（未固化）</span>
         <DigestChip

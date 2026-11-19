@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # release-flow-verify.sh — r30 发版分级审批链 + 不可变链路快照门禁（AC-20）。
 #
-# 40 条断言，七组：
+# 44 条断言，八组：
 #   S1 绑定与等级（6）       6 个槽可读、NORMAL 三级 / REQ_DEPLOY 两级、换绑只影响新单、
 #                           reset 回默认、非法等级 400 detail.field、非管理员 403
 #   S2 正常链（7）           逐级建待办、NODE_APPROVED 三键留痕、中间态 LOCKED、
@@ -18,15 +18,19 @@
 #   S7 演示夹具到 PUBLISHED（8） 夹具就绪 → 版本测试 TEST_PASSED → 三签 → 清空 MR 的 409
 #                           （failedRules 恰 [MR_FILLED]）→ 恢复后提交 200 + 第 1 轮快照
 #                           + 四段同源 → QG-01/02/03 全 PASS → 发布单两级 → 版本三级 PUBLISHED
+#   S8 质量门四态分桶（4）   演示链 PASS 卡 failedRules=0 + skippedRules=[QG-05]、四桶和 == total、
+#                           准入第 6 项与门 result 同结论；造 P0 → failedRules 恰 [QG-04] 且
+#                           reason 只数 FAIL，关缺陷后复评恢复 PASS；node 三态文案与质量门页
+#                           label 逐字断言；旧形状（SKIPPED 混在 failedRules）回放按 status 分桶
 #
 # 用法：
 #   bash scripts/release-flow-verify.sh                # 全量（需 make platform-up 已起栈必、已 demo-reset）
-#   bash scripts/release-flow-verify.sh --static-only  # 不连栈，只查脚本/文档/契约自洽（9 条）
+#   bash scripts/release-flow-verify.sh --static-only  # 不连栈，只查脚本/文档/契约自洽（11 条）
 #
 # 约定（与 wbs-backfill-verify 一致）：
-#   - 脚本自声明 RELEASE_FLOW_TOTAL=40，CASE 必须等于 TOTAL，缺一条就是红；
+#   - 脚本自声明 RELEASE_FLOW_TOTAL=44，CASE 必须等于 TOTAL，缺一条就是红；
 #   - 前置缺失（栈没起、种子账号不在）直接 die，不 skip（r28 教训：条件跳过=假绿）；
-#   - 第 40 条只读 git 对象库（BASE..HEAD），工作树脏不影响结论；基线默认 main，
+#   - S6 的提交区间断言只读 git 对象库（BASE..HEAD），工作树脏不影响结论；基线默认 main，
 #     RELEASE_FLOW_BASE_REF 可覆盖，解析失败判红而不回退 HEAD；
 #   - S1 开头幂等复位六个绑定槽（setup，不计数）；EXIT trap 复位演示数据（RELEASE_FLOW_SKIP_RESET=1 可跳过）。
 set -uo pipefail
@@ -36,7 +40,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${ROOT}/scripts/lib.sh"
 set +e
 
-RELEASE_FLOW_TOTAL=40
+RELEASE_FLOW_TOTAL=44
 CASE=0
 PASS=0
 FAIL=0
@@ -44,7 +48,7 @@ FIXTURES_SET=0
 STATIC_ONLY=0
 [[ "${1:-}" == "--static-only" ]] && STATIC_ONLY=1
 [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && {
-    sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,/^set -uo pipefail$/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
     exit 0
 }
 
@@ -482,15 +486,15 @@ static_checks() {
     else
         s_fail "release-flow-upgrade.sh 缺失或语法错误" "补齐 scripts/release-flow-upgrade.sh"
     fi
-    if [[ "$(grep -c '^RELEASE_FLOW_TOTAL=40$' "${ROOT}/scripts/release-flow-verify.sh")" == "1" ]]; then
-        s_pass "脚本自声明 RELEASE_FLOW_TOTAL=40（AC-20 的分母唯一）"
+    if [[ "$(grep -c '^RELEASE_FLOW_TOTAL=44$' "${ROOT}/scripts/release-flow-verify.sh")" == "1" ]]; then
+        s_pass "脚本自声明 RELEASE_FLOW_TOTAL=44（AC-20 的分母唯一）"
     else
-        s_fail "RELEASE_FLOW_TOTAL 不是 40 或重复声明" "断言数变化必须同步 TECHNICAL §7.2"
+        s_fail "RELEASE_FLOW_TOTAL 不是 44 或重复声明" "断言数变化必须同步 TECHNICAL §8.3"
     fi
-    if [[ "$(grep -cE '^section "S[1-7] ' "${ROOT}/scripts/release-flow-verify.sh")" == "7" ]]; then
-        s_pass "七组断言 S1–S7 均有 section 标记"
+    if [[ "$(grep -cE '^section "S[1-8] ' "${ROOT}/scripts/release-flow-verify.sh")" == "8" ]]; then
+        s_pass "八组断言 S1–S8 均有 section 标记"
     else
-        s_fail "S1–S7 分组标记缺失" "每组一个 section，便于失败定位"
+        s_fail "S1–S8 分组标记缺失" "每组一个 section，便于失败定位"
     fi
     # r32：S7 的 8 条叙述全部由命名函数实现（s7_reset + 8 个断言函数），函数被删而调用点
     # 还在会静默变成「空过」；这里数定义数，确保 9 个都在。
@@ -498,6 +502,27 @@ static_checks() {
         s_pass "S7 十个函数齐备（1 个自愈 reset + 1 个建链 + 8 条断言）"
     else
         s_fail "S7 函数数不为 10" "s7_reset + s7_fixture_ready/build_chain/version_test_to_test_passed/report_signoff/negative_mr/submit_and_chain/quality_gate/order_levels/release_levels"
+    fi
+    # r33：S8 的四条断言同样由命名函数实现，且文件头/结尾文案必须与分母 44 一致——
+    # 只改 TOTAL 不改文案，或删函数留调用点，都会让「44 条」变成一句没有依据的声明。
+    if [[ "$(grep -cE '^s8_[a-z0-9_]+\(\) \{' "${ROOT}/scripts/release-flow-verify.sh")" == "4" ]] \
+        && grep -q '^# 44 条断言，八组：' "${ROOT}/scripts/release-flow-verify.sh" \
+        && grep -q '全部 44 条通过' "${ROOT}/scripts/release-flow-verify.sh"; then
+        s_pass "S8 四个函数齐备（demo_chain_buckets/negative_p0_gate/text_contract/legacy_replay），文件头与结论文案同为 44 条·八组"
+    else
+        s_fail "S8 函数数不为 4 或文件头/结论文案未同步 44 条·八组" \
+            "S8-1..S8-4 各一个命名函数；文件头写「44 条断言，八组」，结尾写「全部 44 条通过」"
+    fi
+    # r33/D-1：质量门展示的数字只允许来自 qualityGateBuckets.ts——组件里自己数 FAIL/WAIVED 或
+    # 写死「N/5 通过」会把 SKIPPED 当成通过，让同一快照的面板与时间线各说一套（PRD 反面目标 1）。
+    local qg_detail="${ROOT}/web/src/views/quality/QualityGateDetailView.vue"
+    local qg_list="${ROOT}/web/src/views/quality/QualityGatesView.vue"
+    if grep -q 'bucketGateRules' "$qg_detail" \
+        && ! grep -qE '[0-9]+/5 通过|5 - failed' "$qg_detail" "$qg_list"; then
+        s_pass "质量门两页分桶已收敛：详情页复用 bucketGateRules，两页均无写死的 N/5 通过（D-1/D-2）"
+    else
+        s_fail "质量门展示仍在自算计数（未复用 bucketGateRules 或写死 N/5 通过）" \
+            "ruleSummary 改为 gateCountLabel(bucketGateRules(...))；写死分母必然与 status 分桶矛盾"
     fi
     if grep -q '^release-flow-verify:' "${ROOT}/Makefile" && grep -q '^release-flow-upgrade:' "${ROOT}/Makefile"; then
         s_pass "Makefile 暴露 release-flow-verify / release-flow-upgrade 两个薄封装"
@@ -1407,6 +1432,171 @@ else
     done
 fi
 
+# --------------------------------------------------------------------------- S8 质量门四态分桶（r33）
+# AC-1/AC-2/AC-3/AC-6/AC-7 的运行面证据。口径分裂（PASS 卡写「1 条未通过」）的根因是
+# 「一条规则算进哪一桶」被三处各算一遍；这里断言四个消费者（deliver 段、req 透传、准入文案、
+# 前端纯函数）对同一份快照给出同一个结论，且旧冻结快照按 status 重新分桶后仍可回放。
+section "S8 质量门四态分桶（4）"
+
+# [S8-1] 演示链：PASS 卡上 failedRules 必须为空，QG-05 单列 skippedRules；四桶和 == total。
+s8_demo_chain_buckets() {
+    local bad=() status result total passed waived failed skipped flen slen scode sreq reason adm_status adm_detail
+    local expect_detail
+    if [[ -z "${S7_REL:-}" || -z "${S7_R04:-}" ]] || (( S7_BUILD_OK == 0 )); then
+        fail "S8-1 无演示链可断言（S7_REL=${S7_REL:-<空>}）" "S7 建链失败时先修 S7；不要在 S7 红的情况下只放行统计"
+        return
+    fi
+    api_call GET "/api/req/releases/${S7_REL}"
+    if [[ "$HTTP_CODE" != "200" ]]; then
+        fail "S8-1 读演示版本链路失败（HTTP ${HTTP_CODE}）" "确认 make platform-up 已起栈且 S7 已把版本推到 PUBLISHED"
+        return
+    fi
+    status="$(jqv '.flowChain.qualityGate.status' "$HTTP_BODY")"
+    result="$(jqv '.flowChain.qualityGate.result' "$HTTP_BODY")"
+    total="$(jqv '.flowChain.qualityGate.total' "$HTTP_BODY")"
+    passed="$(jqv '.flowChain.qualityGate.passedCount' "$HTTP_BODY")"
+    waived="$(jqv '.flowChain.qualityGate.waivedCount' "$HTTP_BODY")"
+    failed="$(jqv '.flowChain.qualityGate.failedCount' "$HTTP_BODY")"
+    skipped="$(jqv '.flowChain.qualityGate.skippedCount' "$HTTP_BODY")"
+    flen="$(jqv '.flowChain.qualityGate.failedRules | length' "$HTTP_BODY")"
+    slen="$(jqv '.flowChain.qualityGate.skippedRules | length' "$HTTP_BODY")"
+    scode="$(jqv '.flowChain.qualityGate.skippedRules[0].code // ""' "$HTTP_BODY")"
+    sreq="$(jqv '.flowChain.qualityGate.skippedRules[0].required' "$HTTP_BODY")"
+    reason="$(jqv '.flowChain.qualityGate.reason // ""' "$HTTP_BODY")"
+    adm_status="$(jqv '.flowChain.deployAdmission.items[] | select(.code=="QUALITY_GATE") | .status' "$HTTP_BODY" | head -n1)"
+    adm_detail="$(jqv '.flowChain.deployAdmission.items[] | select(.code=="QUALITY_GATE") | .detail' "$HTTP_BODY" | head -n1)"
+    [[ "$status" == "PASS" && "$result" == "PASS" ]] || bad+=("status/result=${status}/${result}（期望 PASS/PASS）")
+    [[ "$total" == "5" ]] || bad+=("total=${total}（期望 5 条规则）")
+    [[ "$failed" == "0" && "$flen" == "0" ]] || bad+=("failedCount=${failed} failedRules=${flen}（跳过不是失败）")
+    [[ "$skipped" == "1" && "$slen" == "1" && "$scode" == "QG-05" && "$sreq" == "false" ]] \
+        || bad+=("skippedCount=${skipped} skippedRules=${slen}/${scode}/required=${sreq}（期望 1 条 QG-05、required=false）")
+    if [[ -n "$passed" && -n "$waived" && -n "$failed" && -n "$skipped" && -n "$total" ]]; then
+        (( passed + waived + failed + skipped == total )) || bad+=("四桶和 $((passed + waived + failed + skipped)) ≠ total ${total}")
+    else
+        bad+=("计数缺失（passed/waived/failed/skipped/total 有 null）—— 服务端仍是 r33 之前的产出")
+    fi
+    [[ -z "$reason" ]] || bad+=("reason=\"${reason}\"（PASS 卡不该有未通过文案）")
+    expect_detail="${passed} 条通过 · ${skipped} 条跳过（未启用），质量门 PASS"
+    [[ "$adm_status" == "PASS" && "$adm_detail" == "$expect_detail" ]] \
+        || bad+=("准入第 6 项=${adm_status}/\"${adm_detail}\"（期望 PASS/\"${expect_detail}\"）")
+    if (( ${#bad[@]} == 0 )); then
+        pass "S8-1 演示链分桶：PASS 卡 failedRules=0、QG-05 单列跳过（required=false）、四桶和 5==total、准入文案「${expect_detail}」"
+    else
+        fail "S8-1 演示链分桶不符：$(printf '%s；' "${bad[@]}")" \
+            "FlowEvidenceService.qualityGate 必须用 GateRuleBuckets 分桶；SKIPPED 不许再进 failedRules"
+    fi
+}
+
+# [S8-2] 造 P0 → failedRules 恰 [QG-04]（reason 只数 FAIL）→ 关缺陷复评恢复 PASS。
+# 用本版本的一张临时发布单：FAIL 快照若落在 S7 的单上，findReusable 会在关缺陷后命中更早的
+# PASS 行而不产生新行，「恢复」就永远读不到。
+s8_negative_p0_gate() {
+    local bad=() order defect gate fail_reason failed flen fcodes skipped scodes status reason
+    if [[ -z "${S7_REL:-}" || -z "${S7_R04:-}" ]] || (( S7_BUILD_OK == 0 )); then
+        fail "S8-2 无演示链可造反例（S7_REL=${S7_REL:-<空>}）" "先修 S7 建链；反例必须建立在同一版本上"
+        return
+    fi
+    order="$(create_order "$S7_REL" "$S7_R04")"
+    if [[ -z "$order" ]]; then
+        fail "S8-2 造临时发布单失败（S7_REL=${S7_REL}）" "先看 create_order 的响应；同版本第二张单是允许的（无唯一约束）"
+        return
+    fi
+    api_call POST /api/deliver/defects "$(jq -cn --argjson rel "$S7_REL" --argjson req "$S7_R04" '{
+      requirementId:$req, releaseId:$rel, title:"[r33-S8] 未关闭 P0 复评夹具",
+      description:"门禁 S8-2 自愈夹具：造 P0 让 QG-04 FAIL，断言后关闭", reproSteps:"1. 建单 2. 提交",
+      severity:"P0", priority:"P0", source:"MANUAL", foundPhase:"TEST"}')"
+    defect="$(jqv '.id // empty' "$HTTP_BODY")"
+    if [[ -z "$defect" ]]; then
+        fail "S8-2 造 P0 缺陷失败（HTTP ${HTTP_CODE}: $(printf '%s' "$HTTP_BODY" | head -c 120)）" \
+            "severity 只能是 P0..P3；title 必填；releaseId 必带"
+        return
+    fi
+    api_direct POST "$DELIVER_URL" "/internal/quality-gates/${S7_REL}/evaluate" \
+        "$(jq -cn --argjson o "$order" --argjson r "$S7_R04" '{deployOrderId:$o, requirementIds:[$r]}')" \
+        -H "X-Tenant-Id: ${TID}" -H "X-Internal-Token: ${PLATFORM_INTERNAL_TOKEN}"
+    gate="$(jqv '.result // empty' "$HTTP_BODY")"
+    [[ "$gate" == "FAIL" ]] || bad+=("freeze 未给出 FAIL（HTTP ${HTTP_CODE}, result=${gate:-?}）")
+    api_call GET "/api/req/releases/${S7_REL}"
+    failed="$(jqv '.flowChain.qualityGate.failedCount' "$HTTP_BODY")"
+    flen="$(jqv '.flowChain.qualityGate.failedRules | length' "$HTTP_BODY")"
+    fcodes="$(jqv '[.flowChain.qualityGate.failedRules[].code] | join(",")' "$HTTP_BODY")"
+    skipped="$(jqv '.flowChain.qualityGate.skippedCount' "$HTTP_BODY")"
+    scodes="$(jqv '[.flowChain.qualityGate.skippedRules[].code] | join(",")' "$HTTP_BODY")"
+    reason="$(jqv '.flowChain.qualityGate.reason // ""' "$HTTP_BODY")"
+    [[ "$failed" == "1" && "$flen" == "1" && "$fcodes" == "QG-04" ]] \
+        || bad+=("failedRules=${flen}[${fcodes}] failedCount=${failed}（期望恰 1 条 QG-04）")
+    [[ "$skipped" == "1" && "$scodes" == "QG-05" ]] || bad+=("skippedRules=[${scodes}] skippedCount=${skipped}（期望 QG-05）")
+    [[ "$reason" == "1 条门规则未通过" ]] || bad+=("reason=\"${reason}\"（reason 只能数 FAIL，不能数跳过）")
+    api_call POST "/api/deliver/defects/${defect}/actions" \
+        '{"action":"close_duplicate","comment":"r33 S8-2 自愈：反例断言完成","handlerId":1}'
+    [[ "$HTTP_CODE" == "200" ]] || bad+=("关缺陷失败（HTTP ${HTTP_CODE}）")
+    api_direct POST "$DELIVER_URL" "/internal/quality-gates/${S7_REL}/evaluate" \
+        "$(jq -cn --argjson o "$order" --argjson r "$S7_R04" '{deployOrderId:$o, requirementIds:[$r]}')" \
+        -H "X-Tenant-Id: ${TID}" -H "X-Internal-Token: ${PLATFORM_INTERNAL_TOKEN}"
+    api_call GET "/api/req/releases/${S7_REL}"
+    status="$(jqv '.flowChain.qualityGate.status' "$HTTP_BODY")"
+    failed="$(jqv '.flowChain.qualityGate.failedCount' "$HTTP_BODY")"
+    flen="$(jqv '.flowChain.qualityGate.failedRules | length' "$HTTP_BODY")"
+    skipped="$(jqv '.flowChain.qualityGate.skippedCount' "$HTTP_BODY")"
+    [[ "$status" == "PASS" && "$failed" == "0" && "$flen" == "0" && "$skipped" == "1" ]] \
+        || bad+=("关缺陷后未恢复（status=${status} failed=${failed} failedRules=${flen} skipped=${skipped}）")
+    if (( ${#bad[@]} == 0 )); then
+        pass "S8-2 造 P0 复评：failedRules 恰 [QG-04]、skippedRules [QG-05]、reason「1 条门规则未通过」，关缺陷后复评恢复 PASS（skipped 仍 1）"
+    else
+        fail "S8-2 造 P0 复评不符：$(printf '%s；' "${bad[@]}")" \
+            "QG-04 数未关闭 P0/P1；关缺陷后同一发布单复评必须落新的 PASS 快照（hash 变化 → 不复用旧行）"
+    fi
+}
+
+# [S8-3] node 断言 text：三态文案与质量门页 label 逐字。
+s8_text_contract() {
+    local out rc
+    out="$(node --experimental-strip-types "${ROOT}/scripts/tests/release-flow/qg-buckets.mjs" text 2>&1)"
+    rc=$?
+    if (( rc == 0 )) && needle "$out" "QG_BUCKETS_MODE=text OK=" \
+        && needle "$out" "跳过 1 条 · 未通过 0 条" && needle "$out" "4/4 通过 · 跳过 1"; then
+        pass "S8-3 前端纯函数 text 断言全绿（$(printf '%s' "$out" | grep -o 'OK=[0-9]*' | tail -n1)）：链路卡「跳过 1 条 · 未通过 0 条」、质量门页「4/4 通过 · 跳过 1」"
+    else
+        fail "S8-3 node text 断言失败（exit ${rc}）：$(printf '%s' "$out" | grep -E '^(FAIL|Error|.*Error:)' | head -n3 | tr '\n' ' ')" \
+            "cd 项目根运行 node --experimental-strip-types scripts/tests/release-flow/qg-buckets.mjs text 看逐条 FAIL"
+    fi
+}
+
+# [S8-4] 旧形状回放：r30/r32 冻结快照（SKIPPED 混在 failedRules、无 skippedRules/计数）按 status
+# 重新分桶后文案与新数据一致；同一轮快照连读两次 payloadHash 不变。
+s8_legacy_replay() {
+    local out rc h1 h2 bad=()
+    out="$(node --experimental-strip-types "${ROOT}/scripts/tests/release-flow/qg-buckets.mjs" legacy 2>&1)"
+    rc=$?
+    (( rc == 0 )) || bad+=("node legacy exit ${rc}: $(printf '%s' "$out" | grep -E '^(FAIL|.*Error)' | head -n2 | tr '\n' ' ')")
+    needle "$out" "QG_BUCKETS_MODE=legacy OK=" || bad+=("legacy 输出缺 QG_BUCKETS_MODE 行")
+    if [[ -z "${S7_ORDER:-}" ]]; then
+        bad+=("S7_ORDER 为空，无法验证快照回放稳定性")
+    else
+        api_call GET "/api/req/deploy-orders/${S7_ORDER}/flow-snapshots/1"
+        h1="$(jqv '.payloadHash // empty' "$HTTP_BODY")"
+        api_call GET "/api/req/deploy-orders/${S7_ORDER}/flow-snapshots/1"
+        h2="$(jqv '.payloadHash // empty' "$HTTP_BODY")"
+        [[ -n "$h1" && "$h1" == "$h2" ]] || bad+=("payloadHash 回放不稳定（${h1:-<空>} vs ${h2:-<空>}）")
+    fi
+    if (( ${#bad[@]} == 0 )); then
+        pass "S8-4 旧形状回放：SKIPPED 混在 failedRules 的快照按 status 分桶后文案与新数据一致，payloadHash 两次读相同（${h1:0:12}…）"
+    else
+        fail "S8-4 旧形状回放不符：$(printf '%s；' "${bad[@]}")" \
+            "前端只按 status 分桶、不读计数；回放不得改写已冻结快照的 payloadHash"
+    fi
+}
+
+if (( S7_BUILD_OK == 1 )); then
+    s8_demo_chain_buckets
+    s8_negative_p0_gate
+else
+    fail "S8-1 无演示链可断言（S7 建链失败）" "先修 S7 建链，再复跑门禁"
+    fail "S8-2 无演示链可造反例（S7 建链失败）" "先修 S7 建链，再复跑门禁"
+fi
+s8_text_contract
+s8_legacy_replay
+
 # --------------------------------------------------------------------------- 汇总
 printf '\nRELEASE_FLOW_TOTAL=%d CASE=%d PASS=%d FAIL=%d\n' "$RELEASE_FLOW_TOTAL" "$CASE" "$PASS" "$FAIL"
 SUMMARY_FILE="${REPORT_DIR}/summary-${TAG}.txt"
@@ -1426,5 +1616,5 @@ if ((FAIL > 0)); then
     printf '\033[1;31m有 %d 条断言失败\033[0m\n' "$FAIL"
     exit 1
 fi
-printf '\033[1;32m全部 40 条通过：分级绑定、四段链路、不可变快照、三道闸门与演示链到 PUBLISHED 均成立\033[0m\n'
+printf '\033[1;32m全部 44 条通过：分级绑定、四段链路、不可变快照、三道闸门、演示链到 PUBLISHED 与质量门四态分桶均成立\033[0m\n'
 exit 0

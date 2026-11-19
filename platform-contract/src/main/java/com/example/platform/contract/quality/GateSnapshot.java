@@ -64,7 +64,14 @@ public record GateSnapshot(
         return PASS.equals(result) || PASS_WITH_WAIVER.equals(result);
     }
 
-    /** The rules that did not pass, in configuration order (drives the 409 body and the UI list). */
+    /**
+     * The rules that did not pass, in configuration order (drives the 409 body and the UI list).
+     *
+     * <p>Note this is {@code !passed()}, so it also contains {@code SKIPPED} rows — deliberately,
+     * for snapshots frozen before {@link GateRuleBuckets} existed. New code that needs "failed"
+     * must use {@link GateRuleBuckets#failedRules()} (FAIL only) instead of this, or a skipped
+     * rule is reported as a failure again.</p>
+     */
     public List<GateRuleResult> failedRules() {
         return rules.stream().filter(rule -> !rule.passed()).toList();
     }
@@ -87,8 +94,29 @@ public record GateSnapshot(
             String threshold,
             String fixHint) {
 
+        /**
+         * Whether the rule let the gate through. Non-component method on purpose: adding a
+         * component would change the frozen {@code rules_json} shape and the payload hash.
+         */
         public boolean passed() {
             return "PASS".equals(status) || "WAIVED".equals(status);
+        }
+
+        /** Whether the pass came from a waiver rather than from meeting the threshold. */
+        public boolean waived() {
+            return "WAIVED".equals(status);
+        }
+
+        /**
+         * Whether the rule was never evaluated this round ("not enabled", e.g. an external quality
+         * source that is not wired in).
+         *
+         * <p>Skipped is neither a pass nor a failure: it is out of every ratio and must not be
+         * reported as "未通过". Read it through {@link GateRuleBuckets} rather than re-deriving it
+         * at a call site.</p>
+         */
+        public boolean skipped() {
+            return "SKIPPED".equals(status);
         }
     }
 

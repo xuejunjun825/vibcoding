@@ -191,16 +191,26 @@ public class FlowChainService {
         if (status == null) {
             return FlowChainViews.QualityGateSegment.missing("质量门段没有状态");
         }
-        List<FlowChainViews.RuleLine> failedRules = new ArrayList<>();
-        for (Map<String, Object> row : maps(segment.get("failedRules"))) {
-            failedRules.add(new FlowChainViews.RuleLine(str(row, "code"), str(row, "status"),
-                    bool(row.get("required")), str(row, "actual"), str(row, "threshold"),
-                    str(row, "fixHint")));
-        }
+        List<FlowChainViews.RuleLine> failedRules = ruleLines(segment.get("failedRules"));
+        List<FlowChainViews.RuleLine> skippedRules = ruleLines(segment.get("skippedRules"));
         List<Map<String, Object>> waivers = maps(segment.get("waivers"));
         return new FlowChainViews.QualityGateSegment(status, str(segment, "reason"),
                 str(segment, "result"), lng(segment, "snapshotId"), lng(segment, "gateId"),
-                lng(segment, "reportId"), str(segment, "computedAt"), failedRules, waivers);
+                lng(segment, "reportId"), str(segment, "computedAt"),
+                failedRules, skippedRules, waivers,
+                count(segment, "total"), count(segment, "passedCount"), count(segment, "waivedCount"),
+                count(segment, "failedCount"), count(segment, "skippedCount"));
+    }
+
+    /** 规则行映射：deliver 的 {@code failedRules} / {@code skippedRules} 同构（门规则的展示子集）。 */
+    private static List<FlowChainViews.RuleLine> ruleLines(Object value) {
+        List<FlowChainViews.RuleLine> out = new ArrayList<>();
+        for (Map<String, Object> row : maps(value)) {
+            out.add(new FlowChainViews.RuleLine(str(row, "code"), str(row, "status"),
+                    bool(row.get("required")), str(row, "actual"), str(row, "threshold"),
+                    str(row, "fixHint")));
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ ④ 准入（req 自有）
@@ -361,6 +371,27 @@ public class FlowChainService {
             }
         }
         return fallback;
+    }
+
+    /**
+     * 可空计数：段里没有这个键（旧快照）就返回 {@code null}。
+     *
+     * <p>PASS/WAIVED/FAIL 三个计数同理——「deliver 没给这个字段」与「真的是 0 条」必须可区分，
+     * 否则回放旧快照会凭空多出「跳过 0 条」，把「没记录」说成「已确认没有」。</p>
+     */
+    private static Integer count(Map<String, Object> segment, String key) {
+        Object value = segment.get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Integer.parseInt(text.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private static boolean bool(Object value) {

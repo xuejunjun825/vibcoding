@@ -10,6 +10,12 @@
 import { computed } from 'vue'
 import type { FlowChain } from '@/api/types'
 import { formatDateTime } from '@/utils/format'
+import {
+  bucketGateRules,
+  failedRuleLines,
+  gateCountText,
+  skippedRuleLines,
+} from '@/components/release/qualityGateBuckets'
 
 const props = defineProps<{
   chain: FlowChain | null
@@ -84,7 +90,8 @@ const segments = computed<SegmentView[]>(() => {
   const admissionTone = toneOf(admission?.status)
 
   const admissionTotal = (admission?.passedCount ?? 0) + (admission?.failedCount ?? 0)
-  const failedRules = gate?.failedRules ?? []
+  /** ③ 段：按 status 分桶（旧快照的 failedRules 混着 SKIPPED，故不看数组长度）；tone 仍只由 status 派生 */
+  const gateBuckets = bucketGateRules(gate)
   const failedItems = (admission?.items ?? []).filter((item) => item.status === 'FAIL')
 
   return [
@@ -136,16 +143,14 @@ const segments = computed<SegmentView[]>(() => {
       sub: gate
         ? [
             gate.computedAt ? formatDateTime(gate.computedAt) : '',
-            failedRules.length > 0 ? `${failedRules.length} 条未通过` : '',
+            gateCountText(gateBuckets),
             gate.waivers && gate.waivers.length > 0 ? `${gate.waivers.length} 条豁免` : '',
           ]
             .filter(Boolean)
             .join(' · ') || '门结果由 deliver 计算'
         : '门结果由 deliver 计算',
       reason: gate?.reason ?? '',
-      details: failedRules
-        .slice(0, 2)
-        .map((rule) => `${rule.code} ${rule.actual || ''}/${rule.threshold || '—'}`.trim()),
+      details: [...failedRuleLines(gateBuckets, 2), ...skippedRuleLines(gateBuckets, 1)],
     },
     {
       key: 'deployAdmission',

@@ -13,6 +13,7 @@ import com.example.deliver.quality.report.ReportViews;
 import com.example.deliver.quality.report.SignoffService;
 import com.example.deliver.support.Rows;
 import com.example.platform.common.scope.ScopedJdbc;
+import com.example.platform.contract.quality.GateRuleBuckets;
 import com.example.platform.contract.quality.GateSnapshot;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -275,22 +276,12 @@ public class FlowEvidenceService {
     }
 
     private static Map<String, Object> qualityGate(QualityGateViews.Snapshot snapshot) {
-        List<Map<String, Object>> failedRules = new ArrayList<>();
-        if (snapshot.rules() != null) {
-            for (GateSnapshot.GateRuleResult rule : snapshot.rules()) {
-                if (rule.passed()) {
-                    continue;
-                }
-                Map<String, Object> line = new LinkedHashMap<>();
-                line.put("code", rule.code());
-                line.put("status", rule.status());
-                line.put("required", rule.required());
-                line.put("actual", rule.actual());
-                line.put("threshold", rule.threshold());
-                line.put("fixHint", rule.fixHint());
-                failedRules.add(line);
-            }
-        }
+        // 四态分桶的唯一实现在 platform-contract：这里只做「映射成 JSON」，不再自己判断
+        // 「非 PASS 即失败」。旧写法把 SKIPPED（本轮未接入外部质量源）塞进 failedRules，
+        // 于是 card=PASS 而副标题写「1 条未通过」——两处说法自相矛盾。
+        GateRuleBuckets buckets = GateRuleBuckets.of(snapshot.rules());
+        List<Map<String, Object>> failedRules = ruleLines(buckets.failedRules());
+        List<Map<String, Object>> skippedRules = ruleLines(buckets.skippedRules());
         List<Map<String, Object>> waivers = snapshot.waivers() == null
                 ? List.of() : new ArrayList<>(snapshot.waivers());
         String result = snapshot.result();
@@ -300,8 +291,9 @@ public class FlowEvidenceService {
             status = SEGMENT_PASS;
         } else if (GateSnapshot.FAIL.equals(result)) {
             status = SEGMENT_FAIL;
-            reason = failedRules.isEmpty()
-                    ? "质量门结论 FAIL" : failedRules.size() + " 条门规则未通过";
+            // reason 只数 FAIL：跳过不是失败，否则 AC-2 会写成「2 条」。
+            reason = buckets.failedCount() == 0
+                    ? "质量门结论 FAIL" : buckets.failedCount() + " 条门规则未通过";
         } else {
             status = SEGMENT_PENDING;
             reason = "质量门结论未定（" + result + "）";
@@ -315,8 +307,30 @@ public class FlowEvidenceService {
         out.put("reportId", snapshot.reportId());
         out.put("computedAt", snapshot.computedAt());
         out.put("failedRules", failedRules);
+        out.put("skippedRules", skippedRules);
         out.put("waivers", waivers);
+        out.put("total", buckets.totalCount());
+        out.put("passedCount", buckets.passedCount());
+        out.put("waivedCount", buckets.waivedCount());
+        out.put("failedCount", buckets.failedCount());
+        out.put("skippedCount", buckets.skippedCount());
         return out;
+    }
+
+    /** 规则行形状（code/status/required/actual/threshold/fixHint）——失败与跳过共用同一形状。 */
+    private static List<Map<String, Object>> ruleLines(List<GateSnapshot.GateRuleResult> rules) {
+        List<Map<String, Object>> lines = new ArrayList<>();
+        for (GateSnapshot.GateRuleResult rule : rules) {
+            Map<String, Object> line = new LinkedHashMap<>();
+            line.put("code", rule.code());
+            line.put("status", rule.status());
+            line.put("required", rule.required());
+            line.put("actual", rule.actual());
+            line.put("threshold", rule.threshold());
+            line.put("fixHint", rule.fixHint());
+            lines.add(line);
+        }
+        return lines;
     }
 
     private static Map<String, Object> missingGate(String reason) {

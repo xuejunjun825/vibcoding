@@ -131,10 +131,11 @@ function switchTab(value: 'gates' | 'waivers'): void {
 
 function ruleSummary(row: GateListRow): string {
   if (row.passedRules != null && row.totalRules != null) return `${row.passedRules}/${row.totalRules} 通过`
-  const failed = row.failedRules?.length ?? 0
-  if (row.status === 'PASS' || row.status === 'PASS_WITH_WAIVER') return '5/5 通过'
+  // 兜底（旧接口/未返回计数）：只知道未通过的规则 code，不臆造分母与通过数——写死「N/5」
+  // 会把 SKIPPED 当通过、与详情页按 status 分桶的计数自相矛盾（D-1/D-2）。
   if (!row.gateId) return '未评估'
-  return failed ? `${Math.max(0, 5 - failed)}/5 通过` : '—'
+  const failed = row.failedRules?.length ?? 0
+  return failed ? `未通过 ${failed} 条` : '通过'
 }
 
 function failedCodes(row: GateListRow): string {
