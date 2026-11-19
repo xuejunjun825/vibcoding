@@ -21,6 +21,7 @@ import type {
   GateSnapshot,
   WaiverRow,
 } from '@/api/types'
+import { bucketGateRules, gateCountLabel } from '@/components/release/qualityGateBuckets'
 import StatusPill from '@/components/StatusPill.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import ConclusionBar from '@/components/quality/ConclusionBar.vue'
@@ -234,14 +235,13 @@ async function openReplay(snapshot: GateSnapshot): Promise<void> {
   }
 }
 
+/**
+ * 快照时间线一行（D-1）：与 QualityGatePanel 同源——按 status 分桶后由 gateCountLabel 出文案，
+ * 跳过的规则既不算通过也不进分母。绝不在这里自行数 FAIL/WAIVED 或写死分母 5，
+ * 否则同一页会出现「通过数/判定数」与「写死的满分」两套数字（PRD 反面目标 1）。
+ */
 function ruleSummary(snapshot: GateSnapshot): string {
-  const failed = snapshot.rules.filter((rule) => rule.status === 'FAIL').length
-  const waived = snapshot.rules.filter((rule) => rule.status === 'WAIVED').length
-  if (!failed && !waived) return '5/5 通过'
-  const parts: string[] = []
-  if (failed) parts.push(`${failed} 未通过`)
-  if (waived) parts.push(`${waived} 豁免`)
-  return parts.join(' · ')
+  return gateCountLabel(bucketGateRules(snapshot.rules ?? []))
 }
 
 function openRevoke(row: WaiverRow): void {

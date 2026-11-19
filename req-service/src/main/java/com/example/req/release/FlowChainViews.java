@@ -110,7 +110,17 @@ public final class FlowChainViews {
                                String signedAt) {
     }
 
-    /** ③ 质量门段：deliver 固化的门快照事实（req 只透传，不按签署数自行推 PASS）。 */
+    /**
+     * ③ 质量门段：deliver 固化的门快照事实（req 只透传，不按签署数自行推 PASS）。
+     *
+     * <p>规则四态分桶（PASS / WAIVED / SKIPPED / FAIL）由 deliver 用
+     * {@code GateRuleBuckets} 产出：{@link #failedRules()} 只装 FAIL，{@link #skippedRules()}
+     * 单列 SKIPPED（"本轮未启用"既不算通过也不算未通过）。req 不重算，否则两个服务必然分叉。</p>
+     *
+     * <p>五个计数刻意用可空 {@link Integer}：旧快照（r30/r32 冻结的那批）里根本没有这些字段，
+     * 反序列化后必须是 {@code null} 而不是 0——「无此字段」与「真的是 0 条」不能混。前端也不读
+     * 计数，一律按 {@code status} 分桶，所以旧快照与新数据走同一条展示路径。</p>
+     */
     public record QualityGateSegment(String status,
                                     String reason,
                                     String result,
@@ -119,16 +129,23 @@ public final class FlowChainViews {
                                     Long reportId,
                                     String computedAt,
                                     List<RuleLine> failedRules,
-                                    List<Map<String, Object>> waivers) {
+                                    List<RuleLine> skippedRules,
+                                    List<Map<String, Object>> waivers,
+                                    Integer total,
+                                    Integer passedCount,
+                                    Integer waivedCount,
+                                    Integer failedCount,
+                                    Integer skippedCount) {
 
         public QualityGateSegment {
             failedRules = failedRules == null ? List.of() : List.copyOf(failedRules);
+            skippedRules = skippedRules == null ? List.of() : List.copyOf(skippedRules);
             waivers = waivers == null ? List.of() : List.copyOf(waivers);
         }
 
         public static QualityGateSegment missing(String reason) {
             return new QualityGateSegment(SEGMENT_MISSING, reason, null, null, null, null, null,
-                    List.of(), List.of());
+                    List.of(), List.of(), List.of(), null, null, null, null, null);
         }
     }
 

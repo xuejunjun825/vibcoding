@@ -2,7 +2,7 @@
 
 > 本文件是 r32「演示夹具 → 版本测试 → 报告三签 → 质量门 → 发布单准入 → 发布单两级 → 版本三级 → PUBLISHED」的**演示脚本**，命令可直接粘贴执行。
 > 约束：演示与实现同账号、同路径、同端口（网关 8080 / req 8082 / deliver 8083），不另起环境、不改数据。
-> 截图位统一放在 `docs/teamflow/demo-shots/`，本轮新增 `r32-published-chain.png` 与 `r32-admission-409-mr.png`。
+> 截图位统一放在 `docs/teamflow/demo-shots/`，本轮新增 `r32-published-chain.png` 与 `r32-admission-409-mr.png`；r33 修正质量门跳过口径后补 `r33-qg-skipped-count.png`（同一张 ③ 卡片，现在写「跳过 1 条 · 未通过 0 条」）。
 > r30 那次停在同一份准入清单上（9 项里 4 项 FAIL），原因记在附 A；r32 用夹具把那条需求补到「可真发布」，整条链现在能跑到 `PUBLISHED`。
 
 ---
@@ -280,13 +280,13 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/api/req/releases/$REL/p
 ## 一键回归
 
 ```bash
-make release-flow-verify     # S1..S7 40 条，PASS 必须等于 TOTAL；结束自动 demo-reset
+make release-flow-verify     # S1..S7（r33 追加 S8）全部断言，PASS 必须等于脚本自声明的 TOTAL；结束自动 demo-reset
 make release-flow-upgrade    # 连跑两次 /internal/seed，定义/绑定/version 不增（12 条）
 make platform-demo-reset     # 74 条：业务行 + 工时引擎 + 演示审批链，可重复执行
 ```
 
-`release-flow-verify` 的 `--static-only` 只跑不连栈的契约检查（脚本语法/断言分母/S1–S7 分段/S7 函数齐备/
-Makefile/DEMO 文档/EXIT trap），用于改脚本时快速自检；正式门禁必须连栈跑满 40 条，**缺前置直接失败，不跳过**。
+`release-flow-verify` 的 `--static-only` 只跑不连栈的契约检查（脚本语法/断言分母/S1–S7（r33 起含 S8）分段/S7 函数齐备/
+Makefile/DEMO 文档/EXIT trap），用于改脚本时快速自检；正式门禁必须连栈跑满脚本自声明的全部分母（r33 起 S8 并入），**缺前置直接失败，不跳过**。
 S7 起跑前会自愈 `platform-demo-reset`，所以 S1–S5 把库改成什么样都不影响它。
 
 ---
@@ -306,12 +306,20 @@ R-04 六字段、R-01 提报单/复核单、演示计划覆盖）；8 步全部 
 **逐步响应码、两把梯子的逐级待办/留痕、PUBLISHED 的落库字段与查询、AC-8 的 409 实测都在 A.3。**
 
 **截图**：`r32-published-chain.png`（REL-1444 发版链路四段全「已通过」+ 右侧三级审批阶梯全绿 + 状态「已发布」）、
-`r32-admission-409-mr.png`（DEP-0748 准入 9 项：仅 `MR_FILLED` 红、快照「尚未提交 · 提交成功后生成快照」）。
+`r32-admission-409-mr.png`（DEP-0748 准入 9 项：仅 `MR_FILLED` 红、快照「尚未提交 · 提交成功后生成快照」）；
+r33 修正口径后同一张卡片见 `r33-qg-skipped-count.png`。
 
-> 截图里 ③ 卡片副标题写着「1 条未通过」，但卡片是 `PASS / 已通过`——这 1 条是 `QG-05`（本轮未接入外部质量源，
-> 规则状态 `SKIPPED`），被 `FlowEvidenceService.qualityGate` 按「非 PASS 即 failed」的口径算进了 `failedRules`；
-> 结论没有错，是这个展示口径与 `QualityGateService` 的「SKIPPED 不计入失败」不一致。已作为交付遗留记录，
-> 不在本轮改动范围（见本次 dev 汇总的 out-of-scope）。
+> **已修正（r33）**：③ 卡片现在写「跳过 1 条 · 未通过 0 条」，与卡片 `PASS / 已通过` 自洽
+> （`docs/teamflow/demo-shots/r33-qg-skipped-count.png`，2026-11-19 r33 实测）。r32 时那句「1 条未通过」是
+> `QG-05`（本轮未接入外部质量源，状态 `SKIPPED`）被 `FlowEvidenceService.qualityGate` 按「非 PASS 即 failed」
+> 算进了 `failedRules`。r33 把规则统计改成**三桶口径**：**通过** = `PASS`/`WAIVED`、**跳过** = `SKIPPED`、
+> **未通过** = 只数 `FAIL`（未知状态仍 fail-closed 记成未通过）。`failedRules` 只装 FAIL，跳过单列
+> `skippedRules` 与 `skippedCount`；卡片徽标仍**只由快照 `result`** 决定，副标题数字来自同一次规则扫描——
+> 判定、准入第 6 项、快照结构与 `payloadHash` 都没有改动。同一份快照在质量门页显示「4/4 通过 · 跳过 1」
+> （跳过不进分子也不进分母），准入第 6 项 PASS 时写「4 条通过 · 1 条跳过（未启用），质量门 PASS」。
+> r30/r32 冻结的链路快照按规则 `status` 重新分桶回放，不改写、不迁移、不补字段。
+> 图是本次现跑出来的（2026-11-19 16:50，走 A.2 的 8 步演示夹具脚本一路到 `PUBLISHED`）；版本名里的
+> 「r32 演示-常规发版-…」只是那份夹具脚本自带的标题前缀，链路、快照与四段状态都是 r33 现场生成。
 
 ### A.2 四个必须知道的实操事实
 

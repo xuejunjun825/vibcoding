@@ -2,6 +2,7 @@ package com.example.req.deploy;
 
 import com.example.platform.contract.GateBlocker;
 import com.example.platform.contract.GateDecision;
+import com.example.platform.contract.quality.GateRuleBuckets;
 import com.example.platform.contract.quality.GateSnapshot;
 import com.example.req.integration.admission.AdmissionItemPolicy;
 import com.example.req.integration.admission.AdmissionViews;
@@ -271,12 +272,22 @@ public final class AdmissionPolicy {
                     FIX_GATE_UNAVAILABLE);
         }
         List<GateSnapshot.GateRuleResult> rules = gate.rules() == null ? List.of() : gate.rules();
+        GateRuleBuckets buckets = GateRuleBuckets.of(rules);
         if (gate.passed()) {
             String waiver = GateSnapshot.PASS_WITH_WAIVER.equals(gate.result()) ? "（含规则级豁免）" : "";
+            if (buckets.hasSkipped()) {
+                // 跳过 ≠ 通过：SKIPPED 是「本轮未启用、没被评估」，写进「全部通过」就是把未检说成已检。
+                // 只在真有跳过时换句，全 PASS 场景保留原句（既有夹具与对外文案都不受噪音影响）。
+                return AdmissionItem.pass(code, name,
+                        buckets.passedLikeCount() + " 条通过 · " + buckets.skippedCount()
+                                + " 条跳过（未启用），质量门 PASS" + waiver);
+            }
             return AdmissionItem.pass(code, name,
                     rules.size() + " 条规则全部通过" + waiver + "，质量门快照 #" + gate.snapshotId());
         }
-        List<GateSnapshot.GateRuleResult> failed = gate.failedRules();
+        // 失败明细同样只列 FAIL：{@code gate.failedRules()} 仍按 {@code !passed()} 过滤，会把
+        // SKIPPED 一起端出来（「未启用」被写成「未通过」），所以这里走同一个分桶真值表。
+        List<GateSnapshot.GateRuleResult> failed = buckets.failedRules();
         List<String> detail = failed.stream()
                 .map(rule -> rule.code() + "=" + nvl(rule.actual()) + "（要求 " + nvl(rule.threshold()) + "）")
                 .toList();

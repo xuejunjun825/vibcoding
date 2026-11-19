@@ -452,6 +452,14 @@ export interface FlowQualityGateSegment {
   reportId?: number | null
   computedAt?: string | null
   failedRules?: FlowGateRuleLine[]
+  /** r33：SKIPPED 规则单列（旧快照没有该字段，回放按 status 从 failedRules 分桶） */
+  skippedRules?: FlowGateRuleLine[]
+  /** r33 五计数：旧快照缺字段为 undefined/null，前端只按 status 分桶、不依赖计数 */
+  total?: number | null
+  passedCount?: number | null
+  waivedCount?: number | null
+  failedCount?: number | null
+  skippedCount?: number | null
   waivers?: Array<Record<string, unknown>>
 }
 

@@ -382,12 +382,19 @@ public final class DemoFixture {
      * 走真实动作链 submit → 会签 → review_start → 会签 把它推回 {@code POOLED}。种子里的审批流水
      * 因此是「真跑出来的」，而不是直插 {@code wf_*} 拼出来的假夹具；净状态与 r31 之前一致
      * （POOLED 的 BUS 仍是可拆解的父需求），下游门禁的前置条件不变。</p>
+     *
+     * <p>r33：{@code DEMO-R-02} 的人天由 8 改为 5，与两个子 RD（{@code DEMO-R-03}=3、
+     * {@code DEMO-R-04}=2）之和一致。<b>种子里父 PDR 的人天必须等于子项之和</b>：Tx3 对
+     * {@code DEMO-R-04} 调 {@code RequirementService.deliver} 会触发
+     * {@code refreshParentRollup} 把父需求滚成 3+2=5，而 Tx2 的工时评估单是按建单那一刻的
+     * 8 天批的 —— 5 与 8 相差 37.5%，超过 {@code WbsEstimateService.STALE_THRESHOLD}（20%），
+     * 演示卡片的评估单因此变 {@code STALE}（access a7 R2 红）。改成 5 后 rollup 不变、偏差 0。</p>
      */
     private static final String[][] REQUIREMENTS = {
             {"DEMO-R-01", "BUS", "", "ORD", "supplyOrg", "po1", "", "", "采购订单协同（业务提报）",
                     "P1", "SUBMITTED", "20", "-12", "8", "1"},
             {"DEMO-R-02", "PDR", "DEMO-R-01", "ORD", "supplyOrg", "pm", "po1", "",
-                    "采购订单移动审批", "P1", "SCHEDULED", "8", "-10", "4", "1"},
+                    "采购订单移动审批", "P1", "SCHEDULED", "5", "-10", "4", "1"},
             {"DEMO-R-03", "RD", "DEMO-R-02", "ORD", "supplyOrg", "pm", "dev1", "",
                     "订单审批接口", "P1", "IN_DEV", "3", "-6", "3", "1"},
             {"DEMO-R-04", "RD", "DEMO-R-02", "ORD", "supplyOrg", "pm", "dev2", "",
