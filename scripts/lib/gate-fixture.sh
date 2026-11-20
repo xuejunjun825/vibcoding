@@ -121,10 +121,10 @@ gate_fixture_problems() {
         p+=("DEMO-R-02 已通过工时评估单 ${est} 张（期望 1）")
     fi
 
-    # 6) DEMO-R-04 必须回到 DEMO-REL-1（rfv 的 S7 会把版本改来改去）。
+    # 6) DEMO-R-04 必须在 DEMO-REL-1 上（r35 起 S7 只自造夹具，这条是「从未被移动」的证据）。
     rel="$(_gate_fixture_count requirement "tenant_id=${tid} AND code='DEMO-R-04' AND release_id=(SELECT id FROM \`release\` WHERE tenant_id=${tid} AND code='DEMO-REL-1')")"
     if [[ "$rel" != "1" ]]; then
-        p+=("DEMO-R-04 未回到 DEMO-REL-1（命中 ${rel} 行，期望 1）")
+        p+=("DEMO-R-04 不在 DEMO-REL-1（命中 ${rel} 行，期望 1）")
     fi
 
     if (( ${#p[@]} > 0 )); then

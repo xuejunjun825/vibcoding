@@ -1,0 +1,7 @@
+{
+  "reqId": "req-35",
+  "runId": "tf-mwoc52k1-22c0au",
+  "title": "把 release-flow-verify.sh 的 S7 演示链从「依赖种子 DEMO-R-04」改成「自造等价 RD 夹具」，让这道门禁完全不依赖种子演示数",
+  "mode": "tech",
+  "createdAt": 1795140225184
+}
