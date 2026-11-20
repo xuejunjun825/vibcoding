@@ -172,16 +172,19 @@ TAGLEFT="0"
 if [[ -n "$GATE_TAG" ]]; then
     TAGLEFT="$(db_count requirement "tenant_id=${TID2} AND title LIKE '%${GATE_TAG}%'")"
 fi
-if [[ "$NONFIX" == "0" && "$TAGLEFT" == "0" ]]; then
-    hit "收尾：非夹具需求 0 条、本轮 tag 残留 0 条"
+# r35：S7 改为自造夹具后，租户下不得再留任何 S7- 前缀的需求（种子数据里没有这个前缀）。
+S7LEFT="$(db_count requirement "tenant_id=${TID2} AND title LIKE '%S7-%'")"
+if [[ "$NONFIX" == "0" && "$TAGLEFT" == "0" && "$S7LEFT" == "0" ]]; then
+    hit "收尾：非夹具需求 0 条、本轮 tag 残留 0 条、S7- 痕迹 0 条"
 else
-    miss "收尾残留：非夹具 ${NONFIX} 条 / 本 tag ${TAGLEFT} 条" "两种顺序跑完必须回到同一张干净基线；残留说明某一步的 teardown 没跑或失败被吞"
+    miss "收尾残留：非夹具 ${NONFIX} 条 / 本 tag ${TAGLEFT} 条 / S7- ${S7LEFT} 条" \
+        "两种顺序跑完必须回到同一张干净基线；残留说明某一步的 teardown 没跑或失败被吞（S7 夹具由 s7_reset 自己清）"
 fi
 
 R02="$(db_q "SELECT CONCAT(FORMAT(estimate_days,2),'|',(SELECT COUNT(*) FROM wf_instance w WHERE w.tenant_id=${TID2} AND w.biz_type='WBS_ESTIMATE' AND w.biz_id=requirement.id AND w.status='APPROVED')) FROM requirement WHERE tenant_id=${TID2} AND code='DEMO-R-02'" 2>/dev/null | head -n1)"
 R04="$(db_q "SELECT COUNT(*) FROM requirement r JOIN \`release\` v ON v.id=r.release_id WHERE r.tenant_id=${TID2} AND r.code='DEMO-R-04' AND v.code='DEMO-REL-1'" 2>/dev/null | head -n1)"
 if [[ "$R02" == "5.00|1" && "$R04" == "1" ]]; then
-    hit "收尾：DEMO-R-02 汇总 5.00 + 评估单 APPROVED、DEMO-R-04 回 DEMO-REL-1"
+    hit "收尾：DEMO-R-02 汇总 5.00 + 评估单 APPROVED、DEMO-R-04 仍在 DEMO-REL-1"
 else
     miss "收尾演示不变量漂移：R-02='${R02:-<缺失>}'（期望 5.00|1）R-04='${R04:-<缺失>}'（期望 1）" \
         "门禁夹具必须挂在自建父链上；挂到种子会把 DEMO-R-02 的汇总推高并让评估单 STALE"
