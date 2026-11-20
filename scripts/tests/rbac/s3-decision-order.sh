@@ -37,6 +37,9 @@ report_counts() {
 # 探针 = 空 body 打真实写端点：被拦截是 403，放行则落到参数校验 400——
 # 「放行」的证据不需要真的建出测试计划，段脚本可反复跑而不脏库。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+# 造名走 _lib.sh 的 rbac_run_tag（全数字 tag，落进 demo-reset 的停用正则），清理走 rbac_purge_users。
+# 一次运行只用一把 tag：本段只造 1 个临时用户、不造角色，所以不需要 rbac_purge_roles。
+RBAC_RUN_TAG="$(rbac_run_tag)"
 PROBE_METHOD="${RBAC_PROBE_METHOD}"
 PROBE_PATH="${RBAC_PROBE_PATH}"
 PROBE_BODY="${RBAC_PROBE_BODY}"
@@ -44,14 +47,15 @@ PAGE_CODE="${RBAC_PAGE}"
 ACTION_CODE="${RBAC_ACTION}"
 
 ADMIN_LOGIN=1
-TMP_USER=""
+TMP_USER="s3u${RBAC_RUN_TAG}"
 QA_ID=""
 DEV_ID=""
 QA_ORIG=""
 DEV_ORIG=""
 
 cleanup() {
-    # 失败路径也必须把授权与临时用户还原，否则下一次运行会踩到自己的脏数据
+    # 失败路径也必须把授权与临时用户还原，否则下一次运行会踩到自己的脏数据。
+    # 「还原被改的授权」留在段内：s3 改的是 QA/DEV 两个内置角色的格子，那是本段独有的口径。
     if [[ -n "${QA_ID}" && -n "${QA_ORIG}" ]]; then
         login_as admin Admin@12345 >/dev/null 2>&1 || true
         put_grants "$QA_ID" "$QA_ORIG" >/dev/null 2>&1 || true
@@ -60,20 +64,23 @@ cleanup() {
         login_as admin Admin@12345 >/dev/null 2>&1 || true
         put_grants "$DEV_ID" "$DEV_ORIG" >/dev/null 2>&1 || true
     fi
-    if [[ -n "${TMP_USER}" ]]; then
-        local uid
-        uid="$(api_call GET "/api/req/admin/users?keyword=${TMP_USER}&size=5" >/dev/null; printf '%s' "$HTTP_BODY" | jq -r --arg u "$TMP_USER" '.items[]? | select(.username == $u) | .id' | head -n1)"
-        if [[ -n "${uid}" && "${uid}" != "null" ]]; then
-            api_call PATCH "/api/req/admin/users/${uid}/status" '{"status":"DISABLED"}' >/dev/null 2>&1 || true
-        fi
-    fi
+    # 临时用户由 _lib.sh 的原语**删掉**（不是停用）：停用只会留下 s3u<tag> 这种 DISABLED 残号，
+    # 而本需求的收尾断言要求 s3 前缀残留 0 条。按前缀（s3）而不是本轮 tag 删，历史残留一并清掉。
+    rbac_purge_users s3 >/dev/null \
+        || { err "s3 cleanup: 删临时用户失败（DB 不可读或写被拒）：先 make platform-up"; exit 1; }
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 log "s3：三序判定（真实登录 + 真实端点，探针 ${PROBE_METHOD} ${PROBE_PATH}）"
 
 login_as admin Admin@12345 || die "admin 登录失败：先 make platform-up && make platform-seed"
 ADMIN_LOGIN=0
+# 起跑自愈：上一轮被 kill -9（EXIT trap 不执行）或 QA 用同一个 RBAC_RUN_TAG 连跑两次时，
+# 同名的 s3u<tag> 还在库里——不清掉的话第 5 条建号直接 409，随后 login_as 拿到 403 USER_DISABLED，
+# 报错点离真因隔两步（这正是 r36 要消灭的症状）。s3 前缀里没有种子账号，按前缀删是安全的。
+rbac_purge_users s3 >/dev/null \
+    || { err "s3: 起跑清理临时用户失败：先 make platform-up"; report_counts; exit 1; }
 QA_ID="$(role_id_of QA)"
 DEV_ID="$(role_id_of DEV)"
 [[ -n "${QA_ID}" && -n "${DEV_ID}" ]] || die "取不到内置角色 QA/DEV 的 id（GET /admin/roles 需要 T4 已上线）"
@@ -150,7 +157,6 @@ login_as admin Admin@12345 >/dev/null
 DEV_DENY="$(set_cell "$DEV_ORIG" MENU "$PAGE_CODE" DENY)"
 put_grants "$DEV_ID" "$DEV_DENY" >/dev/null
 put_grants "$QA_ID" "$QA_ALLOW" >/dev/null      # QA = ALLOW，DEV = DENY ⇒ 并集 DENY
-TMP_USER="s3u$RANDOM"
 CREATED="$(api_call POST /api/req/admin/users "{\"username\":\"${TMP_USER}\",\"password\":\"Passw0rd!\",\"name\":\"s3 probe\",\"roles\":[\"QA\",\"DEV\"]}"; printf '%s' "${HTTP_CODE:-000}")"
 if [[ "${CREATED}" == "200" || "${CREATED}" == "201" ]]; then
     login_as "$TMP_USER" 'Passw0rd!' >/dev/null

@@ -1,0 +1,7 @@
+{
+  "reqId": "req-36",
+  "runId": "tf-mwojp33j-jol2iv",
+  "title": "修 rbac-verify 的 s7 段幂等缺陷：s7-negative-nine.sh 用 $RANDOM 生成临时用户（s7a$RANDOM / s7b$R",
+  "mode": "tech",
+  "createdAt": 1795152916359
+}

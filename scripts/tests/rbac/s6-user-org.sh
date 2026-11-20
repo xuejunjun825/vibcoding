@@ -7,6 +7,10 @@
 set -uo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+# 造名走 _lib.sh 的 rbac_run_tag（全数字 tag，落进 demo-reset 的停用正则），清理走 rbac_purge_users。
+# 一次运行只用一把 tag：用户与组织必须同 tag（别调两次 rbac_run_tag，那样两次的随机尾巴不同）。
+# 本段只造用户不造角色，所以不需要 rbac_purge_roles；组织没有段名前缀可复用，仍按 ORG_ID 删。
+RBAC_RUN_TAG="$(rbac_run_tag)"
 
 TOTAL=0
 PASS=0
@@ -30,24 +34,31 @@ report_counts() {
     fi
 }
 
-TMP_USER="s6u$RANDOM"
-ORG_NAME="s6组织$RANDOM"
+TMP_USER="s6u${RBAC_RUN_TAG}"
+ORG_NAME="s6组织${RBAC_RUN_TAG}"
 ORG_ID=""
 USER_ID=""
 cleanup() {
-    admin_login >/dev/null 2>&1 || true
-    if [[ -n "${USER_ID}" ]]; then
-        api_call PATCH "/api/req/admin/users/${USER_ID}/status" '{"status":"DISABLED"}' >/dev/null 2>&1 || true
-    fi
+    # 顺序是硬约束：先删用户再删组织。组织删除对「里面还有人」是 409，反过来的话失败路径会留下
+    # 一个 s6组织<tag> 的孤儿组织——而组织没有段名前缀这一层可复用的身份，只能靠 ORG_ID 这一句删。
+    rbac_purge_users s6 >/dev/null \
+        || { err "s6 cleanup: 删临时用户失败（DB 不可读或写被拒）：先 make platform-up"; exit 1; }
     if [[ -n "${ORG_ID}" ]]; then
+        admin_login >/dev/null 2>&1 || true
         api_call DELETE "/api/req/admin/orgs/${ORG_ID}" >/dev/null 2>&1 || true
     fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 log "s6：人员角色/域差集 + 组织删除 + 人员迁移"
 
 admin_login || die "admin 登录失败：先 make platform-up && make platform-seed"
+
+# 起跑自愈：上一轮被 kill -9（EXIT trap 不执行）或 QA 用同一个 RBAC_RUN_TAG 连跑两次时，
+# 同名的 s6u<tag> 还在库里——不清掉的话建号 409、USER_ID 空，报错点跑到「POST /admin/users 需要 T4」。
+rbac_purge_users s6 >/dev/null \
+    || { err "s6: 起跑清理临时用户失败：先 make platform-up"; report_counts; exit 1; }
 
 ROOT_ORG="$(api_call GET /api/req/admin/orgs >/dev/null; printf '%s' "$HTTP_BODY" | jq -r '.[0].id // empty')"
 [[ -n "${ROOT_ORG}" ]] || ROOT_ORG="$(printf '%s' "$HTTP_BODY" | jq -r '.items[0].id // empty')"
