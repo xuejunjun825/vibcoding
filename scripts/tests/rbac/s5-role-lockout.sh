@@ -29,27 +29,35 @@ report_counts() {
     fi
 }
 
-CODE="S5PROBE_$RANDOM"
+RBAC_RUN_TAG="$(rbac_run_tag)"   # 全数字 tag：同 tag 重跑可被 RBAC_RUN_TAG 钉住（QA 撞名复现）
+CODE="S5PROBE_${RBAC_RUN_TAG}"
 ROLE_ID=""
-TMP_USER="s5u$RANDOM"
+TMP_USER="s5u${RBAC_RUN_TAG}"
 user_created=0
 cleanup() {
-    admin_login >/dev/null 2>&1 || true
-    if [[ -n "${ROLE_ID}" ]]; then
-        api_call PATCH "/api/req/admin/roles/${ROLE_ID}/status" '{"status":"ACTIVE"}' >/dev/null 2>&1 || true
-        api_call DELETE "/api/req/admin/roles/${ROLE_ID}" >/dev/null 2>&1 || true
-    fi
-    if (( user_created )); then
-        local uid
-        uid="$(user_id_of "$TMP_USER")"
-        [[ -n "${uid}" && "${uid}" != "null" ]] && api_call PATCH "/api/req/admin/users/${uid}/status" '{"status":"DISABLED"}' >/dev/null 2>&1
-    fi
+    # 顺序是硬约束：先删用户（连带 sys_user_role），再删角色。反过来的话用户还挂着 S5PROBE_*，
+    # DELETE /admin/roles 必然 409 ROLE_IN_USE —— 老版 s5 的 cleanup 就是这么每轮漏一条角色。
+    admin_login >/dev/null 2>&1 \
+        || { err "s5 cleanup: admin 登录失败：先 make platform-up && make platform-seed"; exit 1; }
+    rbac_purge_users s5 >/dev/null \
+        || { err "s5 cleanup: 删临时用户失败（DB 不可读或写被拒）：先 make platform-up"; exit 1; }
+    rbac_purge_roles S5 >/dev/null \
+        || { err "s5 cleanup: 删临时角色失败（409=还有用户挂着 S5*，说明用户没删干净）"; exit 1; }
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 log "s5：角色 CRUD 与防锁死（自定义角色 ${CODE}）"
 
 admin_login || die "admin 登录失败：先 make platform-up && make platform-seed"
+
+# 起跑自愈：上一轮被 kill -9 跳过 EXIT trap、或 QA 用同一个 RBAC_RUN_TAG 连跑两次时，
+# 同名的 S5PROBE_* 还在库里 —— 不清掉的话第 1 条断言就撞 409 ROLE_CODE_TAKEN，
+# 报错点跑到「创建自定义角色失败」，真因（上一轮残留）反而看不见。
+rbac_purge_users s5 >/dev/null \
+    || { err "s5: 起跑清理临时用户失败：先 make platform-up"; report_counts; exit 1; }
+rbac_purge_roles S5 >/dev/null \
+    || { err "s5: 起跑清理临时角色失败：库里有用户挂着 S5* 或服务不可达"; report_counts; exit 1; }
 
 # ---------------------------------------------------------------- 1. 创建
 api_call POST /api/req/admin/roles "{\"code\":\"${CODE}\",\"name\":\"s5 探针角色\",\"description\":\"门禁脚本创建\"}" >/dev/null
@@ -85,7 +93,7 @@ else
 fi
 
 # ---------------------------------------------------------------- 4. code 不可变
-api_call PUT "/api/req/admin/roles/${ROLE_ID}" "{\"code\":\"S5CHANGED_${RANDOM}\",\"name\":\"x\"}" >/dev/null
+api_call PUT "/api/req/admin/roles/${ROLE_ID}" "{\"code\":\"S5CHANGED_${RBAC_RUN_TAG}\",\"name\":\"x\"}" >/dev/null
 if [[ "${HTTP_CODE:-000}" == "400" ]]; then
     pass "提交新 code ⇒ 400（code 不可变）"
 else

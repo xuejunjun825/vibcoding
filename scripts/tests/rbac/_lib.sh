@@ -7,6 +7,12 @@
 #
 # 可覆盖（跨段复用同一探针口径）：RBAC_PROBE_METHOD / RBAC_PROBE_PATH / RBAC_PROBE_BODY
 #                                    RBAC_PAGE / RBAC_ACTION
+#
+# r36 起本文件同时是「段级临时主体的造名与清理」的唯一实现：
+#   rbac_run_tag / rbac_purge_users <prefix> / rbac_purge_roles <prefix>（见文件末尾）。
+# 段脚本只保留自己那半截——还原被改的授权、删组织——不再各写一份造名与清理的副本。
+# 收敛的理由是一次真实事故：五份近似 cleanup、造名靠 $RANDOM，s7 撞上历史同名 DISABLED 号后
+# 建号 409 被吞、随后 login_as 以 403 USER_DISABLED die（报错点离真因隔两步），并留下 527 条残号。
 
 RBAC_PROBE_METHOD="${RBAC_PROBE_METHOD:-POST}"
 RBAC_PROBE_PATH="${RBAC_PROBE_PATH:-/api/deliver/test-plans}"
@@ -131,3 +137,81 @@ audit_count() { # audit_count <action 前缀> [biz_type]
     [[ -n "${2:-}" ]] && where="${where} AND biz_type = '${2}'"
     db_q "SELECT COUNT(*) FROM audit_log WHERE ${where}" | head -n1
 }
+
+# ===================== r36：段级临时主体的造名与清理（s3~s8 唯一实现） =====================
+# 依赖方向不变：lib.sh → _lib.sh → 段 → rbac-verify.sh → gate-order-verify.sh。
+# 这里只回答两个问题：名字怎么起（跨轮不撞名）、东西怎么删干净（删不掉要红）。
+# 各段仍自己负责「还原被改的授权」「删组织」——那两件事改的格子/对象各不相同，收不到这一层。
+
+rbac_run_tag() { # rbac_run_tag → 本次运行的全数字 tag（RBAC_RUN_TAG 可覆盖，QA 用它造撞名复现）
+    # 全数字不是洁癖：platform-demo-reset.sh 的停用兜底正则
+    #   ^(s[0-9]+[a-z]*u|t[0-9]+[a-z]*|probe)[0-9]*$
+    # 只在 tag 为纯数字时才能匹配 sNu<tag>。也就是说 trap 万一被 kill -9 跳过（EXIT 不执行），
+    # 还能靠 reset 把这些号停用；带字母的 tag 则两边都救不了（历史 s7a*/s7b* 就是这么漏的）。
+    printf '%s' "${RBAC_RUN_TAG:-$(date +%m%d%H%M%S)$$$RANDOM}"
+}
+
+rbac_purge_users() { # rbac_purge_users <prefix> → stdout 删除的用户行数；残留 0 条才 return 0
+    # 用户没有 DELETE API（H5 明确不做），所以直连 DB —— 与 s5 第 10 条断言先断关系行、
+    # platform-verify 删种子号的写法同源。按**段族前缀**（s3/s5/s6/s7/s8）而不是本轮 tag 删：
+    # 否则 527 条历史残留永远清不掉，「跑完 0 条」这条收尾断言就立不住。
+    local prefix="$1" tid before after
+    [[ -n "${prefix}" ]] || { err "rbac_purge_users: 缺前缀"; return 1; }
+    tid="$(db_q "SELECT id FROM sys_tenant WHERE code = '${PLATFORM_TENANT:-t1}'" | head -n1)"
+    [[ -n "${tid}" ]] || { err "rbac_purge_users: 取不到租户 ${PLATFORM_TENANT:-t1} 的 id：先 make platform-up"; return 1; }
+    before="$(db_q "SELECT COUNT(*) FROM sys_user WHERE tenant_id = ${tid} AND username REGEXP '^${prefix}[a-z0-9]*$'" | head -n1)"
+    [[ -n "${before}" ]] || { err "rbac_purge_users: 数不到 ${prefix} 前缀的临时账号：DB 不可读"; return 1; }
+    # 顺序是硬约束：sys_user_role / sys_user_domain 都是 (user_id, x) 主键、无外键指向 sys_user，
+    # 先删主体就会留下点不到人的孤儿行（审计与角色用户数都会跟着错）。
+    db_q "DELETE ur FROM sys_user_role ur JOIN sys_user u
+            ON u.id = ur.user_id AND u.tenant_id = ur.tenant_id
+          WHERE u.tenant_id = ${tid} AND u.username REGEXP '^${prefix}[a-z0-9]*$'" >/dev/null
+    db_q "DELETE ud FROM sys_user_domain ud JOIN sys_user u
+            ON u.id = ud.user_id AND u.tenant_id = ud.tenant_id
+          WHERE u.tenant_id = ${tid} AND u.username REGEXP '^${prefix}[a-z0-9]*$'" >/dev/null
+    db_q "DELETE FROM sys_user WHERE tenant_id = ${tid} AND username REGEXP '^${prefix}[a-z0-9]*$'" >/dev/null
+    # 删完必须复核：db_q 把 mysql 的 stderr 丢了，只看返回码会把「连接断了」当成功。
+    after="$(db_q "SELECT COUNT(*) FROM sys_user WHERE tenant_id = ${tid} AND username REGEXP '^${prefix}[a-z0-9]*$'" | head -n1)"
+    if [[ "${after}" != "0" ]]; then
+        err "rbac_purge_users: 前缀 ${prefix} 仍残留 ${after:-?} 个临时账号（DB 读不到或 DELETE 被拒）"
+        printf '%s' "${before:-0}"
+        return 1
+    fi
+    # after == 0，所以「删掉的条数」就是 before（不写算术式：前导零会被 $(( )) 当八进制）。
+    printf '%s' "${before}"
+}
+
+rbac_purge_roles() { # rbac_purge_roles <prefix> → stdout 删除的角色数；残留 0 条才 return 0
+    # 角色有 DELETE /admin/roles/{id}，走 API 而不是直连：删角色要级联 sys_role_permission 并写审计，
+    # 只有 RoleAdminService 那一份实现保证得了。前置条件（服务端口径）只有两条：非内置 + 没有用户挂着。
+    # 所以调用方必须**先 rbac_purge_users 再这里**——顺序反了就是 409 ROLE_IN_USE（本次事故的第二个根因）。
+    local prefix="$1" id n=0 left
+    [[ -n "${prefix}" ]] || { err "rbac_purge_roles: 缺前缀"; return 1; }
+    admin_login >/dev/null || { err "rbac_purge_roles: admin 登录失败：先 make platform-up && make platform-seed"; return 1; }
+    api_call GET /api/req/admin/roles >/dev/null
+    if [[ "${HTTP_CODE:-000}" != "200" ]]; then
+        err "rbac_purge_roles: GET /admin/roles 回 ${HTTP_CODE:-000}，枚举不到角色"
+        return 1
+    fi
+    for id in $(printf '%s' "$HTTP_BODY" | jq -r --arg p "$prefix" '.[]? | select((.code // "") | startswith($p)) | .id' 2>/dev/null); do
+        [[ -n "${id}" && "${id}" != "null" ]] || continue
+        api_call DELETE "/api/req/admin/roles/${id}" >/dev/null
+        case "${HTTP_CODE:-000}" in
+            200|204|404) n=$((n + 1)) ;;
+            *)  err "rbac_purge_roles: DELETE 角色 ${id} 回 ${HTTP_CODE:-000}（409=还有用户挂着它：先 rbac_purge_users 再删角色）"
+                printf '%s' "${n}"
+                return 1 ;;
+        esac
+    done
+    left="$(db_q "SELECT COUNT(*) FROM sys_role WHERE code LIKE '${prefix}%'" | head -n1)"
+    if [[ "${left}" != "0" ]]; then
+        err "rbac_purge_roles: 前缀 ${prefix} 仍残留 ${left:-?} 个角色"
+        printf '%s' "${n}"
+        return 1
+    fi
+    printf '%s' "${n}"
+}
+
+# 同一进程里所有函数/段共用一把 tag（段脚本仍会显式调一次 rbac_run_tag 声明依赖，
+# 也便于 gate-order 的静态断言 grep 到它）；环境变量 RBAC_RUN_TAG 优先，供 QA 固定 tag 复现撞名。
+RBAC_RUN_TAG="$(rbac_run_tag)"

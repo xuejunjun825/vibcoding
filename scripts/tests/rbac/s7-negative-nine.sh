@@ -30,30 +30,68 @@ report_counts() {
     fi
 }
 
-TMP_ROLE="S7ROLE_$RANDOM"
+RBAC_RUN_TAG="$(rbac_run_tag)"   # 全数字 tag：同 tag 重跑可被 RBAC_RUN_TAG 钉住（QA 撞名复现）
+TMP_ROLE="S7ROLE_${RBAC_RUN_TAG}"
 TMP_ROLE_ID=""
-TMP_USER1="s7a$RANDOM"
-TMP_USER2="s7b$RANDOM"
+# r36 之前这里是「s7a + 随机数」这一套造名：既撞不了名也清不掉（cleanup 只停用不删，实测残留 168 条），
+# 而且那种名字连 demo-reset 的停用兜底 REGEXP（^(s[0-9]+[a-z]*u|...)[0-9]*$）都匹配不上。
+TMP_USER1="s7u1${RBAC_RUN_TAG}"
+TMP_USER2="s7u2${RBAC_RUN_TAG}"
 QA_ORIG=""
 DEV_ORIG=""
+BIZ_ORIG=""      # 在 cleanup 之前先声明：set -u 下 trap 可能在赋值前就触发
+
+# 还原被本段改脏的授权格——这半截留在段内（清理原语只管删主体），三套快照各按各的码还原。
+restore_role_grants() { # restore_role_grants <roleCode> <snapshot>：空/非 168 格视为没取到，不写库
+    local code="$1" snap="$2" id rc
+    [[ -n "${snap}" ]] || return 0
+    [[ "$(printf '%s' "${snap}" | jq 'if type=="array" then length else 0 end' 2>/dev/null)" == "168" ]] || return 0
+    id="$(role_id_of "${code}")"
+    [[ -n "${id}" && "${id}" != "null" ]] || { err "s7 cleanup: 找不到角色 ${code}，授权还原不了"; return 1; }
+    rc="$(put_grants "${id}" "${snap}")"
+    [[ "${rc}" == "200" ]] || { err "s7 cleanup: 还原 ${code} 授权失败（HTTP ${rc}）"; return 1; }
+}
+
+# r36 的第二个根因在这里：旧 cleanup 是「先删角色、后停用户」。而 TMP_USER1 建号时就挂着 S7ROLE_<tag>，
+# 那一刻 DELETE /admin/roles/{id} 必然命中 RoleAdminService 的 ROLE_IN_USE 409，又被 || true 吞掉——
+# 于是每跑一轮就漏下一条自定义角色。角色删除的前置条件只有两条（非内置 + 用户数 0），不要求 ACTIVE。
 cleanup() {
-    admin_login >/dev/null 2>&1 || true
-    if [[ -n "${QA_ORIG}" ]]; then put_grants "$(role_id_of QA)" "$QA_ORIG" >/dev/null 2>&1 || true; fi
-    if [[ -n "${DEV_ORIG}" ]]; then put_grants "$(role_id_of DEV)" "$DEV_ORIG" >/dev/null 2>&1 || true; fi
-    if [[ -n "${TMP_ROLE_ID}" ]]; then
-        api_call PATCH "/api/req/admin/roles/${TMP_ROLE_ID}/status" '{"status":"ACTIVE"}' >/dev/null 2>&1 || true
-        api_call DELETE "/api/req/admin/roles/${TMP_ROLE_ID}" >/dev/null 2>&1 || true
-    fi
-    for u in "$TMP_USER1" "$TMP_USER2"; do
-        local uid; uid="$(user_id_of "$u")"
-        [[ -n "${uid}" && "${uid}" != "null" ]] && api_call PATCH "/api/req/admin/users/${uid}/status" '{"status":"DISABLED"}' >/dev/null 2>&1
-    done
+    admin_login >/dev/null 2>&1 \
+        || { err "s7 cleanup: admin 登录失败：先 make platform-up && make platform-seed"; exit 1; }
+    restore_role_grants QA "${QA_ORIG}" \
+        || { err "s7 cleanup: 还原 QA 授权失败：授权可能停在 DENY"; exit 1; }
+    restore_role_grants DEV "${DEV_ORIG}" \
+        || { err "s7 cleanup: 还原 DEV 授权失败：授权可能停在 DENY"; exit 1; }
+    restore_role_grants BUSINESS "${BIZ_ORIG}" \
+        || { err "s7 cleanup: 还原 BUSINESS 授权失败：授权可能停在 DENY"; exit 1; }
+    rbac_purge_users s7 >/dev/null \
+        || { err "s7 cleanup: 删临时用户失败（DB 不可读或写被拒）：先 make platform-up"; exit 1; }
+    rbac_purge_roles S7 >/dev/null \
+        || { err "s7 cleanup: 删临时角色失败（409=还有用户挂着 S7ROLE_*，说明用户没删干净）"; exit 1; }
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+# 建号/建角色失败必须当场红：r36 之前 409 被 >/dev/null 吞掉，随后 login_as 以 403 USER_DISABLED
+# 直接 die，报错点离真因隔了两步（历史事故的全部可见症状就是这一条）。
+require_created() { # require_created <做了什么> <HTTP 码>：非 200/201 → err + report_counts + exit 1
+    local what="$1" code="${2:-000}"
+    [[ "${code}" == "200" || "${code}" == "201" ]] && return 0
+    err "${what} 失败：HTTP ${code}，响应 ${HTTP_BODY:0:120}"
+    report_counts
+    exit 1
+}
 
 log "s7：AC-18 九例负向"
 
 admin_login || die "admin 登录失败：先 make platform-up && make platform-seed"
+
+# 起跑自愈：上一轮被 kill -9（EXIT trap 不执行）或 QA 固定 RBAC_RUN_TAG 连跑两次时，同名的
+# s7u1*/s7u2*/S7ROLE_* 会让下面建角色/建号直接 409；同时这把 168 条历史 s7 残留一次性清掉。
+rbac_purge_users s7 >/dev/null \
+    || { err "s7: 起跑清理临时用户失败（DB 不可读或写被拒）：先 make platform-up"; report_counts; exit 1; }
+rbac_purge_roles S7 >/dev/null \
+    || { err "s7: 起跑清理临时角色失败（库里有用户挂着 S7ROLE_* 或服务不可达）"; report_counts; exit 1; }
 ADMIN_ID="$(role_id_of PLATFORM_ADMIN)"
 QA_ID="$(role_id_of QA)"
 DEV_ID="$(role_id_of DEV)"
@@ -101,11 +139,13 @@ fi
 
 # ---------------------------------------------------------------- 4. 停用角色后失权
 api_call POST /api/req/admin/roles "{\"code\":\"${TMP_ROLE}\",\"name\":\"s7 停用探针\"}" >/dev/null
+require_created "建临时角色 ${TMP_ROLE}" "${HTTP_CODE:-000}"
 TMP_ROLE_ID="$(printf '%s' "$HTTP_BODY" | jq -r '.id // empty')"
 ALLOW_SET="$(set_cell "$QA_ORIG" MENU "$RBAC_PAGE" ALLOW)"
 ALLOW_SET="$(set_cell "$ALLOW_SET" ACTION "$RBAC_ACTION" ALLOW)"
 [[ -n "${TMP_ROLE_ID}" ]] && put_grants "$TMP_ROLE_ID" "$ALLOW_SET" >/dev/null
 api_call POST /api/req/admin/users "{\"username\":\"${TMP_USER1}\",\"password\":\"Passw0rd!\",\"name\":\"s7 a\",\"roles\":[\"${TMP_ROLE}\"]}" >/dev/null
+require_created "建临时用户 ${TMP_USER1}（角色 ${TMP_ROLE}）" "${HTTP_CODE:-000}"
 if [[ -n "${TMP_ROLE_ID}" ]]; then
     login_as "$TMP_USER1" 'Passw0rd!' >/dev/null
     P4A="$(probe_settle allow)"
@@ -129,6 +169,7 @@ admin_login >/dev/null
 put_grants "$QA_ID" "$ALLOW_SET" >/dev/null
 put_grants "$DEV_ID" "$(set_cell "$DEV_ORIG" MENU "$RBAC_PAGE" DENY)" >/dev/null
 api_call POST /api/req/admin/users "{\"username\":\"${TMP_USER2}\",\"password\":\"Passw0rd!\",\"name\":\"s7 b\",\"roles\":[\"QA\",\"DEV\"]}" >/dev/null
+require_created "建临时用户 ${TMP_USER2}（角色 QA+DEV）" "${HTTP_CODE:-000}"
 login_as "$TMP_USER2" 'Passw0rd!' >/dev/null
 C5="$(probe_settle 403)"
 if [[ "${C5}" == "403" ]]; then

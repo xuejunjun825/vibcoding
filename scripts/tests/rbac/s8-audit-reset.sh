@@ -29,20 +29,65 @@ report_counts() {
     fi
 }
 
-TMP_ROLE="S8ROLE_$RANDOM"
+RBAC_RUN_TAG="$(rbac_run_tag)"   # 全数字 tag：同 tag 重跑可被 RBAC_RUN_TAG 钉住（QA 撞名复现）
+TMP_ROLE="S8ROLE_${RBAC_RUN_TAG}"
 ROLE_ID=""
-TMP_USER="s8u$RANDOM"
+TMP_USER="s8u${RBAC_RUN_TAG}"
+ADMIN_ID=""     # 在 cleanup 之前先声明：set -u 下 trap 可能在赋值前就触发
+ADMIN_ORIG=""
+ADMIN_MUTATED=0 # 只要本段把 admin 的占位格子改脏了就是 1；reset 成功或 cleanup 还原后归 0
+# r36 之前本段完全没有 cleanup：它自己会调两次 /internal/demo-reset，reset 把自定义角色删掉、
+# 把临时号**停用**而不是删除，于是每跑一轮就多一个 DISABLED 的 s8u<tag>（实测 85 条）。
+# 补上 trap 之后整段跑完库面干净——这一点正是 gate-order 里 rbac 必须排在序列末尾的原因。
+cleanup() {
+    admin_login >/dev/null 2>&1 \
+        || { err "s8 cleanup: admin 登录失败：先 make platform-up && make platform-seed"; exit 1; }
+    # 「还原授权」这半截留在段内（清理原语只管删主体）：本段把 PLATFORM_ADMIN 的 audit:view 改成
+    # DENY 再靠 /internal/demo-reset 还原；若中途退出，reset 没跑到，这一格就留在 DENY 上。
+    # 只在本段确实改脏过（ADMIN_MUTATED=1）时补回起跑快照——否则会反过来把「起跑前就脏」的状态
+    # 锁死在库里，把一次意外变成永久漂移。没差异时不写库（服务端 no-diff 不记审计）。
+    if (( ADMIN_MUTATED )) && [[ -n "${ADMIN_ID}" && -n "${ADMIN_ORIG}" ]] \
+        && [[ "$(printf '%s' "${ADMIN_ORIG}" | jq 'if type=="array" then length else 0 end' 2>/dev/null)" == "168" ]]; then
+        CUR="$(grants_of "${ADMIN_ID}")"
+        if [[ "${CUR}" != "${ADMIN_ORIG}" ]]; then
+            RESTORE_CODE="$(put_grants "${ADMIN_ID}" "${ADMIN_ORIG}")"
+            [[ "${RESTORE_CODE}" == "200" ]] \
+                || { err "s8 cleanup: 还原 PLATFORM_ADMIN 授权失败（HTTP ${RESTORE_CODE}，audit:view 可能留在 DENY）"; exit 1; }
+        fi
+    fi
+    rbac_purge_users s8 >/dev/null \
+        || { err "s8 cleanup: 删临时用户失败（DB 不可读或写被拒）：先 make platform-up"; exit 1; }
+    rbac_purge_roles S8 >/dev/null \
+        || { err "s8 cleanup: 删临时角色失败（409=还有用户挂着 S8*，说明用户没删干净）"; exit 1; }
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 log "s8：审计可追溯 + reset 幂等"
 
 admin_login || die "admin 登录失败：先 make platform-up && make platform-seed"
+
+# 起跑自愈：上一轮被 kill -9（EXIT trap 不执行）或 QA 固定 RBAC_RUN_TAG 连跑两次时，
+# 同名 S8ROLE_* 会让下面建角色直接 409，随后 ROLE_ID 为空、整套审计断言红在无关的地方。
+rbac_purge_users s8 >/dev/null \
+    || { err "s8: 起跑清理临时用户失败：先 make platform-up"; report_counts; exit 1; }
+rbac_purge_roles S8 >/dev/null \
+    || { err "s8: 起跑清理临时角色失败：库里有用户挂着 S8* 或服务不可达"; report_counts; exit 1; }
 ADMIN_ID="$(role_id_of PLATFORM_ADMIN)"
 ADMIN_ORIG="$(grants_of "$ADMIN_ID")"
 
 # ---------------------------------------------------------------- 1. 角色审计
 R0="$(audit_count ROLE_)"
 api_call POST /api/req/admin/roles "{\"code\":\"${TMP_ROLE}\",\"name\":\"s8 审计探针\",\"description\":\"before\"}" >/dev/null
+CREATE_CODE="${HTTP_CODE:-000}"
 ROLE_ID="$(printf '%s' "$HTTP_BODY" | jq -r '.id // empty')"
+# 建主体失败必须当场红：否则 ROLE_ID 为空，后面每条审计断言的失败原因都指向「审计缺失」，
+# 与真因（409 撞名 / 401 未登录 / 服务没起）隔着好几步 —— s7 的 403 USER_DISABLED 就是这么绕出来的。
+case "${CREATE_CODE}" in
+    200|201) ;;
+    *)  err "s8: 建临时角色 ${TMP_ROLE} 失败：HTTP ${CREATE_CODE} ${HTTP_BODY:0:120}（先 make platform-up，并确认没有同名残留）"
+        report_counts; exit 1 ;;
+esac
 api_call PUT "/api/req/admin/roles/${ROLE_ID}" '{"name":"s8 审计探针 v2","description":"after"}' >/dev/null
 R1="$(audit_count ROLE_)"
 DETAIL="$(db_q "SELECT COUNT(*) FROM audit_log WHERE action LIKE 'ROLE_%'
@@ -58,6 +103,7 @@ fi
 G0="$(audit_count ROLE_PERMISSION)"
 CHANGED="$(set_cell "$ADMIN_ORIG" FUNCTION audit:view DENY)"
 put_grants "$ADMIN_ID" "$CHANGED" >/dev/null
+ADMIN_MUTATED=1
 G1="$(audit_count ROLE_PERMISSION)"
 HIGH_RISK="$(db_q "SELECT COUNT(*) FROM audit_log WHERE action LIKE 'ROLE_PERMISSION%'
       AND JSON_EXTRACT(detail_json, '$.highRiskGranted') IS NOT NULL" | head -n1)"
@@ -81,7 +127,13 @@ fi
 
 # ---------------------------------------------------------------- 4. 用户审计
 api_call POST /api/req/admin/users "{\"username\":\"${TMP_USER}\",\"password\":\"Passw0rd!\",\"name\":\"s8 user\",\"roles\":[\"QA\"]}" >/dev/null
+USER_CODE="${HTTP_CODE:-000}"
 TMP_UID="$(printf '%s' "$HTTP_BODY" | jq -r '.id // empty')"
+case "${USER_CODE}" in
+    200|201) ;;
+    *)  err "s8: 建临时账号 ${TMP_USER} 失败：HTTP ${USER_CODE} ${HTTP_BODY:0:120}（先 make platform-up，并确认没有同名残留）"
+        report_counts; exit 1 ;;
+esac
 U0="$(audit_count USER_)"
 api_call PUT /api/req/admin/users "{\"id\":${TMP_UID},\"name\":\"s8 user\",\"roles\":[\"QA\",\"PMO\"]}" >/dev/null
 U1="$(audit_count USER_)"
@@ -103,12 +155,14 @@ fi
 
 # ---------------------------------------------------------------- 6. reset 恢复预设
 put_grants "$ADMIN_ID" "$(set_cell "$ADMIN_ORIG" FUNCTION audit:view DENY)" >/dev/null
+ADMIN_MUTATED=1
 BEFORE_RESET="$(db_q "SELECT access FROM sys_role_permission p JOIN sys_role r ON r.id = p.role_id
       WHERE r.code = 'PLATFORM_ADMIN' AND p.subject_type = 'FUNCTION' AND p.subject_code = 'audit:view'" | head -n1)"
 internal_call POST "$REQ_URL" /internal/demo-reset >/dev/null
 RESET_CODE="${HTTP_CODE:-000}"
 AFTER_RESET="$(db_q "SELECT access FROM sys_role_permission p JOIN sys_role r ON r.id = p.role_id
       WHERE r.code = 'PLATFORM_ADMIN' AND p.subject_type = 'FUNCTION' AND p.subject_code = 'audit:view'" | head -n1)"
+[[ "${RESET_CODE}" == "200" ]] && ADMIN_MUTATED=0   # reset 已经把它还原了，cleanup 不必再补
 if [[ "${RESET_CODE}" == "200" && "${BEFORE_RESET}" == "DENY" && "${AFTER_RESET}" == "ALLOW" ]]; then
     pass "reset 把被改过的单元恢复到预设（audit:view ${BEFORE_RESET} → ${AFTER_RESET}）"
 else
