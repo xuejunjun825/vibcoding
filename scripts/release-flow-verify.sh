@@ -14,7 +14,7 @@
 #                           （QG-02）、CONDITIONAL 未豁免 409、EMERGENCY 缺原因 400
 #   S6 回归与卫生（2）       无发布路由 / 快照表无 UPDATE·DELETE；提交区间 BASE..HEAD 内
 #                           7 个 *pom.xml 与 web/package.json·web/pnpm-lock.yaml 无 diff，
-#                           迁移只允许 0/1 条新增 V15（r39 自动化四表；M/D/其它 A 即红）；判据自检 1 正 3 反同场执行
+#                           迁移 0/1 条 A、文件名 V<n>__<snake>.sql、版本 = 基线树最大+1（mig_max_version 派生；M/D/其它 A/跳号即红）；判据自检 1 正 4 反同场执行
 #   S7 自造夹具到 PUBLISHED（8） 夹具自造 BUS→PDR→RD 并读回复核 → 版本测试 TEST_PASSED → 三签
 #                           → 清空 MR 的 409（failedRules 恰 [MR_FILLED]）→ 恢复后提交 200
 #                           + 第 1 轮快照 + 四段同源 → QG-01/02/03 全 PASS → 发布单两级
@@ -346,45 +346,88 @@ resolve_git_base() { # stdout=merge-base 的 sha；失败非 0，绝不回退 HE
     printf '%s\n' "$base"
 }
 
+mig_max_version() { # <repo> <rev> -> 0；stdout = 该提交树里现存迁移的最大版本号（无迁移打印 0）
+    # r41：迁移版本上界一律从**基线提交树**派生，判据里不许出现写死的允许版本号。
+    # 只读 git 对象库（ls-tree -r <rev>），不读工作树/索引；ls-tree 失败必须 fail-closed
+    # 返回 1，绝不可落回 0——落回 0 会把「不可知」伪装成 V1，把不可知伪装成已知。
+    local repo="$1" rev="$2" mig_dir='req-service/src/main/resources/db/migration'
+    local out="" line="" vbase="" v="" max=0
+    [[ -n "$repo" && -n "$rev" ]] || return 1
+    out="$(git -C "$repo" ls-tree -r --name-only "$rev" -- "$mig_dir" 2>/dev/null)" || return 1
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        vbase="${line##*/}"
+        [[ "$vbase" =~ ^V([0-9]+)__ ]] || continue
+        v=$((10#${BASH_REMATCH[1]}))
+        (( v > max )) && max=$v
+    done <<<"$out"
+    printf '%s\n' "$max"
+}
+
 check_commit_hygiene() { # <repo> <base> <head> -> 0 合规 / 1 违规 / 2 入参或 git 对象不可用
     local repo="$1" base="$2" head="$3" bad=0 st path out
-    local pom_paths=('*pom.xml' 'web/package.json' 'web/pnpm-lock.yaml')
+    local pom_paths=('*pom.xml' 'web/package.json' 'web/pnpm-lock.yaml' '*package-lock.json')
     local mig_dir='req-service/src/main/resources/db/migration'
-    local mig_allowed="${mig_dir}/V15__automation_rule.sql"
-    local mig_count=0
+    local mig_count=0 mig_ver="" base_max=0 expected="n/a" vbase=""
     [[ -n "$repo" && -n "$base" && -n "$head" ]] || return 2
 
     # 1) 依赖/锁文件：根 pom 与全部模块 pom（仓库现有 7 个）都不许在区间内变动；
-    #    lockfile 是 pnpm 的 web/pnpm-lock.yaml（仓库没有 package-lock.json，指向不存在的
-    #    文件等于一条永远为空的判据）。
+    #    lockfile 覆盖 pnpm 的 web/pnpm-lock.yaml 与 npm 的 package-lock.json——后者当前
+    #    不存在也要进 pattern：换成 npm 那天判据不用再改，且它被 A 进来同样必须红。
     out="$(git -C "$repo" diff --name-status --no-renames "$base" "$head" -- "${pom_paths[@]}")" || return 2
     while IFS=$'\t' read -r st path; do
         [[ -n "$path" ]] || continue
-        printf '%s\t%s\n' "$st" "$path"
+        printf '%s\t%s\t依赖/锁文件在区间内变动（只允许迁移新增）\n' "$st" "$path"
         bad=1
     done <<<"$out"
 
-    # 2) 迁移：只允许 0 或 1 条 `A .../V15__automation_rule.sql`（合并后 BASE 已含 V15 时
-    #    区间为空也必须绿）；M/D/R 与其它 A（V16+、R__*.sql）一律红。
+    # 2) 迁移：0 或 1 条 A、文件名 V<数字>__<snake>.sql，且版本号 = 基线提交树最大 + 1。
+    #    区间纯函数：base 由 resolve_git_base 给出（merge-base），版本上界从 base 的树派生，
+    #    于是「加迁移」与「改判据」解耦——r40 加 V16 时红在写死 V15 上，不得重演。
+    if ! base_max="$(mig_max_version "$repo" "$base")"; then
+        printf 'BASE\t%s\t基线提交树不可读（mig_max_version fail-closed）\n' "$mig_dir"
+        printf 'MIGRATION\tadded=0\tbase_max=none\texpected=n/a\n'
+        return 2
+    fi
     out="$(git -C "$repo" diff --name-status --no-renames "$base" "$head" -- "$mig_dir")" || return 2
     while IFS=$'\t' read -r st path; do
         [[ -n "$path" ]] || continue
-        printf '%s\t%s\n' "$st" "$path"
-        if [[ "$st" == "A" && "$path" == "$mig_allowed" ]]; then
-            mig_count=$((mig_count + 1))
-            ((mig_count <= 1)) || bad=1
+        if [[ "$st" != "A" ]]; then
+            printf '%s\t%s\t迁移只允许新增（M/D/R 即红）\n' "$st" "$path"
+            bad=1
+            continue
+        fi
+        mig_count=$((mig_count + 1))
+        vbase="${path##*/}"
+        if [[ "$vbase" =~ ^V([0-9]+)__[a-z0-9_]+\.sql$ ]]; then
+            mig_ver=$((10#${BASH_REMATCH[1]}))
         else
+            printf '%s\t%s\t迁移文件名须为 V<数字>__<snake>.sql\n' "$st" "$path"
+            mig_ver=""
+            bad=1
+        fi
+        if (( mig_count > 1 )); then
+            printf '%s\t%s\t一次只允许新增 1 条迁移（已第 %d 条）\n' "$st" "$path" "$mig_count"
             bad=1
         fi
     done <<<"$out"
 
+    if (( mig_count == 1 )); then
+        expected="V$((base_max + 1))"
+        if [[ -n "$mig_ver" ]] && (( mig_ver != base_max + 1 )); then
+            printf 'A\t%s\t迁移版本须为基线最大+1（期望 %s，实际 V%s）\n' "$mig_dir" "$expected" "$mig_ver"
+            bad=1
+        fi
+    fi
+    printf 'MIGRATION\tadded=%d\tbase_max=V%s\texpected=%s\n' "$mig_count" "$base_max" "$expected"
     return "$bad"
 }
 
 hygiene_self_test() { # <base> -> 0 判据按预期红/绿 / 1 判据退化或 worktree 不可用
-    # 自检与判据同文件、同一 case 内执行：先证明判据会红（3 个已提交变异），再证明它不会恒红
-    # （空区间 + 未跟踪临时文件必须绿）。变异必须是「已提交」的，这样退回 `git status` 判据会
-    # 立刻被反例 a/b/c 抓住。
+    # 自检与判据同文件、同一 case 内执行：r41 起 1 正 4 反（反例 5 含 4 个锁文件子变异）。
+    # 变异必须是「已提交」的（判据只读 git 对象库），退回 `git status` / `git diff HEAD`
+    # 的判据会被反例 2 立刻抓住；版本号 m 由 mig_max_version 现算，自检里不出现写死的版本号。
+    # 每个用例的通过行必须带 k/5 标记写成字面量（gate-order 第 21 条按字面量锚定，全文件恰好 5 处）。
     local base="${1:-}"
     [[ -n "$base" ]] || { printf '自检失败：基线为空（RELEASE_FLOW_BASE_REF）\n'; return 1; }
     (
@@ -397,6 +440,10 @@ hygiene_self_test() { # <base> -> 0 判据按预期红/绿 / 1 判据退化或 w
         orig=""
         mut=""
         mig_dir=""
+        m=""
+        spec=""
+        mst=""
+        rel=""
         tmp="$(mktemp -d "${TMPDIR:-/tmp}/rf-hygiene.XXXXXX")" || { printf '自检失败：mktemp 不可用\n'; exit 1; }
         wt="$tmp/wt"
         st_cleanup() {
@@ -411,45 +458,72 @@ hygiene_self_test() { # <base> -> 0 判据按预期红/绿 / 1 判据退化或 w
         local g=(git -C "$wt" -c user.name=hygiene-probe -c user.email=hygiene@example.invalid
                  -c commit.gpgsign=false -c core.hooksPath=/dev/null)
         mig_dir="$wt/req-service/src/main/resources/db/migration"
+        m="$(mig_max_version "$wt" "$orig")" \
+            || { printf '自检失败：基线迁移版本不可派生（mig_max_version fail-closed）\n'; exit 1; }
+        [[ "$m" =~ ^[0-9]+$ ]] || { printf '自检失败：mig_max_version 输出非数字（%s）\n' "$m"; exit 1; }
 
-        # 正例：空区间 + 工作树留一个未跟踪临时文件 → 必须绿（r31 的原始症状就是脏树影响了判定）
+        # [1/5] 正例：空区间 + 工作树留一个未跟踪临时文件 → 必须绿（r31 的原始症状就是脏树影响判定）
         : >"$wt/.hygiene-untracked-probe"
         if ! check_commit_hygiene "$wt" "$orig" "$orig" >/dev/null 2>&1; then
-            printf '自检正例未变绿：空区间 + 未跟踪文件被判违规\n'; exit 1
+            printf '自检失败（例 1/5）：空区间 + 未跟踪文件被判违规\n'; exit 1
         fi
         rm -f "$wt/.hygiene-untracked-probe"
+        printf '  HYG_SELF[1/5] 正例（空区间 + 未跟踪临时文件）→ 绿\n'
 
-        # 反例 a：已提交修改历史迁移 V13 → 必须红
-        printf '\n-- hygiene mutation a\n' >>"$mig_dir/V13__vendor_pm_role.sql"
-        "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm 'hygiene mutation a' >/dev/null 2>&1 \
-            || { printf '自检失败：变异 a 无法提交\n'; exit 1; }
+        # [2/5] 反例：已提交修改历史迁移 V13 → 必须红
+        printf '\n-- hygiene mutation 2\n' >>"$mig_dir/V13__vendor_pm_role.sql"
+        "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm 'hygiene mutation 2' >/dev/null 2>&1 \
+            || { printf '自检失败：变异 2 无法提交\n'; exit 1; }
         mut="$(git -C "$wt" rev-parse HEAD)"
         if check_commit_hygiene "$wt" "$orig" "$mut" >/dev/null 2>&1; then
-            printf '自检反例 a 未变红：已提交改 V13 仍被判合规\n'; exit 1
+            printf '自检失败（例 2/5）：已提交修改历史迁移 V13 仍被判合规\n'; exit 1
         fi
-        git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 a 无法还原\n'; exit 1; }
+        git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 2 无法还原\n'; exit 1; }
+        printf '  HYG_SELF[2/5] 反例（M 历史迁移 V13）→ 红\n'
 
-        # 反例 b：已提交新增 V16 → 必须红
-        : >"$mig_dir/V16__mutation_probe.sql"
-        "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm 'hygiene mutation b' >/dev/null 2>&1 \
-            || { printf '自检失败：变异 b 无法提交\n'; exit 1; }
+        # [3/5] 反例：一次提交 A 两条迁移（V<m+1> + V<m+2>）→ 必须红（超一条即红）
+        : >"$mig_dir/V$((m + 1))__mutation_probe_a.sql"
+        : >"$mig_dir/V$((m + 2))__mutation_probe_b.sql"
+        "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm 'hygiene mutation 3' >/dev/null 2>&1 \
+            || { printf '自检失败：变异 3 无法提交\n'; exit 1; }
         mut="$(git -C "$wt" rev-parse HEAD)"
         if check_commit_hygiene "$wt" "$orig" "$mut" >/dev/null 2>&1; then
-            printf '自检反例 b 未变红：已提交新增 V16 仍被判合规\n'; exit 1
+            printf '自检失败（例 3/5）：一次新增两条迁移仍被判合规\n'; exit 1
         fi
-        git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 b 无法还原\n'; exit 1; }
+        git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 3 无法还原\n'; exit 1; }
+        printf '  HYG_SELF[3/5] 反例（一次 A 两条 V<m+1>/V<m+2>）→ 红\n'
 
-        # 反例 c：已提交修改模块 pom → 必须红（守住 pom 覆盖面；只写反例的话判据被写成恒红也不会被发现）
-        printf '\n<!-- hygiene mutation c -->\n' >>"$wt/req-service/pom.xml"
-        "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm 'hygiene mutation c' >/dev/null 2>&1 \
-            || { printf '自检失败：变异 c 无法提交\n'; exit 1; }
+        # [4/5] 反例：跳号单条 A（只加 V<m+2>，基线最大是 V<m>）→ 必须红
+        : >"$mig_dir/V$((m + 2))__mutation_probe.sql"
+        "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm 'hygiene mutation 4' >/dev/null 2>&1 \
+            || { printf '自检失败：变异 4 无法提交\n'; exit 1; }
         mut="$(git -C "$wt" rev-parse HEAD)"
         if check_commit_hygiene "$wt" "$orig" "$mut" >/dev/null 2>&1; then
-            printf '自检反例 c 未变红：已提交改 req-service/pom.xml 仍被判合规\n'; exit 1
+            printf '自检失败（例 4/5）：跳号新增 V<m+2> 仍被判合规\n'; exit 1
         fi
-        git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 c 无法还原\n'; exit 1; }
+        git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 4 无法还原\n'; exit 1; }
+        printf '  HYG_SELF[4/5] 反例（跳号单 A V<m+2>，未接在基线最大后）→ 红\n'
 
-        printf '自检 → 正例绿；a 改 V13 红；b 新增 V16 红；c 改 req-service/pom.xml 红\n'
+        # [5/5] 反例：依赖/锁文件四连各自红（M 根 pom / M web/package.json / M web/pnpm-lock.yaml / A web/package-lock.json）
+        for spec in "M pom.xml" "M web/package.json" "M web/pnpm-lock.yaml" "A web/package-lock.json"; do
+            mst="${spec%% *}"
+            rel="${spec#* }"
+            if [[ "$mst" == "A" ]]; then
+                : >"$wt/$rel"
+            else
+                printf '\n-- hygiene mutation 5\n' >>"$wt/$rel"
+            fi
+            "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm "hygiene mutation 5 ${rel}" >/dev/null 2>&1 \
+                || { printf '自检失败：变异 5（%s %s）无法提交\n' "$mst" "$rel"; exit 1; }
+            mut="$(git -C "$wt" rev-parse HEAD)"
+            if check_commit_hygiene "$wt" "$orig" "$mut" >/dev/null 2>&1; then
+                printf '自检失败（例 5/5）：已提交 %s %s 仍被判合规\n' "$mst" "$rel"; exit 1
+            fi
+            git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 5（%s）无法还原\n' "$rel"; exit 1; }
+        done
+        printf '  HYG_SELF[5/5] 反例（M 根 pom / M package.json / M pnpm-lock / A package-lock 各自红）→ 4 子例全红\n'
+
+        printf '自检 → 5/5 全绿（1 正 4 反，反例 5 含 4 个子变异）\n'
         exit 0
     )
 }
@@ -1151,13 +1225,14 @@ else
         "发布只能由审批回调调用；快照仓库不得提供更新/删除方法；源文件缺失也必须判红"
 fi
 
-# 第 32 条（r31 重写）：提交区间纯判据 BASE..HEAD + 同场正负变异自检。
+# 第 32 条（r31 立、r41 改为版本无关）：提交区间纯判据 BASE..HEAD + 同场正负变异自检。
 # 分母仍 32：自检验证的是判据本身，不是新业务事实，独立计数会污染 AC-20 的分母语义。
 POM_COUNT="$(git -C "$ROOT" ls-files '*pom.xml' | wc -l | tr -d ' ')"
 HYGIENE_OUT=""
 HYGIENE_RC=2
 SELF_OUT=""
 SELF_RC=2
+MIG_ADDED=""
 if [[ -z "$GIT_BASE" || -z "$GIT_HEAD" ]]; then
     HYGIENE_OUT="基线不可解析：merge-base ${GIT_BASE_REF} HEAD 失败；用 RELEASE_FLOW_BASE_REF 指定可用基线"
 else
@@ -1168,12 +1243,16 @@ else
 fi
 HYGIENE_BRIEF="$(printf '%s' "$HYGIENE_OUT" | tr '\n' ';' | sed 's/;$//')"
 SELF_BRIEF="$(printf '%s' "$SELF_OUT" | tr '\n' ';' | sed 's/;$//')"
-[[ "$SELF_RC" == "0" ]] && printf '  %s\n' "$SELF_BRIEF"
+MIG_ADDED="$(printf '%s\n' "$HYGIENE_OUT" | grep '^MIGRATION' | tail -n 1 | cut -f2 | sed 's/^added=//')"
+if [[ "$SELF_RC" == "0" ]]; then
+    # 判据自证：5 行 HYG_SELF 原样打出来（gate-order 第 21 条按字面量锚定，QA 按行核对）
+    printf '%s\n' "$SELF_OUT"
+fi
 if [[ "$HYGIENE_RC" == "0" && "$SELF_RC" == "0" ]]; then
-    pass "提交区间 ${GIT_BASE:0:7}..${GIT_HEAD:0:7} 卫生：${POM_COUNT} 个 *pom.xml + web/package.json + web/pnpm-lock.yaml 无改动、迁移仅 0/1 条 A V15；判据自检 4/4（正例绿 / 改 V13 / 新增 V16 / 改模块 pom 均红）"
+    pass "提交区间 ${GIT_BASE:0:7}..${GIT_HEAD:0:7} 卫生：${POM_COUNT} 个 *pom.xml + web/package.json + pnpm-lock/package-lock 无改动；迁移 added=${MIG_ADDED:-?}（0 或 1 条 A，版本 = 基线最大+1，M/D/R 即红）；判据自检 5/5"
 else
     fail "提交卫生不符或判据自检失败（range=${GIT_BASE:0:7}..${GIT_HEAD:0:7}, hygiene=${HYGIENE_RC}, selfTest=${SELF_RC}）" \
-        "${HYGIENE_BRIEF:-无判据输出} | ${SELF_BRIEF:-无自检输出} —— AC-23：只认 BASE..HEAD；pom/lockfile 不得改；迁移只允许新增 V15；自检必须 1 正 3 反"
+        "${HYGIENE_BRIEF:-无判据输出} | ${SELF_BRIEF:-无自检输出} —— AC-23：只认 BASE..HEAD；pom/lockfile 不得改；迁移只允许 0 或 1 条 A、文件名 V<n>__<snake>.sql、版本号 = 基线最大+1；自检必须 1 正 4 反"
 fi
 
 # --------------------------------------------------------------------------- S7

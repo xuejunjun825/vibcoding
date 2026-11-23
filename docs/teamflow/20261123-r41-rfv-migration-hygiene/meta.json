@@ -1,0 +1,7 @@
+{
+  "reqId": "req-41",
+  "runId": "tf-mwt6l1c8-58vacr",
+  "title": "修复门禁自身的缺陷：`scripts/release-flow-verify.sh` 的 [32]「提交卫生」把允许新增的迁移版本号写死成 V14（r39 时放",
+  "mode": "tech",
+  "createdAt": 1795433223300
+}

@@ -22,7 +22,8 @@
 # 删后回起跳值）。它只断言、不自愈：413 条 domain 孤儿是 r38 之前攒下的历史债，门禁代删会掩盖
 # 「谓词又被复制后各自演化」这类回归；修复命令固定为 bash scripts/orphan-join-purge.sh --apply。
 #
-# 20 条 = 1 栈前置 + 5 静态契约 + 9 序列步骤 + 5 收尾基线（r37 第 4 条 / r38 第 5 条为负向自检）。
+# 21 条 = 1 栈前置 + 6 静态契约 + 9 序列步骤 + 5 收尾基线（r37 第 4 条 / r38 第 5 条为负向自检；
+# r41 第 21 条为判据防回退静态契约）。
 # 它要独占演示栈、单轮 6–11 分钟，所以不进 make test（每次提交门禁），只做发布前门禁：
 #   make gate-order-verify
 set -uo pipefail
@@ -92,7 +93,7 @@ r37_selfheal() {
 r37_selfheal || exit 1
 
 # ---------------------------------------------------------------- 2-5 静态契约
-banner "1) 静态契约（5）"
+banner "1) 静态契约（6）"
 
 GATES=("release-flow-verify.sh" "platform-verify.sh" "platform-test-negative.sh")
 
@@ -189,7 +190,32 @@ else
         "source tests/rbac/_lib.sh；造名用 rbac_run_tag；cleanup 里先 rbac_purge_users 再 rbac_purge_roles；\`trap cleanup EXIT\` 必须存在；白名单/保护/清理谓词只写在 scripts/lib/temp-accounts.sh"
 fi
 
-# ---------------------------------------------------------------- 7-15 双序列
+# 第 21 条（r41）：判据不许退回「写死允许版本号」。只读 rfv 源码、不运行 rfv，A/B 双序列语义零影响；
+# 四组断言先累加到 bad 再一次性 hit/miss（任一 grep 直接 return 会把「已失败」洗成「没跑」）。
+bad=""
+if grep -qE '只允许新增 V1[0-9]' "${ROOT}/scripts/release-flow-verify.sh"; then
+    bad+="旧文案(只允许新增 V1x) "
+fi
+if grep -qE 'mig_allowed=.*V[0-9]+__' "${ROOT}/scripts/release-flow-verify.sh"; then
+    bad+="写死允许文件名(mig_allowed) "
+fi
+if ! grep -q 'mig_max_version' "${ROOT}/scripts/release-flow-verify.sh"; then
+    bad+="缺 mig_max_version "
+fi
+if ! grep -q 'ls-tree -r' "${ROOT}/scripts/release-flow-verify.sh"; then
+    bad+="缺 ls-tree -r（版本上界未从基线树派生） "
+fi
+for i in 1 2 3 4 5; do
+    grep -q "HYG_SELF\[$i/5\]" "${ROOT}/scripts/release-flow-verify.sh" || bad+="缺 HYG_SELF[$i/5] "
+done
+if [[ -z "$bad" ]]; then
+    hit "release-flow-verify 第 32 条判据：版本上界由 mig_max_version 从基线提交树（ls-tree -r）派生，无写死的允许版本/文件名，5 条自检标记齐备（r41 上锁，防判据退回硬编码）"
+else
+    miss "release-flow-verify 迁移判据退化: ${bad}" \
+        "迁移判据必须 mig_max_version + ls-tree -r 动态派生；不得出现『只允许新增 V1x』旧文案或 mig_allowed= 写死文件名；自检 5 条标记 HYG_SELF[1/5]..[5/5] 必须是字面量"
+fi
+
+# ---------------------------------------------------------------- 8-16 双序列
 # 每一步 = 该门禁自己的分母 + gate_fixture_problems 为空；两者任何一个不成立都判该步红。
 run_reset() { # label
     local label="$1" out rc m a b probs
@@ -266,7 +292,7 @@ run_rfv "B3 rfv（access 之后）"
 run_access "B4 access（rfv 之后）"
 run_rbac "B5 rbac（access+rfv 之后，全段）"
 
-# ---------------------------------------------------------------- 16-20 收尾基线
+# ---------------------------------------------------------------- 17-21 收尾基线
 banner "4) 收尾基线（5）"
 TID2="$(db_q "SELECT id FROM sys_tenant WHERE code='${GATE_FIXTURE_TENANT_CODE}'" 2>/dev/null | head -n1)"
 NONFIX="$(db_count requirement "tenant_id=${TID2} AND code NOT LIKE 'DEMO-R-%'")"
@@ -405,10 +431,10 @@ fi
 
 # ---------------------------------------------------------------- 汇总
 printf '\n'
-if (( FAIL_N == 0 && TOTAL_N == 20 )); then
-    ok "gate-order-verify: 20/20 —— A/B 两种顺序跑完基线一致（门禁顺序无关，临时主体口径单一真源）"
+if (( FAIL_N == 0 && TOTAL_N == 21 )); then
+    ok "gate-order-verify: 21/21 —— A/B 两种顺序跑完基线一致（门禁顺序无关，临时主体口径单一真源）"
     exit 0
 fi
-err "gate-order-verify: ${PASS_N}/${TOTAL_N}（声明 20 条）—— 失败 ${FAIL_N} 条"
+err "gate-order-verify: ${PASS_N}/${TOTAL_N}（声明 21 条）—— 失败 ${FAIL_N} 条"
 err "修复方向：先看每条 FAIL 上方的问题清单（问题: ...）；残留类问题执行 bash scripts/legacy-probe-purge.sh 或 make platform-demo-reset 后再跑"
 exit 1
