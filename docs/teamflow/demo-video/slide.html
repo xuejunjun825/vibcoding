@@ -1,0 +1,31 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{width:1440px;height:900px;overflow:hidden;background:#0E1117;font-family:"PingFang SC","Heiti SC",sans-serif}
+  .stage{position:relative;width:1440px;height:900px;display:flex;align-items:center;justify-content:center;background:#F5F7FA}
+  img.shot{width:1440px;height:900px;object-fit:cover;display:block}
+  .bar{position:absolute;left:0;right:0;bottom:0;padding:34px 44px 30px;background:linear-gradient(180deg,rgba(12,15,20,.72),rgba(12,15,20,.96) 42%);color:#fff}
+  .chap{display:inline-block;font-size:16px;letter-spacing:.06em;color:#8FBBFF;margin-bottom:10px}
+  .text{font-size:31px;font-weight:600;line-height:1.35}
+  .sub{margin-top:7px;font-size:19px;color:#B9C2CF}
+  .title{width:1440px;height:900px;display:flex;flex-direction:column;justify-content:center;align-items:center;background:radial-gradient(1200px 600px at 50% 40%,#1B2740,#0E1117 70%);color:#fff}
+  .title h1{font-size:64px;font-weight:700;letter-spacing:.02em}
+  .title p{margin-top:22px;font-size:26px;color:#9FB0C6}
+  .title .tag{margin-top:40px;font-size:18px;color:#6E7F96;letter-spacing:.14em}
+  .role{position:absolute;top:22px;left:40px;background:rgba(14,17,23,.86);color:#fff;font-size:17px;padding:7px 14px;border-radius:8px}
+</style></head>
+<body><div class="stage" id="stage"></div>
+<script>
+window.render = (d) => {
+  const s = document.getElementById('stage');
+  if (d.kind === 'title') {
+    s.className = 'title';
+    s.innerHTML = `<h1>${d.h1}</h1><p>${d.p}</p><div class="tag">${d.tag||''}</div>`;
+  } else {
+    s.className = 'stage';
+    s.innerHTML = `<img class="shot" src="${d.img}">
+      <div class="bar"><span class="chap">${d.role?d.role+' · ':''}${d.chap}</span><div class="text">${d.text}</div><div class="sub">${d.sub||''}</div></div>`;
+  }
+  return new Promise(res=>{const im=s.querySelector('img'); if(!im) return setTimeout(res,120); if(im.complete) return setTimeout(res,120); im.onload=()=>setTimeout(res,120);});
+};
+</script></body></html>

@@ -1,0 +1,23 @@
+[
+ {"kind":"title","dur":5,"h1":"DevOps 研发管理平台","p":"需求全流程 · 各角色操作演示","tag":"演示数据 · 真实接口"},
+ {"img":"frames/01-biz-reqpool.png","dur":5,"role":"① 业务部门 · 陈业务（biz1）","chap":"业务方提报","text":"打开平台即落在需求池，只看得到自己业务单元的需求","sub":"左侧按权限收敛菜单：业务方没有「测试计划」「发布单」等交付域入口"},
+ {"img":"frames/02-biz-detail-submitted.png","dur":5,"role":"① 业务部门 · 陈业务","chap":"业务方提报","text":"填写业务需求：类型/业务域/优先级/期望交付，不填人天","sub":"人天由研发评估，业务方只提「什么时候要」"},
+ {"img":"frames/03-biz-detail-approving.png","dur":5,"role":"① 业务部门 · 陈业务","chap":"提交审批","text":"点「提交审批」→ 状态变为审批中，审批进度显示当前卡在产品评审","sub":"业务方权限只能提交与撤回，不能自己批"},
+ {"img":"frames/04-pm-approvals-todo.png","dur":5,"role":"② 产品经理 · 张产品（pm）","chap":"产品经理审批","text":"审批中心：待办按单据类型聚合，可直接在列表里处理","sub":"单据类型 = 需求提报 / 入池评审 / 版本 / 发布 / 工时评估"},
+ {"img":"frames/05-bus-pending-review.png","dur":5,"role":"② 产品经理","chap":"审批通过","text":"提报审批通过 → 自动转入「待评审」，最近动态留痕操作人与时间","sub":"每次流转都写 audit_log，可追溯"},
+ {"img":"frames/06-bus-pooled.png","dur":5,"role":"② 产品经理","chap":"评审入池","text":"评审通过 → 需求入池（POOLED），此时才允许拆解","sub":"未入池就拆解会被服务端拒绝：409 PARENT_NOT_POOLED"},
+ {"img":"frames/08-pdr-scheduled.png","dur":5,"role":"② 产品经理 / 项目域负责人","chap":"拆解与排期","text":"先拆产品需求并排期；排期前必须先过工时评估门","sub":"评估未通过时「排期」按钮不可用，接口返回 409 ESTIMATE_NOT_APPROVED"},
+ {"img":"frames/09-rd-created.png","dur":5,"role":"② 产品经理","chap":"拆解研发需求","text":"再拆研发需求，写清研发范围与人天（6.5 天）","sub":"父需求人天由子需求汇总，不可手工填写"},
+ {"img":"frames/10-rd-vendor-assigned.png","dur":5,"role":"③ 项目域负责人 · 李项目（tl1）","chap":"指派厂商","text":"把研发需求指派给厂商 VEN-A，指派动作与原因进审计","sub":"厂商用户此后只能看到与自己相关的需求"},
+ {"img":"frames/rd-in-dev.png","dur":6,"role":"④ 研发工程师 · 赵研发（dev1）","chap":"开始开发","text":"工时评估已通过（当前 6.5 / 评估 6.5，偏差 0%），状态进入开发中","sub":"改了人天超过 ±20%，评估单会失效为 STALE，需重新评估"},
+ {"img":"frames/dev-task-board.png","dur":5,"role":"④ 研发工程师","chap":"任务执行","text":"把研发需求拆成任务，在看板里推进 待办 → 进行中 → 完成","sub":"任务只做拆解与进度，不改变需求状态机"},
+ {"img":"frames/rd-pending-test.png","dur":5,"role":"⑤ 测试 · 孙测试（qa1）","chap":"提测","text":"研发完成后提测，状态转为待测试，测试同学接手","sub":"「测试通过」必须由测试角色执行，研发不能自己点"},
+ {"img":"frames/qa-test-plans.png","dur":5,"role":"⑤ 测试 · 孙测试","chap":"测试执行","text":"测试计划挂版本、用例版本化；执行结果记录到具体用例版本","sub":"失败可一键转缺陷，并带用例/版本/需求上下文"},
+ {"img":"frames/rd-done.png","dur":5,"role":"④ 研发 / ⑤ 测试 / ② 产品","chap":"测试通过 → 合入 → 完成","text":"测试通过 → 合入 → 完成，研发需求闭环","sub":"每一步都有权限与前置门，不是靠流程约定"},
+ {"img":"frames/bus-closed.png","dur":6,"role":"② 产品经理","chap":"业务需求闭环","text":"上层业务需求汇总到 6.5 人天，最终关闭","sub":"父需求进度/人天全部由子需求实时汇总，不手工维护"},
+ {"img":"frames/tl1-releases.png","dur":6,"role":"⑥ 项目域负责人 / PMO","chap":"版本与发版","text":"版本计划包含需求清单；发版链路四段：测试计划 → 报告三签 → 质量门 → 发布单准入","sub":"发布单 9 项准入全部由服务端实时判定，前端只是展示"},
+ {"img":"frames/vpm1-reqpool.png","dur":5,"role":"⑦ 厂商项目经理 · 钱厂商（vpm1）","chap":"厂商视角","text":"厂商用户只看得到本厂商承接的 3 条需求，看不到别家与内部评审细节","sub":"域 × 厂商行级隔离：同一租户、同一接口，返回不同数据"},
+ {"img":"frames/admin-permissions.png","dur":6,"role":"⑧ 平台管理员（admin）","chap":"权限治理","text":"角色 × 三层授权：页面、动作、功能码都能逐个开关，改完立即生效","sub":"权限是唯一真相，页面渲染与接口判定同源"},
+ {"img":"frames/admin-automation.png","dur":5,"role":"⑧ 平台管理员","chap":"自动化规则","text":"规则 = 触发 + 条件 + 动作，执行日志可查命中/跳过原因","sub":"规则不能改状态、不能绕过审批与门禁（静态门禁拦截）"},
+ {"kind":"title","dur":5,"h1":"一条需求的全链路","p":"提报 → 审批 → 入池 → 拆解 → 排期 → 开发 → 测试 → 交付 → 闭环","tag":"每个环节都有权限与前置门"}
+]
