@@ -1,5 +1,6 @@
 package com.example.req.approval;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.Map;
@@ -12,8 +13,22 @@ public class WorkflowJson {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * 固定键集专用：与注入的 mapper 同配置，只把默认属性包含改成 {@code ALWAYS}。
+     *
+     * <p>变更单的 before/after（各 7 键）与 impact（8 键）是 AC-3 的契约，null 值也必须落库；
+     * 全局 {@code default-property-inclusion: non_null} 会把 Map 里的 null 键直接吞掉。
+     * 这里从注入实例 rebuild，避免另造一份丢失日期/数值格式的 mapper，也不改全局默认。</p>
+     */
+    private final ObjectMapper stableMapper;
+
     public WorkflowJson(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+        this.stableMapper = objectMapper.rebuild()
+                .changeDefaultPropertyInclusion(inclusion -> inclusion
+                        .withValueInclusion(JsonInclude.Include.ALWAYS)
+                        .withContentInclusion(JsonInclude.Include.ALWAYS))
+                .build();
     }
 
     public WorkflowDefinition parse(String json) {
@@ -44,6 +59,21 @@ public class WorkflowJson {
         } catch (Exception ex) {
             throw new ApprovalException(400, ApprovalException.WORKFLOW_INVALID,
                     "流程定义无法序列化：" + ex.getMessage(), java.util.Map.of());
+        }
+    }
+
+    /**
+     * 序列化「固定键集」快照（变更单 before/after/impact）：null 值保留为显式 {@code null}。
+     *
+     * <p>只给契约要求键齐全的 Map 用；流程定义等普通 JSON 仍走 {@link #write(Object)}，
+     * 保持全局 non_null 默认不动。</p>
+     */
+    public String writeStable(Object value) {
+        try {
+            return stableMapper.writeValueAsString(value);
+        } catch (Exception ex) {
+            throw new ApprovalException(400, ApprovalException.WORKFLOW_INVALID,
+                    "快照无法序列化：" + ex.getMessage(), java.util.Map.of());
         }
     }
 

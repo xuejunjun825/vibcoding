@@ -45,7 +45,7 @@ public final class RequirementViews {
                        Long releaseId, BigDecimal estimateDays, BigDecimal actualDays, String mrUrl,
                        LocalDate expectedDeliveryDate, LocalDate planStartDate, LocalDate planEndDate,
                        LocalDateTime closedAt, LocalDateTime updatedAt,
-                       Rollup rollup, List<String> allowedActions, Map<String, Boolean> permissions,
+                       Rollup rollup, List<String> allowedActions, Map<String, Object> permissions,
                        DecomposeGate decomposeGate, List<TagView> tags) {
 
         /*
@@ -63,7 +63,7 @@ public final class RequirementViews {
     }
 
     public record Detail(View view, List<Child> children, List<String> allowedActions,
-                         Map<String, Boolean> permissions,
+                         Map<String, Object> permissions,
                          WbsEstimateViews.EstimateView estimate) {
     }
 

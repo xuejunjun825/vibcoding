@@ -4,6 +4,7 @@ import com.example.platform.common.error.ApiException;
 import com.example.platform.contract.GateBlocker;
 import com.example.platform.contract.GateDecision;
 
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,12 @@ public final class RequirementErrors {
     /** 工时评估前置门（r26）。 */
     public static final String ESTIMATE_NOT_APPROVED = "ESTIMATE_NOT_APPROVED";
     public static final String ESTIMATE_ALREADY_APPROVED = "ESTIMATE_ALREADY_APPROVED";
+    /** 需求变更单（r40）：字段白名单/收口/审批/应用五类错误码。 */
+    public static final String CHANGE_FIELD_NOT_ALLOWED = "CHANGE_FIELD_NOT_ALLOWED";
+    public static final String CHANGE_REQUIRED = "CHANGE_REQUIRED";
+    public static final String CHANGE_NOT_APPROVED = "CHANGE_NOT_APPROVED";
+    public static final String CHANGE_ALREADY_APPLIED = "CHANGE_ALREADY_APPLIED";
+    public static final String CHANGE_CONFLICT = "CHANGE_CONFLICT";
 
     private RequirementErrors() {
     }
@@ -136,5 +143,51 @@ public final class RequirementErrors {
         return new ApiException(403, FORBIDDEN, "无权执行该操作",
                 Map.of("action", action == null ? "" : action,
                         "allowedActions", allowedActions == null ? List.of() : allowedActions));
+    }
+
+    // ------------------------------------------------------------ 需求变更单（r40）
+
+    /**
+     * 字段不在该变更类型的白名单里（或变更类型本身未知）。
+     * detail 固定三键 {@code changeType / field / allowedFields}，field 为 null 时被 ApiException 丢弃。
+     */
+    public static ApiException changeFieldNotAllowed(String changeType, String field,
+                                                     List<String> allowedFields) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("changeType", changeType);
+        detail.put("field", field);
+        detail.put("allowedFields", allowedFields == null ? List.of() : allowedFields);
+        return new ApiException(400, CHANGE_FIELD_NOT_ALLOWED,
+                field == null ? "该变更类型不允许修改字段" : "字段 " + field + " 不允许通过该变更类型修改",
+                detail);
+    }
+
+    /** 晚期态直接改受管字段：409，detail 带需求 id、命中的字段与发起变更的端点。 */
+    public static ApiException changeRequired(long requirementId, List<String> fields,
+                                              String changeEndpoint) {
+        return new ApiException(409, CHANGE_REQUIRED, "该字段需通过变更单修改",
+                Map.of("requirementId", requirementId,
+                        "fields", fields == null ? List.of() : fields,
+                        "changeEndpoint", changeEndpoint == null ? "" : changeEndpoint));
+    }
+
+    /** 审批未通过（或仍在审批中）时应用变更单。 */
+    public static ApiException changeNotApproved(String status) {
+        return new ApiException(409, CHANGE_NOT_APPROVED, "变更单未通过审批，不能应用",
+                Map.of("status", status == null ? "PENDING" : status));
+    }
+
+    /** 同一变更单第二次应用：409 且带上首次应用时间，前端据此提示「已生效」而不是「失败」。 */
+    public static ApiException changeAlreadyApplied(LocalDateTime appliedAt) {
+        return new ApiException(409, CHANGE_ALREADY_APPLIED, "变更单已应用，不能重复应用",
+                appliedAt == null ? Map.of() : Map.of("appliedAt", appliedAt.toString()));
+    }
+
+    /** apply 时 before 与当前需求值不一致（期间被别人改过）：409，逐字段指出差异。 */
+    public static ApiException changeConflict(String field, Object expected, Object actual) {
+        return new ApiException(409, CHANGE_CONFLICT, "变更单字段与当前值不一致，请重新发起",
+                Map.of("field", field == null ? "" : field,
+                        "expected", expected == null ? "" : expected,
+                        "actual", actual == null ? "" : actual));
     }
 }

@@ -378,10 +378,18 @@ export function auditForbiddenDegrade(src) {
       sites.push(`${relPath}:${site.line}`)
     }
   }
+  // r40 变更单/编辑抽屉也要选父需求（parentId 变更），复用同一搜索入口；
+  // 这里不再是「只有一个调用点」，而是「调用点封闭在已知的三处」——新增调用点必须显式登记。
+  const SEARCH_CALLERS = [
+    FILES.defect,
+    'web/src/components/req/ChangeCreateDrawer.vue',
+    'web/src/components/req/RequirementEditDrawer.vue',
+  ]
+  const unexpectedSite = sites.find((site) => !SEARCH_CALLERS.some((p) => site.startsWith(p)))
   push(
     'D5',
-    sites.length === 1 && sites[0].startsWith(FILES.defect),
-    `searchRequirements 全仓调用点 = ${sites.length}（${sites.join(', ') || '无'}）：改动面只有缺陷弹窗一处`,
+    sites.length === SEARCH_CALLERS.length && !unexpectedSite,
+    `searchRequirements 调用点 = ${sites.length}，且都在已知入口（${sites.join(', ') || '无'}）`,
   )
 
   return out

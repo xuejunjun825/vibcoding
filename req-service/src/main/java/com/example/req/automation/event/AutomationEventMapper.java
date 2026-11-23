@@ -45,6 +45,9 @@ public final class AutomationEventMapper {
 
     private static final String BIZ_REQUIREMENT = "REQUIREMENT";
     private static final String BIZ_RELEASE = "RELEASE";
+    /** 变更单审计按单号收口；字段事件仍挂在被改的需求上（detail.requirementId）。 */
+    private static final String BIZ_REQ_CHANGE = "REQ_CHANGE";
+    private static final String ACTION_CHANGE_APPLIED = "REQUIREMENT_CHANGE_APPLIED";
     private static final String RELEASE_MEMBER_ADD = "RELEASE_MEMBER_ADD";
     private static final String RELEASE_MEMBER_REMOVE = "RELEASE_MEMBER_REMOVE";
 
@@ -73,6 +76,23 @@ public final class AutomationEventMapper {
     private static final List<Tracked> ESTIMATE_FIELDS = List.of(
             new Tracked("estimateDays", FIELD_ESTIMATE_DAYS));
 
+    /**
+     * r40 变更单应用后派生的字段事件（7 个可变更字段）。
+     *
+     * <p>detailKey 是变更快照的键（camelCase，与 {@code RequirementChangeFields.FIELDS} 同名），
+     * field 是列名（下划线，与 {@code AutomationSpecs.FIELDS} 同一词表）——两者必须同时对齐，
+     * 否则规则保存得进、命中不了。审计本身只写 1 条 {@code REQUIREMENT_CHANGE_APPLIED}，
+     * 每字段 1 条事件由这里派生（§10）。</p>
+     */
+    private static final List<Tracked> CHANGE_FIELDS = List.of(
+            new Tracked("title", "title"),
+            new Tracked("description", "description"),
+            new Tracked("priority", FIELD_PRIORITY),
+            new Tracked("estimateDays", FIELD_ESTIMATE_DAYS),
+            new Tracked("releaseId", FIELD_RELEASE),
+            new Tracked("parentId", "parent_id"),
+            new Tracked("expectedDeliveryDate", "expected_delivery_date"));
+
     private AutomationEventMapper() {
     }
 
@@ -95,7 +115,32 @@ public final class AutomationEventMapper {
         if (BIZ_RELEASE.equals(bizType)) {
             return mapRelease(action, bizId, detail, suffix);
         }
+        if (BIZ_REQ_CHANGE.equals(bizType)) {
+            return mapChange(action, bizId, detail, suffix);
+        }
         return List.of();
+    }
+
+    /**
+     * 变更单审计：只有 apply 会产生字段事件，且事件必须挂在<b>需求</b>上。
+     *
+     * <p>审计行 {@code biz_type=REQ_CHANGE, biz_id=changeId} 是为了「按单号直查」；
+     * 自动化规则的快照/条件仍是需求维度，所以需求 id 从 audit detail 的
+     * {@code requirementId} 取。{@code CHANGE_AFTER_RELEASE_LOCK} 是留痕标记，
+     * 不是内容变化，刻意不派事件。</p>
+     */
+    private static List<AutomationEventDraft> mapChange(String action, long changeId,
+                                                        Map<String, Object> detail,
+                                                        String suffix) {
+        if (!ACTION_CHANGE_APPLIED.equals(action)) {
+            return List.of();
+        }
+        Long requirementId = asLong(detail.get("requirementId"));
+        if (requirementId == null) {
+            return List.of();
+        }
+        return fieldChanges(requirementId, detail, suffix, CHANGE_FIELDS,
+                mapAt(detail, "before"), mapAt(detail, "after"));
     }
 
     /**
@@ -146,6 +191,10 @@ public final class AutomationEventMapper {
             case "DELIVER" -> fieldChanges(requirementId, detail, suffix, DELIVER_FIELDS,
                     mapAt(detail, "before"), mapAt(detail, "after"));
             case "OWNER_ASSIGN" -> List.of(ownerAssign(requirementId, detail, suffix));
+            // r40：变更单应用=一次真实字段写入，但审计只有 1 条；按字段派生事件保持与 PUT 同口径。
+            // CHANGE_AFTER_RELEASE_LOCK 刻意没有 case：它是留痕标记，不是内容变化，不触发自动化。
+            case "REQUIREMENT_CHANGE_APPLIED" -> fieldChanges(requirementId, detail, suffix,
+                    CHANGE_FIELDS, mapAt(detail, "before"), mapAt(detail, "after"));
             default -> List.of();
         };
     }
@@ -281,6 +330,11 @@ public final class AutomationEventMapper {
         copy(payload, "assigneeVendorId", values, "assigneeVendorId");
         copy(payload, "ownerUserId", values, "ownerUserId");
         copy(payload, "releaseId", values, "releaseId");
+        // r40：变更单的 after 快照带这四个键（既有 auditSnapshot 没有），复制进来规则句才能读到。
+        copy(payload, "title", values, "title");
+        copy(payload, "description", values, "description");
+        copy(payload, "parentId", values, "parentId");
+        copy(payload, "expectedDeliveryDate", values, "expectedDeliveryDate");
     }
 
     private static void copy(Map<String, Object> target, String key, Map<?, ?> source,

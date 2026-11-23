@@ -81,6 +81,11 @@ public class RequirementService {
      * {@code RequirementPoolQuery} 的批量版（一次一页，避免 N+1）。
      */
     private final RequirementTagQuery tagQuery;
+    /**
+     * 需求↔版本关联的移动端口（r40）：早期态 PUT 改动 releaseId 时要真正双写关联行，
+     * 晚期态由变更单 apply 调用。Provider 注入是为了让十参单测构造继续可用。
+     */
+    private final ObjectProvider<com.example.req.requirement.change.RequirementReleaseMembership> releaseMembership;
 
 
     /** 十参构造：保留给既有单测（不装配评估门与标签端口时门/estimate/tags 均不生效）。 */
@@ -96,7 +101,7 @@ public class RequirementService {
                               ActionPermissionResolver actionPermissions) {
         this(repository, domainRelRepository, stateMachine, codeGenerator, auditService,
                 notificationWriter, gatePort, approvalStarter, jdbcTemplate, actionPermissions,
-                null, null);
+                null, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -111,7 +116,9 @@ public class RequirementService {
                               JdbcTemplate jdbcTemplate,
                               ActionPermissionResolver actionPermissions,
                               ObjectProvider<WbsEstimateService> estimateGate,
-                              RequirementTagQuery tagQuery) {
+                              RequirementTagQuery tagQuery,
+                              ObjectProvider<com.example.req.requirement.change.RequirementReleaseMembership>
+                                      releaseMembership) {
         this.repository = repository;
         this.domainRelRepository = domainRelRepository;
         this.stateMachine = stateMachine;
@@ -124,6 +131,7 @@ public class RequirementService {
         this.actionPermissions = actionPermissions;
         this.estimateGate = estimateGate;
         this.tagQuery = tagQuery;
+        this.releaseMembership = releaseMembership;
     }
 
     // ---------------------------------------------------------------- create
@@ -202,6 +210,9 @@ public class RequirementService {
         // 放在后面取快照会把「新值」当成旧值，FIELD_CHANGE 就永远不产生。
         Map<String, Object> before = auditSnapshot(entity,
                 String.valueOf(entity.getExpectedDeliveryDate()));
+        // 收口判定要跟「改之前」的值比；入参校验会就地写 entity，所以先冻结一份快照。
+        Map<String, Object> guardBefore =
+                com.example.req.requirement.change.RequirementChangeFields.snapshot(entity);
         applyParentChange(entity, req.extra());
         applyDaysChange(entity, req.extra());
         applySonarKeyChange(entity, req.extra());
@@ -218,6 +229,17 @@ public class RequirementService {
         if (req.expectedDeliveryDate != null) {
             entity.setExpectedDeliveryDate(req.expectedDeliveryDate);
         }
+
+        // r40 PUT 收口（AC-13）：内容/日期/父子/版本字段的**真实变化**在早期态之外只能走变更单。
+        // 必须放在所有入参校验之后：非法父链/人天精度要先按既有 400 暴露，不能被 409 盖掉
+        // （否则 PUT 改出一个环也只会得到「请走变更单」，错误码与修复指引都错）。
+        // 同时又必须在写库（repository.save / release 成员移动）之前：拦下时一行都没动。
+        com.example.req.requirement.change.RequirementChangeGuard.rejectDirectEdit(
+                entity, guardBefore, req);
+        // F2：releaseId 以前在 PUT 里被静默忽略。早期态允许直接改，但必须真正移动关联行，
+        // 否则 requirement.release_id 变了、release_requirement 没变，版本侧看不到它。
+        applyReleaseChange(entity, req.extra(), scope.userId());
+
         entity.setUpdatedBy(scope.userId());
         repository.save(entity);
         if (req.domainIds != null) {
@@ -308,6 +330,29 @@ public class RequirementService {
         entity.setSonarProjectKey(next);
     }
 
+    /**
+     * 早期态 PUT 改 releaseId：真正移动关联行（r40 F2）。
+     *
+     * <p>晚期态的该字段已被 {@code RequirementChangeGuard} 拦成 409，所以执行到这里一定是
+     * 早期态或值未变。值未变时不移动，避免「提交整张表单」也 delete+insert 一遍。
+     * 十参单测没有装关联端口，此时跳过（那类单测本来就不覆盖 release 双写）。</p>
+     */
+    private void applyReleaseChange(RequirementEntity entity, Map<String, Object> extra, long actorId) {
+        if (extra == null || !extra.containsKey("releaseId")) {
+            return;
+        }
+        Long target = SysDb.asNullableLong(extra.get("releaseId"));
+        if (Objects.equals(target, entity.getReleaseId())) {
+            return;
+        }
+        com.example.req.requirement.change.RequirementReleaseMembership membership =
+                releaseMembership == null ? null : releaseMembership.getIfAvailable();
+        if (membership == null) {
+            return;
+        }
+        membership.move(entity, target, actorId);
+    }
+
     /** AC-2：父需求人天只读；RD 走 0.5 天精度校验后才落库。 */
     private void applyDaysChange(RequirementEntity entity, Map<String, Object> extra) {
         if (extra == null || (!extra.containsKey("estimateDays") && !extra.containsKey("actualDays"))) {
@@ -360,7 +405,7 @@ public class RequirementService {
         return new Detail(toView(entity, rollup), childViews,
                 gateFiltered(entity,
                         allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId())),
-                Map.of(), estimateOf(entity));
+                changePermissions(entity), estimateOf(entity));
     }
 
     /** 工时评估块的唯一入口（BUS 为 null，未评估为完整 NONE 对象）。 */
@@ -807,7 +852,7 @@ public class RequirementService {
      * 父需求人天 = 子需求之和；改动会一路向上重算（RD → PDR → BUS），
      * 否则 BUS 上显示的人天会停在 PDR 的旧值。最多 8 层防御异常数据成环。
      */
-    private void refreshParentRollup(RequirementEntity parent) {
+    public void refreshParentRollup(RequirementEntity parent) {
         RequirementEntity cursor = parent;
         int guard = 0;
         while (cursor != null && guard++ < 8) {
@@ -960,6 +1005,44 @@ public class RequirementService {
                 callerOf(TenantContext.require()), actionPermissions);
     }
 
+    /**
+     * 变更单可见性（r40 §9.3）：三个键只从这里下发，前端不再复刻早期态表或双依赖判定。
+     *
+     * <ul>
+     *   <li>{@code changeRequest}：有「发起变更」动作档且当前状态可写（终态需求不能发起）；</li>
+     *   <li>{@code changeApply}：有「应用变更」动作档（是否真能应用还要看单据状态 {@code APPROVED}）；</li>
+     *   <li>{@code editableFields}：本类型的早期态可直编字段，晚期态为空表——编辑抽屉据此锁定分组。</li>
+     * </ul>
+     *
+     * <p>权限只读 {@link ActionPermissionResolver}：动作是否被授权由平台统一判定，这里只做
+     * 「档位 ∩ 页面」的一次查询，绝不自己拼角色/功能码。</p>
+     */
+    public Map<String, Object> changePermissions(RequirementEntity entity) {
+        boolean request = hasAction("req.action.change_request") && isWritableNow(entity);
+        boolean apply = hasAction("req.action.change_apply");
+        Map<String, Object> permissions = new java.util.LinkedHashMap<>();
+        permissions.put("changeRequest", request);
+        permissions.put("changeApply", apply);
+        permissions.put("editableFields",
+                com.example.req.requirement.change.RequirementChangeFields.editableFields(
+                        entity.getType(), entity.getStatus()));
+        return permissions;
+    }
+
+    private boolean hasAction(String actionCode) {
+        if (actionPermissions == null) {
+            return false;
+        }
+        // 与 RequirementChangeService.canApply 同一判据：DENY 才是没有；RESTRICTED 是「有但受限」，
+        // 由执行侧的数据范围判定兜底，不在可见性上提前判死（否则受限角色看不到按钮也点不了）。
+        return actionPermissions.decide("req.pool", actionCode)
+                != com.example.platform.contract.PermissionMatrix.Access.DENY;
+    }
+
+    private boolean isWritableNow(RequirementEntity entity) {
+        return !stateMachine.isTerminalAcrossTypes(entity.getStatus());
+    }
+
     View toView(RequirementEntity entity, Rollup rollup) {
         Long parentId = entity.getParentId();
         String parentCode = null;
@@ -976,7 +1059,7 @@ public class RequirementService {
                 entity.getClosedAt(), entity.getUpdatedAt(), rollup,
                 gateFiltered(entity,
                         allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId())),
-                Map.of(),
+                changePermissions(entity),
                 RequirementViews.DecomposeGate.from(
                         RequirementRules.decomposeGate(entity.getType(), entity.getStatus()),
                         entity.getStatus()),

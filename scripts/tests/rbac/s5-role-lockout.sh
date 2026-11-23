@@ -107,7 +107,7 @@ NEW_GRANTS="$(set_cell "$QA_ORIG" MENU "$RBAC_PAGE" ALLOW)"
 NEW_GRANTS="$(set_cell "$NEW_GRANTS" ACTION "$RBAC_ACTION" ALLOW)"
 PUTCODE="$(put_grants "$ROLE_ID" "$NEW_GRANTS")"
 if [[ "${PUTCODE}" == "200" ]]; then
-    pass "自定义角色可写授权（171 行全量覆盖）"
+    pass "自定义角色可写授权（173 行全量覆盖）"
 else
     fail "写授权失败：HTTP ${PUTCODE}" \
         "PUT /admin/roles/{id}/permissions 必须是全量覆盖，且对自定义角色同样有效"
@@ -176,7 +176,7 @@ if [[ "${B1}" == "409|BUILTIN_ROLE_IMMUTABLE" && "${B2}" == "409|BUILTIN_ROLE_IM
     pass "内置角色不可删、不可停（409 BUILTIN_ROLE_IMMUTABLE ×2）"
 else
     fail "内置角色保护缺失：delete=${B1} disable=${B2}" \
-        "内置角色是种子推导的基准（1881 行/角色 171 行），删了之后 demo-reset 也补不回来"
+        "内置角色是种子推导的基准（1903 行/角色 173 行），删了之后 demo-reset 也补不回来"
 fi
 
 # ---------------------------------------------------------------- 9. 防锁死：清空管理员
@@ -208,7 +208,7 @@ DEL_CODE="$(api_call DELETE "/api/req/admin/roles/${ROLE_ID}" >/dev/null; printf
 LEFT_ROWS="$(db_q "SELECT COUNT(*) FROM sys_role_permission WHERE role_id = ${ROLE_ID}" | head -n1)"
 LEFT_ROLE="$(db_q "SELECT COUNT(*) FROM sys_role WHERE id = ${ROLE_ID}" | head -n1)"
 if [[ ( "${DEL_CODE}" == "200" || "${DEL_CODE}" == "204" ) && "${LEFT_ROWS}" == "0" && "${LEFT_ROLE}" == "0" ]]; then
-    pass "删除自定义角色 ⇒ 角色与其 171 行授权一起清掉"
+    pass "删除自定义角色 ⇒ 角色与其 173 行授权一起清掉"
     ROLE_ID=""
 else
     fail "删除角色不彻底：HTTP ${DEL_CODE} 角色残留=${LEFT_ROLE} 授权残留=${LEFT_ROWS}" \

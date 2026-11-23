@@ -1,6 +1,6 @@
 # 已交付功能模块清单
 
-> 生成时间：2026-11-09，**最后更新 2026-11-23**（r38 合回后）· 口径：**已验收并合入 `main`** 的能力；任务夹路径见各轮目录 `docs/teamflow/20261*-r*`。
+> 生成时间：2026-11-09，**最后更新 2026-11-23**（r40 交付后）· 口径：**已验收并合入 `main`** 的能力；任务夹路径见各轮目录 `docs/teamflow/20261*-r*`。
 > 分支 `main` 当前 = `d99530d`；每轮证据见对应任务夹的 `ACCEPTANCE.md`，门禁基线见 `memory.md:36`。
 
 ## 0. 版本台账
@@ -34,10 +34,12 @@
 | r36 | 临时主体幂等 | `tests/rbac/_lib.sh` 造名/清理原语 + trap，s3/s5/s6/s7/s8 接入，`gate-order` 18 条 | `rbac` 113×2 | `81967c4` |
 | r37 | 遗留探针清理 | `lib/temp-accounts.sh`（4 前缀白名单 + 14 名保护 + 只删 DISABLED）、`legacy-probe-purge.sh`、`gate-order` 19、`reset` 76 | purge 首跑 4 · 二跑 0 | `8c39a3a` |
 | r38 | 孤儿 join 行判定 | 谓词单点 `temp_orphan_join_where()`、`orphan-join-purge.sh`、`gate-order` 20（含负向自检）、清 413 条历史域孤儿 | 20/20 · 孤儿 role/domain 0 | `d99530d` |
+| r39 | 自动化规则引擎 | `automation_rule`/`automation_event`/`automation_run`/`requirement_tag` 四表（V15）、outbox 事件、幂等抢占、`automation-verify` 6 段 40 条 | 6/6 AC · `automation` 40/40 | 分支内（未合 main） |
+| r40 | 需求变更单 | `req_change`/`req_change_item`（V16）、第 6 类 `REQ_CHANGE` 两级审批、显式 apply、`CHANGE_REQUIRED` 收口、第 10 个 Tab + 720 四步抽屉 + 深链、`change-verify` 6 段 40 条 | 20/21 AC（另 1 条文档 P1）· `change-verify` 40/40 | 分支内（未合 main） |
 
 > r6 任务夹：[docs/teamflow/20261109-r6-ccode-cteam-ctest-p0/](20261109-r6-ccode-cteam-ctest-p0/)（PRD 20 条 AC · DESIGN · TECHNICAL · QA-REPORT · ACCEPTANCE）。
 
-**规模（2026-11-23 实测，排除 `src/test`）**：Java **495** 个类（另测试 69）、Vue **140** 个页面/组件、TS **51** 个、REST 映射 **371** 处、Flyway 迁移 **14** 个（V1–V14）、顶层运维/自测脚本 **31** 个（`scripts/tests/` 下另有 45 个）。门禁（r38 实测）：`platform-verify` **194**、`platform-test-negative` **130**、`access-verify` **206**、`rbac-verify` **113**、`platform-demo-reset` **76**、`release-flow-verify` **44**、`gate-order-verify` **20**、`wbs-backfill-verify` **18**、`unit` **392**、`lint` 22、`verify` 14。
+**规模（2026-11-23 实测，排除 `src/test`）**：Java **495** 个类（另测试 69）、Vue **140** 个页面/组件、TS **51** 个、REST 映射 **371** 处、Flyway 迁移 **16** 个（V1–V16）、顶层运维/自测脚本 **31** 个（`scripts/tests/` 下另有 45 个）。门禁（r40 实测）：`platform-verify` **194**、`platform-test-negative` **130**、`access-verify` **206**、`rbac-verify` **113**、`platform-demo-reset` **80**、`release-flow-verify` **44**、`gate-order-verify` **20**、`wbs-backfill-verify` **18**、`change-verify` **40**、`automation-verify` **40**、`unit` **392**、`lint` 22、`verify` 14。
 
 ## 1. 平台基座（r1）
 
@@ -128,7 +130,7 @@
 
 ## 11. 数据模型与工程质量
 
-- **迁移**：`V1__platform_schema.sql`（39 表）→ `V2` 列类型/`V3` 角色目录/`V4` 追溯索引/`V5__quality_management.sql`（14 表 + 5 表增列 + 5 指标）/`V6` 状态宽度/`V7` 环境字典。
+- **迁移**：`V1__platform_schema.sql`（39 表）→ `V2` 列类型/`V3` 角色目录/`V4` 追溯索引/`V5__quality_management.sql`（14 表 + 5 表增列 + 5 指标）/`V6` 状态宽度/`V7` 环境字典/`V8`–`V12` 集成·协同·分析域/`V13__vendor_pm_role.sql`/`V14__release_flow_chain.sql`/`V15__automation_rule.sql`（自动化四表）/`V16__requirement_change.sql`（需求变更单两表）；共 **16** 个，历史迁移校验和不许变。
 - **架构单点**（每条只有一份实现，验收时逐项核对）：`StateTables`、`ScopeSql`、`PermissionMatrix/RouteTable`、`MetricFormulas`、`GateEvaluator`、`QualityAggregator`、`AuditService`、`JwtCodec`、`HmacSigner`。
 - **测试套件**：`make verify` 14 · `platform-verify` 167 · `platform-test-negative` 25 · `platform-unit` 140 · `quality-verify` 347 · `lint` 16 · `web typecheck/build` 0 error；`platform-perf` 6 项（列表 P95 0.216s、准入 0.019s、上报 20 并发 p95 0.020s）。
 
@@ -172,3 +174,21 @@
 - **不许有隐形残留**（r37、r38）：临时账号清理收敛到 `lib/temp-accounts.sh` 单一真源（4 前缀白名单 + 14 名保护 + 只删 DISABLED）；孤儿 join 行判定用 `temp_orphan_join_where()` 单一谓词覆盖 `sys_user_role` 与 `sys_user_domain`，「同租户无主」即红。
 - **每条零断言都要有负向自检**：插入一条应当被数到的脏数据，证明计数 0→1→0，避免「断言退化成永不命中」的空跑（`gate-order` 第 19、20 条即此形态）。
 - **口径只有一个数**：`Makefile` 帮助行、`memory.md`、任务夹文档里的门禁条数必须同批更新；已发生过三次漂移（`negative` 128/130、权限码 56、`gate-order` 15/19），现在由 PRD 的 AC-9/AC-10 强制核对。
+
+## 17. 需求变更单（r40，2026-11-23）
+
+**定位**：变更单是**留痕单据**，不是编辑表单——冻结 `before/after` 与影响快照、同事务起第 6 类审批、显式 `apply` 才写字段、应用后逐字段留证据。任务夹 [20261123-r40-req-change-order/](20261123-r40-req-change-order/)，流程见 [CHANGE-REQUEST-FLOW.md](CHANGE-REQUEST-FLOW.md)。
+
+| 面 | 交付物 |
+|---|---|
+| 表 | `req_change`（状态/原因/两份 JSON 快照/impact/审批实例/apply 元数据，**无 FK**）、`req_change_item`（复合主键 `(change_id, field)`，主键即幂等约束）；`V16__requirement_change.sql`，V1–V15 不动、**items 只在 apply 落库** |
+| 端点 | `POST /requirements/{id}/changes`（201）、`POST .../changes/preview`（200，不落库）、`GET .../changes?status=&page=&size=`、`GET /changes/{id}`、`POST /changes/{id}/apply`（200，`APPLIED`） |
+| 领域单点 | `RequirementChangeFields`（白名单/7 键快照/归一/差异/早期态表 `editableFields`）、`RequirementChangeImpactAssessor`（8 键 impact）、`RequirementChangeValidator`（创建即拦 + apply 复验）、`RequirementChangeGuard`（PUT 收口） |
+| 事务 | `RequirementChangeService`（创建：校验+快照+impact+同事务起审批+审计）、`RequirementChangeApplyService`（12 步单事务：状态闸→需求行锁→before 比对→复验→条件更新→RELEASE 双写→写字段→items→1 条审计→锁审计） |
+| 审批 | `WorkflowVersion.BIZ_REQ_CHANGE` 第 6 类，默认 `PRODUCT → DOMAIN_OWNER` 两级；`RequirementChangeCallback` 只做 `PENDING→APPROVED/REJECTED/WITHDRAWN`，**绝不写需求字段**；`RequirementChangeSummaryProvider` 供审批中心「需求变更」摘要与深链 |
+| 权限 | 动作码 `req.action.change_request` / `req.action.change_apply`（73→**75**）、`PermissionRouteTable` 5 条路由规则、`VENDOR_PM` 显式 DENY 两条；**不进** 16 条状态迁移矩阵，零新菜单码 |
+| 前端 | 第 10 个 Tab「变更」+ 720 四步抽屉（第 ④ 步必须真 preview）+ 560 编辑抽屉（按 `editableFields` 锁定）+ 深链 `/requirements/:id/changes/:changeId` + `409 CHANGE_REQUIRED` banner；`APPROVED` 文案「已通过 · 待应用」与 `APPLIED` 彻底分开 |
+| 事件 | apply 只写 1 条 `REQUIREMENT_CHANGE_APPLIED` 审计，`AutomationEventMapper` 派生每字段 1 条 `FIELD_CHANGE`；规则字段词表扩到 8 个（7 可变更 + `owner_user_id`），title-only 规则可保存 |
+| 门禁 | `make change-verify` = `scripts/change-verify.sh`（S1 迁移与结构 5 / S2 申请与影响 8 / S3 审批映射 6 / S4 应用正负 8 / S5 人天与锁 7 / S6 收口与审计查询 6 = **40 条**；`--static-only` 12 条免栈、`--twice` 连跑两次比对）；`make test` 在 `platform-verify` 之后接一步 |
+| 计数迁移 | 动作 73→**75**、每角色 171→**173**、`sys_role_permission` 1881→**1903**、ACTION 格 803→**825**（FUNCTION 671 / MENU 407 不变）；`s0/s1/s2/s5/s7/s8/_lib/rbac-verify/platform-verify/platform-demo-reset` 同批更新，Flyway 断言 15→**16** |
+| 本轮不做 | 变更回滚（再开一张单，`before` 冻结成当前值形成审计链）、跨类型合并单、批量应用、变更单评论/附件 |

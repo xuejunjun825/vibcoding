@@ -50,6 +50,15 @@ public class SeedService {
     private static final String COLLAB_SEED_SOURCE = "db/migration/V9__ccode_cteam_ctest_p0.sql";
     /** 5 行质量指标（FPY/回归/逃逸/72h/回滚）的定义只在 V5 步 7，这里同样按段重放。 */
     private static final String QUALITY_SEED_SOURCE = "db/migration/V5__quality_management.sql";
+    /**
+     * 第六类（r40）需求变更单的默认两级定义：产品经理 → 需求所属域负责人，两个节点都是 ALL（串行会签）。
+     * 之所以提成包内常量：单元测试可以解析它，定义写坏时在 seed 之前就红，而不是等用户点「发起变更」才 400。
+     */
+    static final String CHANGE_WORKFLOW_JSON = "{\"schemaVersion\":1,\"start\":\"n1\",\"nodes\":["
+            + "{\"key\":\"n1\",\"type\":\"APPROVAL\",\"name\":\"产品经理审批\",\"mode\":\"ALL\","
+            + "\"approvers\":[{\"type\":\"ROLE\",\"value\":\"PRODUCT\"}],\"next\":\"n2\"},"
+            + "{\"key\":\"n2\",\"type\":\"APPROVAL\",\"name\":\"域负责人审批\",\"mode\":\"ALL\","
+            + "\"approvers\":[{\"type\":\"DOMAIN_OWNER\",\"value\":\"\"}],\"next\":\"end\"}]}";
 
     private final JdbcTemplate jdbc;
     private final boolean enabled;
@@ -270,6 +279,12 @@ public class SeedService {
                 + "\"approvers\":[{\"type\":\"ROLE\",\"value\":\"PRODUCT\"},"
                 + "{\"type\":\"DOMAIN_OWNER\",\"value\":\"\"}],\"next\":\"end\"}]}";
         seedWorkflow(tenantId, "WBS_ESTIMATE", "ANY", "工时评估初审（域负责人或产品经理）", apprEstimate,
+                users.get("admin"), now);
+        // 第六类（r40）：需求变更单，两级<b>串行</b>会签 —— 产品经理通过后，才轮到需求所属域负责人
+        // （AC-4「两级审批」）。这里必须是 mode=ALL 的两个节点而不是一个 ANY 节点：ANY 会让任一人
+        // 一票通过，二级形同虚设。
+        String apprChange = CHANGE_WORKFLOW_JSON;
+        seedWorkflow(tenantId, "REQ_CHANGE", "ANY", "需求变更默认审批（产品经理 → 域负责人）", apprChange,
                 users.get("admin"), now);
         jdbc.update("UPDATE biz_domain SET owner_user_id = ? WHERE tenant_id = ? AND owner_user_id IS NULL",
                 users.get("pm"), tenantId);

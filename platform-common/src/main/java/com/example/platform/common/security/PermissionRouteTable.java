@@ -151,6 +151,16 @@ public final class PermissionRouteTable {
         rules.add(rule("PUT", "^/requirements/\\d+$", page("req.pool")));
         rules.add(rule("PATCH", "^/requirements/\\d+$", page("req.pool")));
         rules.add(rule("DELETE", "^/requirements/\\d+$", page("req.pool")));
+        // 需求变更单（r40）：五个端点必须排在 /requirements 兜底之前，否则 POST 会被页规则
+        // 放行成「有页面权限就能发起变更」。apply 不以 /requirements 开头，必须独立一条。
+        rules.add(rule("POST", "^/requirements/\\d+/changes$",
+                action("req.pool", "req.action.change_request")));
+        rules.add(rule("POST", "^/requirements/\\d+/changes/preview$",
+                action("req.pool", "req.action.change_request")));
+        rules.add(rule("GET", "^/requirements/\\d+/changes$", page("req.pool")));
+        rules.add(rule("GET", "^/changes/\\d+$", page("req.pool")));
+        rules.add(rule("POST", "^/changes/\\d+/apply$",
+                action("req.pool", "req.action.change_apply")));
         rules.add(rule(null, "^/requirements.*$", page("req.pool", "me.tasks")));
 
         // ---------------------------------------------------------------- defects

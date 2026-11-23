@@ -18,7 +18,7 @@ import com.example.req.seed.RbacSeeder;
 import org.junit.jupiter.api.Test;
 
 /**
- * AC-3 as executable evidence: the 1881 seeded rows per tenant are not hand-written, they are
+ * AC-3 as executable evidence: the 1903 seeded rows per tenant are not hand-written, they are
  * derived — {@code FUNCTION = the matrix cell}, {@code MENU = max(function codes the page binds)},
  * {@code ACTION = max(function codes the action needs) unless the role carries an explicit
  * override}. If the derivation ever drifts from the matrix, upgrading quietly changes who can do
@@ -58,20 +58,28 @@ class RbacSeedEquivalenceTest {
      * that notices before the seeded rows do.
      */
     @Test
-    void vendorPmCarriesElevenRealActionOverrides() {
-        Set<String> expected = Set.of(
+    void vendorPmCarriesThirteenRealActionOverrides() {
+        // r24 的 11 条是「派生会放行、所以必须显式拒绝」；r40 新增的 2 条变更动作当前派生就是
+        // DENY（VENDOR_PM 没有 req:split/req:deliver），显式列出是防功能码表以后扩码时静默放行。
+        // 两类都断言最终 DENY；只有第一类额外断言「派生原本是 ALLOW」，那才是 no-op 的判据。
+        Set<String> derivedAllow = Set.of(
                 "release.action.create", "release.action.update",
                 "release.action.approve", "release.action.close",
                 "task.action.create", "task.action.assign",
                 "task.action.update", "task.action.close",
                 "sprint.action.create", "sprint.action.close",
                 "test.action.case_edit");
-        assertEquals(expected, RbacSeeder.actionDenyOverrides("VENDOR_PM"));
+        Set<String> expected = new java.util.LinkedHashSet<>(derivedAllow);
+        expected.add("req.action.change_request");
+        expected.add("req.action.change_apply");
+        assertEquals(Set.copyOf(expected), RbacSeeder.actionDenyOverrides("VENDOR_PM"));
         for (String code : expected) {
             ActionRegistry.ActionDef action = ActionRegistry.actions().stream()
                     .filter(candidate -> candidate.code().equals(code)).findFirst().orElseThrow();
-            assertEquals(Access.ALLOW, max("VENDOR_PM", action.functionCodes()),
-                    code + " must derive ALLOW from its function codes, or the override is a no-op");
+            if (derivedAllow.contains(code)) {
+                assertEquals(Access.ALLOW, max("VENDOR_PM", action.functionCodes()),
+                        code + " must derive ALLOW from its function codes, or the override is a no-op");
+            }
             assertEquals(Access.DENY, RbacSeeder.actionAccessFor("VENDOR_PM", action),
                     code + " must be DENY for VENDOR_PM");
         }
@@ -90,7 +98,7 @@ class RbacSeedEquivalenceTest {
                 .filter(action -> RbacSeeder.actionAccessFor("VENDOR_PM", action) == Access.ALLOW)
                 .count();
         assertEquals(7L, allowed,
-                "VENDOR_PM keeps 7 actions (73 − 11 overrides − 55 derived DENY)");
+                "VENDOR_PM keeps 7 actions (75 − 13 overrides − 55 derived DENY)");
     }
 
     /** A page that binds no function code is not narrowed by the function layer. */
@@ -117,9 +125,9 @@ class RbacSeedEquivalenceTest {
     }
 
     @Test
-    void totalRowsAreEighteenEightyOne() {
-        assertEquals(1881L, rowCount(),
-                "11 roles × (61 functions + 37 pages + 73 actions) seeded rows per tenant");
+    void totalRowsAreNineteenHundredThree() {
+        assertEquals(1903L, rowCount(),
+                "11 roles × (61 functions + 37 pages + 75 actions) seeded rows per tenant");
     }
 
     private static long rowCount() {

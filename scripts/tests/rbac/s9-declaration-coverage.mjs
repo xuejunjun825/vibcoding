@@ -116,7 +116,10 @@ for (const file of controllers) {
     if (verb === 'Get') continue
     writeEndpoints += 1
     const methodPath = (args.match(/"([^"]*)"/) || [])[1] || ''
-    const full = (classPrefix + methodPath).replace(/\{[^}]*\}/g, '\\d+').replace(/\/{2,}/g, '/').replace(/\/+$/, '') || '/'
+    // 路径变量换成具体样例值：PermissionRouteTable 的规则是给真实请求路径用的正则
+    // （如 ^/changes/\d+/apply$）。若这里也塞 \d+ 字面量，r.regex.test(full) 永远匹配不上，
+    // 路由表已覆盖的端点会被误报成「未声明动作」。
+    const full = (classPrefix + methodPath).replace(/\{[^}]*\}/g, '1').replace(/\/{2,}/g, '/').replace(/\/+$/, '') || '/'
     const line = text.slice(0, m.index).split('\n').length
 
     // 声明：注解紧跟在映射注解之后、方法签名之前
