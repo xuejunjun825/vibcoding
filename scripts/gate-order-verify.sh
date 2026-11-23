@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
-# gate-order-verify.sh — 顺序无关的机器化证明（r34，AC-5/AC-6/AC-7；r36 加 rbac）。
+# gate-order-verify.sh — 顺序无关的机器化证明（r34，AC-5/AC-6/AC-7；r36 加 rbac；r37 加临时账号自愈与负向自检）。
 #
 # 为什么需要独立门禁：顺序依赖只能由「两种顺序都跑」证伪，单序列 + 人肉推理证明不了。
 #   A 序列：reset → release-flow-verify → access-verify → access-verify
 #   B 序列：reset → access-verify → release-flow-verify → access-verify → rbac-verify
-# 每一步同时看两件事：该门禁自己的分母（75/75、CASE=44 PASS=44 FAIL=0、206/206、113/113），
+# 每一步同时看两件事：该门禁自己的分母（76/76、CASE=44 PASS=44 FAIL=0、206/206、113/113），
 # 以及 scripts/lib/gate-fixture.sh 的 gate_fixture_problems 为空（足迹/非夹具需求/演示不变量）。
 #
 # r36：rbac 只进 B 末尾，不进 A。rbac 段内 s8 会调两次 /internal/demo-reset（复位演示库），
 # 插在序列中间会把后一步的起跑基线悄悄换掉；放尾部则「rbac 自己收得干净」由第 3 条收尾基线
 # （临时主体残留 0 条）背书，A 序列的 r34 证据（rfv 之后 access 仍绿 + access 双跑幂等）原样保留。
 #
-# 18 条 = 1 栈前置 + 5 静态契约 + 9 序列步骤 + 3 收尾基线。
+# r37：临时账号口径收敛到 scripts/lib/temp-accounts.sh 一份真源（4 个白名单前缀 + 14 名保护名单 +
+# 只删 status='DISABLED'）。本脚本只做三件事：起跑先自愈一次（清掉历史遗留下来的停用探针号，
+# 清理失败直接 exit 1，不降级成 WARN）；第 18 条改成三个计数都为 0（白名单用户任意状态 / 停用 /
+# 临时角色，数与清理共用同一个正则）；第 19 条是负向自检——插一条 probe9<时间戳+pid> 的 DISABLED
+# 账号，计数必须 ≥1。没有第 19 条，正则退化成永不命中时第 18 条会永远绿，门禁静默失效。
+#
+# 19 条 = 1 栈前置 + 5 静态契约 + 9 序列步骤 + 4 收尾基线（r37 起第 4 条为负向自检）。
 # 它要独占演示栈、单轮 6–11 分钟，所以不进 make test（每次提交门禁），只做发布前门禁：
 #   make gate-order-verify
 set -uo pipefail
@@ -21,6 +27,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${ROOT}/scripts/lib.sh"
 # shellcheck source=lib/gate-fixture.sh
 source "${ROOT}/scripts/lib/gate-fixture.sh"
+# shellcheck source=lib/temp-accounts.sh
+source "${ROOT}/scripts/lib/temp-accounts.sh"
 
 GATE_FIXTURE_TENANT_CODE="${PLATFORM_TENANT:-t1}"
 
@@ -62,6 +70,22 @@ fi
 hit "演示栈就绪（req/deliver health + ${GATE_FIXTURE_TENANT_CODE}/admin 登录）"
 gate_fixture_begin || { err "gate-fixture 起跑失败（见上方 [gate] 输出）"; exit 1; }
 
+# ---------------------------------------------------------------- 起跑自愈（r37）
+# 上一轮门禁/探针可能留下「白名单前缀 + 已停用」的账号行：Java 的 DemoFixture 只把 status 改成
+# DISABLED，行仍在，真正的删除归 shell 侧。第 18 条要求三数皆 0，所以在任何段之前先清一次；
+# 否则第 18 条会红在别人的残渣上，而残渣本身不是本次改动造成的。
+# 清理失败必须让本门禁失败（静态第 2 条禁止 `不影响本次断言` 这类 WARN 降级措辞）。
+r37_selfheal() {
+    local purged
+    temp_accounts_db_ready || { err "r37 自愈：MySQL 不可连 —— 先 make platform-up"; return 1; }
+    temp_accounts_guard || { err "r37 自愈：保护名单守卫不成立，拒绝清理（见上方 [temp-accounts] 输出）"; return 1; }
+    purged="$(temp_purge_disabled)" \
+        || { err "r37 自愈：清理停用临时账号失败（见上方 [temp-accounts] 输出）"; return 1; }
+    printf '  r37 自愈：purged=%s（白名单前缀 + DISABLED；14 名保护账号不动）\n' "${purged}"
+    return 0
+}
+r37_selfheal || exit 1
+
 # ---------------------------------------------------------------- 2-5 静态契约
 banner "1) 静态契约（5）"
 
@@ -94,12 +118,12 @@ else
     miss "仍有静默清理: ${bad}" "复位只走 gate_fixture_reset；失败必须把退出码变差，不能只打 WARN"
 fi
 
-if grep -q '^TOTAL_CHECKS=75' "${ROOT}/scripts/platform-demo-reset.sh" \
+if grep -q '^TOTAL_CHECKS=76' "${ROOT}/scripts/platform-demo-reset.sh" \
     && grep -q 'NON_FIXTURE_REQS' "${ROOT}/scripts/platform-demo-reset.sh" \
     && grep -q "NOT LIKE 'DEMO-R-%'" "${ROOT}/scripts/platform-demo-reset.sh"; then
-    hit "干净基线单点定义：demo-reset TOTAL_CHECKS=75 且含「非夹具需求 0 条」"
+    hit "干净基线单点定义：demo-reset TOTAL_CHECKS=76 且含「非夹具需求 0 条」"
 else
-    miss "demo-reset 分母/断言缺失" "TOTAL_CHECKS 必须为 75，并含 NON_FIXTURE_REQS（code NOT LIKE 'DEMO-R-%' 期望 0）"
+    miss "demo-reset 分母/断言缺失" "TOTAL_CHECKS 必须为 76（r37 起含第 76 条停用账号清理），并含 NON_FIXTURE_REQS（code NOT LIKE 'DEMO-R-%' 期望 0）"
 fi
 
 if grep -q '^gate-order-verify:' "${ROOT}/Makefile" \
@@ -130,11 +154,34 @@ for g in s5-role-lockout.sh s7-negative-nine.sh s8-audit-reset.sh; do
     grep -q 'rbac_purge_roles' "${ROOT}/scripts/tests/rbac/${g}" || bad+="${g}:缺rbac_purge_roles "
 done
 grep -q 'rbac_run_tag' "${ROOT}/scripts/tests/rbac/_lib.sh" || bad+="_lib.sh:缺rbac_run_tag "
-if [[ -z "$bad" ]]; then
-    hit "rbac 五段造名/清理走 _lib.sh 原语、全部有 trap、无 \$RANDOM 造名（s5/s7/s8 另用 purge_roles）"
+# r37（并入第 5 条，不增条数）：临时账号的白名单/保护名单/清理谓词只许有 scripts/lib/temp-accounts.sh
+# 一份真源。造名与删除各自复制一份正则，就会演变成「门禁查的」与「清理删的」不是同一个口径
+# （r36 之前 527 条残留正是这么攒出来的）；再坏一点是正则退化成永不命中，门禁静默变绿。
+# 自匹配陷阱：下面两个 grep 模式写成 t6[p] / s3[|]s5，否则本行自己就会被自己的 grep 命中。
+R37_LIB="${ROOT}/scripts/lib/temp-accounts.sh"
+[[ -f "$R37_LIB" ]] || bad+="temp-accounts.sh:缺失 "
+grep -q 'TEMP_ACCOUNT_PATTERNS=(' "$R37_LIB" || bad+="temp-accounts.sh:缺白名单数组 "
+# 四个前缀逐个认。两个 t6 前缀写成 t6[p] / t6[p]robe：字面量会自己命中下面那条
+# 「消费方不得有旧正则副本」的扫描，而这个文件就是消费方之一（自匹配陷阱）。
+grep -qF -- 's[3-8]' "$R37_LIB" || bad+="白名单缺 s[3-8] "
+grep -qE 't6[p]' "$R37_LIB" || bad+="白名单缺 t6 短前缀族 "
+grep -qE 't6[p]robe' "$R37_LIB" || bad+="白名单缺 t6 长前缀族 "
+grep -qF -- 'probe' "$R37_LIB" || bad+="白名单缺 probe "
+if declare -p TEMP_PROTECTED_USERS >/dev/null 2>&1; then
+    [[ "${#TEMP_PROTECTED_USERS[@]}" == "14" ]] || bad+="保护名单 ${#TEMP_PROTECTED_USERS[@]}/14 "
 else
-    miss "rbac 段未收敛到 _lib.sh: ${bad}" \
-        "source tests/rbac/_lib.sh；造名用 rbac_run_tag；cleanup 里先 rbac_purge_users 再 rbac_purge_roles；\`trap cleanup EXIT\` 必须存在"
+    bad+="temp-accounts.sh:保护名单未加载 "
+fi
+grep -q "status = 'DISABLED'" "$R37_LIB" || bad+="temp-accounts.sh:缺 status = 'DISABLED' 谓词 "
+for g in gate-order-verify.sh platform-demo-reset.sh; do
+    n="$(grep -cE 't6[p]|s3[|]s5' "${ROOT}/scripts/${g}" || true)"
+    [[ "${n:-0}" == "0" ]] || bad+="${g}:旧正则字面量(${n}处) "
+done
+if [[ -z "$bad" ]]; then
+    hit "rbac 五段造名/清理走 _lib.sh 原语、全部有 trap、无 \$RANDOM 造名（s5/s7/s8 另用 purge_roles）；临时账号单一真源 temp-accounts.sh（4 前缀 / 14 名保护 / 只删 DISABLED，消费方无旧正则副本）"
+else
+    miss "rbac 段未收敛到 _lib.sh 或临时账号正则出现了副本: ${bad}" \
+        "source tests/rbac/_lib.sh；造名用 rbac_run_tag；cleanup 里先 rbac_purge_users 再 rbac_purge_roles；\`trap cleanup EXIT\` 必须存在；白名单/保护/清理谓词只写在 scripts/lib/temp-accounts.sh"
 fi
 
 # ---------------------------------------------------------------- 7-15 双序列
@@ -145,7 +192,7 @@ run_reset() { # label
     m="$(printf '%s' "$out" | grep -oE 'platform-demo-reset: [0-9]+/[0-9]+' | tail -n 1)"
     a="${m##*: }"; b="${a##*/}"; a="${a%%/*}"
     probs="$(gate_fixture_problems)"
-    if (( rc == 0 )) && [[ -n "$m" && "$a" == "$b" && "$a" -ge 75 && -z "$probs" ]]; then
+    if (( rc == 0 )) && [[ -n "$m" && "$a" == "$b" && "$a" -ge 76 && -z "$probs" ]]; then
         hit "${label}：reset ${a}/${b} 且基线干净"
     else
         miss "${label}：reset 未到 ${a:-?}/${b:-?}（rc=${rc}）或基线不干净" \
@@ -214,8 +261,8 @@ run_rfv "B3 rfv（access 之后）"
 run_access "B4 access（rfv 之后）"
 run_rbac "B5 rbac（access+rfv 之后，全段）"
 
-# ---------------------------------------------------------------- 16-18 收尾基线
-banner "4) 收尾基线（3）"
+# ---------------------------------------------------------------- 16-19 收尾基线
+banner "4) 收尾基线（4）"
 TID2="$(db_q "SELECT id FROM sys_tenant WHERE code='${GATE_FIXTURE_TENANT_CODE}'" 2>/dev/null | head -n1)"
 NONFIX="$(db_count requirement "tenant_id=${TID2} AND code NOT LIKE 'DEMO-R-%'")"
 TAGLEFT="0"
@@ -240,29 +287,75 @@ else
         "门禁夹具必须挂在自建父链上；挂到种子会把 DEMO-R-02 的汇总推高并让评估单 STALE"
 fi
 
-# r36 第 3 条：rbac 跑完临时主体必须 0 条。前缀口径（而不是本轮 tag）是刻意的：
-# 历史上 s7 用 $RANDOM 造名 + 只停用不删留下的 527 条垃圾，只有按段族前缀清才清得掉；
-# 名字形状同时要落进 demo-reset 的 TEMP_ACTIVE（^(s[0-9]+[a-z]*u|t[0-9]+[a-z]*|probe)[0-9]*$），
-# 所以 tag 是全数字、用户名是 s3u/s5u/s6u/s7u1/s7u2/s8u + tag。
-RBAC_USERS_LEFT="$(db_count sys_user "tenant_id=${TID2} AND username REGEXP '^(s3|s5|s6|s7|s8)[a-z0-9]*\$'")"
-RBAC_ROLES_LEFT=0
-for p in S5 S7 S8; do
-    n="$(db_count sys_role "tenant_id=${TID2} AND code LIKE '${p}%'")"
-    RBAC_ROLES_LEFT=$(( RBAC_ROLES_LEFT + ${n:-0} ))
-done
-if [[ "${RBAC_USERS_LEFT:-x}" == "0" && "$RBAC_ROLES_LEFT" == "0" ]]; then
-    hit "收尾：rbac 临时主体残留 0 条（s3/s5/s6/s7/s8 用户 + S5/S7/S8 角色）"
+# r37 第 3 条：临时主体必须 0 条，口径全部来自 scripts/lib/temp-accounts.sh（唯一正则生成点）。
+# 三个数分别挡三种漏法：
+#   ① 任意状态的用户（全库）：只清了一部分、或清完又被造出来；
+#   ② 停用（全库）：Java 的 DemoFixture 只改 status 不删行，历史遗留全落在这里（r37 首清 4 条：
+#      r18 早期探针 3 条 + 11-17 的 probe11272）；
+#   ③ 临时角色（租户内）：S5/S7/S8 自建角色——RoleAdminService.delete 只认「非内置 + 用户数 0」，
+#      所以必须先删用户再删角色，否则 ROLE_IN_USE 409 会吞掉删除。
+# 断言与清理共用同一个 TEMP_ACCOUNT_REGEX，杜绝「门禁查的」与「清理删的」各自演化；
+# 计数走 _temp_count 的 ^[0-9]+$ 校验，DB 不可连时不会被当成 0（假绿）。
+U_LEFT="$(temp_users_left)" || U_LEFT="ERR"
+D_LEFT="$(temp_disabled_left)" || D_LEFT="ERR"
+R_LEFT="$(temp_roles_left)" || R_LEFT="ERR"
+if [[ "$U_LEFT" == "0" && "$D_LEFT" == "0" && "$R_LEFT" == "0" ]]; then
+    hit "收尾：白名单用户 0 条（任意状态、全库）、停用 0 条（全库）、临时角色 0 条（${GATE_FIXTURE_TENANT_CODE}）"
 else
-    miss "收尾残留：rbac 临时用户 ${RBAC_USERS_LEFT:-?} 条 / 临时角色 ${RBAC_ROLES_LEFT} 条" \
-        "每段 cleanup 必须 rbac_purge_users 再 rbac_purge_roles（先删用户再删角色，否则 ROLE_IN_USE 409 会吞掉删除）"
+    left_names="$(temp_disabled_usernames 2>/dev/null | head -5 | tr '\n' ' ')"
+    miss "收尾残留：白名单用户 ${U_LEFT:-?} 条（期望 0）/ 停用 ${D_LEFT:-?} 条（期望 0）/ 临时角色 ${R_LEFT:-?} 条（期望 0）" \
+        "残余示例：${left_names:-<无停用号>}；修复：bash scripts/legacy-probe-purge.sh（先看它打印的正则与保护名单）后再复跑本门禁"
+fi
+
+# r37 第 4 条：负向自检——证明上面那条真的在测正则，而不是自证清白。
+# 做法：插一条白名单前缀（probe9<时间戳+pid>）且 status='DISABLED' 的账号，停用计数必须从 0 变 ≥1，
+# 然后删掉、再断言回到 0。正则一旦退化成永不命中（锚点写错、前缀漏掉 probe），这里必红。
+# name / password_hash 是 NOT NULL，不带值插入会 1364 报错——必须给非空值（TECHNICAL §10-8）。
+# 清理三路：INT/TERM 显式兜底 + 条末主动删 + 夹具 teardown（EXIT → demo-reset → 同一清理）。
+# 刻意不再注册 EXIT trap：那会顶掉 gate_fixture 的 EXIT trap，静态第 1 条会红。
+r37_tag="$(date +%m%d%H%M%S)$$"
+r37_probe="probe9${r37_tag}"
+r37_probe_cleanup() { # 幂等：先 join 行再主表（名字落在白名单正则内、状态 DISABLED，清理也能兜住）
+    db_q "DELETE ur FROM sys_user_role ur JOIN sys_user u ON u.id = ur.user_id AND u.tenant_id = ur.tenant_id WHERE u.username = '${r37_probe}'" >/dev/null 2>&1 || true
+    db_q "DELETE ud FROM sys_user_domain ud JOIN sys_user u ON u.id = ud.user_id AND u.tenant_id = ud.tenant_id WHERE u.username = '${r37_probe}'" >/dev/null 2>&1 || true
+    db_q "DELETE FROM sys_user WHERE username = '${r37_probe}'" >/dev/null 2>&1 || true
+}
+trap 'r37_probe_cleanup; exit 130' INT
+trap 'r37_probe_cleanup; exit 143' TERM
+
+r37_bad=""
+r37_d0="$(temp_disabled_left)" || r37_d0="ERR"
+[[ "$r37_d0" == "0" ]] || r37_bad+="①起跳计数已非 0(${r37_d0}) "
+
+r37_ins_rc=0
+db_q "INSERT INTO sys_user (tenant_id, username, name, password_hash, status, created_by, updated_by) VALUES (${TID2}, '${r37_probe}', 'r37 gate-order probe', 'r37probehashunused', 'DISABLED', NULL, NULL)" >/dev/null 2>&1 \
+    || r37_ins_rc=$?
+(( r37_ins_rc == 0 )) || r37_bad+="②插入失败(rc=${r37_ins_rc}) "
+
+r37_d1="$(temp_disabled_left)" || r37_d1="ERR"
+if [[ "${r37_d1:-x}" =~ ^[0-9]+$ ]] && (( r37_d1 >= 1 )); then
+    :
+else
+    r37_bad+="③插入后计数未增(${r37_d1}，期望 ≥1) "
+fi
+
+r37_probe_cleanup
+r37_d2="$(temp_disabled_left)" || r37_d2="ERR"
+[[ "$r37_d2" == "0" ]] || r37_bad+="④清理后仍非 0(${r37_d2}) "
+
+if [[ -z "$r37_bad" ]]; then
+    hit "负向自检：插入 ${r37_probe}（DISABLED）后计数 ${r37_d0}→${r37_d1}，清理后回 ${r37_d2}（正则没有退化成永不命中）"
+else
+    miss "负向自检失败：${r37_bad}" \
+        "③ 计数未增=TEMP_ACCOUNT_PATTERNS 里少了能命中 ${r37_probe} 的前缀（probe）；② 插入失败=sys_user 的 name/password_hash 非空约束；④ 清理后仍有=DATABASE 里有并发写入"
 fi
 
 # ---------------------------------------------------------------- 汇总
 printf '\n'
-if (( FAIL_N == 0 && TOTAL_N == 18 )); then
-    ok "gate-order-verify: 18/18 —— A/B 两种顺序跑完基线一致（门禁顺序无关）"
+if (( FAIL_N == 0 && TOTAL_N == 19 )); then
+    ok "gate-order-verify: 19/19 —— A/B 两种顺序跑完基线一致（门禁顺序无关，临时账号口径单一真源）"
     exit 0
 fi
-err "gate-order-verify: ${PASS_N}/${TOTAL_N}（声明 18 条）—— 失败 ${FAIL_N} 条"
-err "修复方向：先看每条 FAIL 上方的问题清单（问题: ...）；残留类问题执行 make platform-demo-reset 后再跑"
+err "gate-order-verify: ${PASS_N}/${TOTAL_N}（声明 19 条）—— 失败 ${FAIL_N} 条"
+err "修复方向：先看每条 FAIL 上方的问题清单（问题: ...）；残留类问题执行 bash scripts/legacy-probe-purge.sh 或 make platform-demo-reset 后再跑"
 exit 1

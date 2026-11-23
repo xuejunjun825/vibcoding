@@ -103,7 +103,7 @@ wbs-backfill-verify: ## 存量工时回填门禁 S1..S6 共 18 条（契约/生�
 release-flow-verify: ## 分级审批/四段链路/不可变快照门禁 S1–S8 共 44 条（先 make platform-up && platform-seed && platform-demo-reset）
 	@./scripts/release-flow-verify.sh
 
-gate-order-verify: ## A/B 双序列证明门禁顺序无关（15 条，独占演示栈）
+gate-order-verify: ## A/B 双序列证明门禁顺序无关（19 条，独占演示栈）
 	@./scripts/gate-order-verify.sh
 
 release-flow-upgrade: ## 存量库幂等升级：连跑两次 /internal/seed，定义/绑定/version 不增（先 make platform-up）

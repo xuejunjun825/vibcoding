@@ -29,15 +29,21 @@
 #   * 断言层失败继续跑完（一次看全所有差异），末尾同样打印分类与清单；
 #   * 脚本内**不重试、不 sleep**：重试只发生在网关（仅幂等 GET、仅 1 次），脚本若静默重试
 #     会把「间歇失败」掩盖成「偶尔慢」。
+# 20261120-r37：Java 的 DemoFixture 只把门禁临时号改 status='DISABLED'（行还在），真正的删除归
+#   shell 侧。本脚本在最后一次 reset_once 之后调用 scripts/lib/temp-accounts.sh 的 temp_purge_disabled
+#   （白名单前缀 + 已停用，先删 join 行再删用户），并新增第 76 条复核 DISABLED=0 且 t1 内 14 名种子
+#   仍 ACTIVE（断言数 75 → 76）。「停用谁」（下面的 TEMP_ACTIVE，与 DemoFixture 同源）与「删谁」
+#   （TEMP_ACCOUNT_REGEX）是两件事，刻意保留两份正则，不要合并。
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/temp-accounts.sh"
 
 FAIL=0
 CASE=0
-# 本脚本固定 75 项断言（r26 起 66 → 69；r30 加账号基线 1 项 → 70；r32 演示链 4 项 → 74；
-# r34 加「非夹具需求 0 条」1 项 → 75）。断言只增：
-# 新增/删除断言时同步改这里，末尾会校验实际执行数 == 声明数，漂移直接红——否则「75/75」会变成一句没人维护的祝福。
-TOTAL_CHECKS=75
+# 本脚本固定 76 项断言（r26 起 66 → 69；r30 加账号基线 1 项 → 70；r32 演示链 4 项 → 74；
+# r34 加「非夹具需求 0 条」1 项 → 75；r37 加停用账号清理 1 项 → 76）。断言只增：
+# 新增/删除断言时同步改这里，末尾会校验实际执行数 == 声明数，漂移直接红——否则「76/76」会变成一句没人维护的祝福。
+TOTAL_CHECKS=76
 FAIL_TRANSPORT=0
 FAIL_API=0
 FAIL_ASSERT=0
@@ -340,7 +346,7 @@ KEPT_VENDORS="$(db_count sys_vendor "tenant_id = ${TENANT_ID}")"
     || fail "定义数据被误删：种子账号 ${KEPT_USERS} / 域 ${KEPT_DOMAINS} / 厂商 ${KEPT_VENDORS}" \
             "DELETE_ORDER 只能包含业务实例表，账号/域/厂商属定义数据"
 
-# r30：账号「基线」也要还原，不只是「种子还在」。门禁建的一次性账号（s8u…/t6p…/probe…）若停在
+# r30：账号「基线」也要还原，不只是「种子还在」。门禁建的一次性账号（s8u… / t6 探针号 / probe…）若停在
 # ACTIVE，会污染按角色解析的审批人集合——PMO/ALL 会签节点一次生成 61 条待办，三级链与演示都走不完
 # （QA D-5）。重置只改 status（行与审计保留），REGEXP 与 DemoFixture.DISABLE_GATE_TEMP_USERS 同源。
 TEMP_ACTIVE="$(db_count sys_user "tenant_id = ${TENANT_ID} AND status = 'ACTIVE' AND username NOT IN ('admin','pm','tl1','po1','biz1','suite1','dev1','dev2','qa1','qa2','vendor1','vendor2','mgr1','vpm1') AND username REGEXP '^(s[0-9]+[a-z]*u|t[0-9]+[a-z]*|probe)[0-9]*$'")"
@@ -728,17 +734,28 @@ CUSTOM_ROLES_DB="$(db_count sys_role "tenant_id = ${TENANT_ID} AND builtin = 0")
     || fail "库内仍有 ${CUSTOM_ROLES_DB:-?} 个自定义角色" \
             "删角色不删授权行会留下孤儿行，之后同 code 重建角色会「带上」上一轮的权限"
 
+# r37 第 76 条：Java 停用步骤只改 status（DemoFixture.DISABLE_GATE_TEMP_USERS），行还在；
+# shell 侧在这里把「白名单前缀 + 已停用」的残留连同 join 行真正删掉，并复核 14 名种子仍 ACTIVE。
+# 必须放在最后一次 reset_once 之后：早删等于没删。
+PURGED_R37="$(temp_purge_disabled)" || PURGED_R37="ERR"
+D_R37="$(temp_disabled_left)" || D_R37="ERR"
+P_R37="$(temp_protected_active_count)" || P_R37="ERR"
+[[ "${D_R37}" == "0" && "${P_R37}" == "14" ]] \
+  && pass "r37 停用账号清理：DISABLED ${D_R37} / 种子 ACTIVE ${P_R37}（purged=${PURGED_R37}）" \
+  || fail "r37 停用账号：DISABLED ${D_R37}（期望 0）/ 种子 ACTIVE ${P_R37}（期望 14）" \
+          "先 bash scripts/legacy-probe-purge.sh 看首个报错；种子缺失=先 make platform-seed"
+
 # ---------------------------------------------------------------- 结果
 
 if (( CASE != TOTAL_CHECKS )); then
-    err "断言数漂移: 实际执行 ${CASE} 项，声明 ${TOTAL_CHECKS} 项——增删断言时必须同步 TOTAL_CHECKS，否则 75/75 口径失效"
+    err "断言数漂移: 实际执行 ${CASE} 项，声明 ${TOTAL_CHECKS} 项——增删断言时必须同步 TOTAL_CHECKS，否则 76/76 口径失效"
     exit 1
 fi
 if (( FAIL > 0 )); then
     err "platform-demo-reset: ${CASE} 项中 ${FAIL} 项失败（transport ${FAIL_TRANSPORT} / api ${FAIL_API} / assert ${FAIL_ASSERT}）"
     err "失败分类：transport = 栈或网络层（先 make platform-up 后重跑）；api = 接口语义；assert = 数据未回演示态"
     err "提示：assert 类若只有个别计数偏移（如需求 16 条、test_strategy 1 行），先确认没有第二个写者"
-    err "      在同一条演示栈上并发（另一次 reset/seed/门禁探针）——重置本身幂等，独占重跑即应回到 75/75"
+    err "      在同一条演示栈上并发（另一次 reset/seed/门禁探针）——重置本身幂等，独占重跑即应回到 76/76"
     err "重跑: bash scripts/platform-demo-reset.sh"
     exit 1
 fi
