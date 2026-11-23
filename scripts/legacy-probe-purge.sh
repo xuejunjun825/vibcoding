@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# legacy-probe-purge.sh — 清掉「白名单前缀 + 已停用」的遗留临时账号，并给出可复核的一行证据（r37，AC-1..AC-4）。
+# legacy-probe-purge.sh — 清掉「白名单前缀 + 已停用」的遗留临时账号，并给出可复核的一行证据（r37，AC-1..AC-4；
+# r38 起证据行同时展开 join 行孤儿两个分量：orphans_role=<n> orphans_domain=<n>）。
 #
 # 谁需要它：门禁（gate-order-verify / platform-demo-reset）失败时提示的修复命令就是本脚本；
 # 它只做编排与打印，前缀/保护名单/删除逻辑全在 scripts/lib/temp-accounts.sh 一个单点里——
@@ -9,7 +10,8 @@
 #       14 名种子账号命中即拒；join 行先删、主表后删；不写任何清单文件，全部信息只打 stdout。
 #
 # 用法：bash scripts/legacy-probe-purge.sh      # 幂等：首跑有数，二跑 purged=0
-# 退出码：0 全部达成；1 DB 不可连 / 守卫不成立（零删除）/ 删后仍有残留
+# 退出码：0 全部达成（remaining=0 且 orphans_role=0 且 orphans_domain=0）；
+#         1 DB 不可连 / 守卫不成立（零删除）/ 删后仍有账号残留或 join 行孤儿
 
 set -euo pipefail
 
@@ -63,20 +65,23 @@ main() {
     }
     remaining="$(temp_disabled_left)" || exit 1
     users_left="$(temp_users_left)" || exit 1
+    # 整行契约（r38）：orphans 是 `orphans_role=<n> orphans_domain=<n>` 一整行，原样展开、绝不拆 token。
     orphans="$(temp_orphan_join_left)" || exit 1
 
-    # AC-2 的判据行：purged=<N> remaining=0 users_left=<N> orphans_role=0
-    echo "[legacy-probe-purge] purged=${purged} remaining=${remaining} users_left=${users_left} orphans_role=${orphans}"
+    # AC-2 的判据行：purged=<N> remaining=0 users_left=<N> orphans_role=0 orphans_domain=0
+    echo "[legacy-probe-purge] purged=${purged} remaining=${remaining} users_left=${users_left} ${orphans}"
 
-    if [[ "${remaining}" != '0' || "${orphans}" != '0' ]]; then
+    # 判据只做整串比较：合法的零值行只有一种，任一分量非 0 都会让整串不等——不 awk/cut 取分量。
+    if [[ "${remaining}" != '0' || "${orphans}" != 'orphans_role=0 orphans_domain=0' ]]; then
         local sample
         sample="$(temp_disabled_usernames 2>/dev/null | head -5 | tr '\n' ' ')" || sample=''
-        echo "[legacy-probe-purge] 失败：仍有残留（remaining=${remaining} orphans_role=${orphans}）示例：${sample}" >&2
-        echo '[legacy-probe-purge] 修复：先看上面的 [temp-accounts] 首个报错；DB 写入被拒/并发重造都会让计数不归零，处理后再跑一次本命令' >&2
+        echo "[legacy-probe-purge] 失败：仍有残留（remaining=${remaining} ${orphans}）示例：${sample}" >&2
+        echo '[legacy-probe-purge] 修复：join 行孤儿非 0 → 先 bash scripts/orphan-join-purge.sh --apply（默认 dry-run 只报数），再跑本命令' >&2
+        echo '[legacy-probe-purge] 修复：账号残留 → 先看上面的 [temp-accounts] 首个报错；DB 写入被拒/并发重造都会让计数不归零' >&2
         exit 1
     fi
 
-    echo '[legacy-probe-purge] 完成：remaining=0 orphans_role=0（幂等，可重复执行）'
+    echo '[legacy-probe-purge] 完成：remaining=0 orphans_role=0 orphans_domain=0（幂等，可重复执行）'
     exit 0
 }
 

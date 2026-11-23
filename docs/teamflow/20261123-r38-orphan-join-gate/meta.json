@@ -1,0 +1,7 @@
+{
+  "reqId": "req-38",
+  "runId": "tf-mwsm0khj-297ost",
+  "title": "把「孤儿行」判定从只数 sys_user_role 扩到 sys_user_domain，并清掉库里现有的 413 条历史孤儿 sys_user_domain ",
+  "mode": "tech",
+  "createdAt": 1795398676019
+}
