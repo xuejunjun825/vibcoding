@@ -17,7 +17,12 @@
 # 临时角色，数与清理共用同一个正则）；第 19 条是负向自检——插一条 probe9<时间戳+pid> 的 DISABLED
 # 账号，计数必须 ≥1。没有第 19 条，正则退化成永不命中时第 18 条会永远绿，门禁静默失效。
 #
-# 19 条 = 1 栈前置 + 5 静态契约 + 9 序列步骤 + 4 收尾基线（r37 起第 4 条为负向自检）。
+# r38：临时主体卫生从账号层扩到 join 行层——第 20 条要求 sys_user_role / sys_user_domain 的
+# 「同租户无主」行都为 0，并内置负向自检（插一行无主 sys_user_domain，domain 计数必须 ≥1，
+# 删后回起跳值）。它只断言、不自愈：413 条 domain 孤儿是 r38 之前攒下的历史债，门禁代删会掩盖
+# 「谓词又被复制后各自演化」这类回归；修复命令固定为 bash scripts/orphan-join-purge.sh --apply。
+#
+# 20 条 = 1 栈前置 + 5 静态契约 + 9 序列步骤 + 5 收尾基线（r37 第 4 条 / r38 第 5 条为负向自检）。
 # 它要独占演示栈、单轮 6–11 分钟，所以不进 make test（每次提交门禁），只做发布前门禁：
 #   make gate-order-verify
 set -uo pipefail
@@ -261,8 +266,8 @@ run_rfv "B3 rfv（access 之后）"
 run_access "B4 access（rfv 之后）"
 run_rbac "B5 rbac（access+rfv 之后，全段）"
 
-# ---------------------------------------------------------------- 16-19 收尾基线
-banner "4) 收尾基线（4）"
+# ---------------------------------------------------------------- 16-20 收尾基线
+banner "4) 收尾基线（5）"
 TID2="$(db_q "SELECT id FROM sys_tenant WHERE code='${GATE_FIXTURE_TENANT_CODE}'" 2>/dev/null | head -n1)"
 NONFIX="$(db_count requirement "tenant_id=${TID2} AND code NOT LIKE 'DEMO-R-%'")"
 TAGLEFT="0"
@@ -315,10 +320,16 @@ fi
 # 刻意不再注册 EXIT trap：那会顶掉 gate_fixture 的 EXIT trap，静态第 1 条会红。
 r37_tag="$(date +%m%d%H%M%S)$$"
 r37_probe="probe9${r37_tag}"
+r38_uid="9${r37_tag}"   # r38 负向自检：无主 join 行的 user_id，9 前缀远离真实自增 id
 r37_probe_cleanup() { # 幂等：先 join 行再主表（名字落在白名单正则内、状态 DISABLED，清理也能兜住）
     db_q "DELETE ur FROM sys_user_role ur JOIN sys_user u ON u.id = ur.user_id AND u.tenant_id = ur.tenant_id WHERE u.username = '${r37_probe}'" >/dev/null 2>&1 || true
     db_q "DELETE ud FROM sys_user_domain ud JOIN sys_user u ON u.id = ud.user_id AND u.tenant_id = ud.tenant_id WHERE u.username = '${r37_probe}'" >/dev/null 2>&1 || true
     db_q "DELETE FROM sys_user WHERE username = '${r37_probe}'" >/dev/null 2>&1 || true
+    # r38：无主 domain 行没有对应账号，只能按 user_id 删。并轨在这里是为了不注册第二个 EXIT trap
+    # （第二个 trap 会顶掉 gate_fixture 的收尾，静态第 1 条当场红）。${r38_uid:-} 兜 set -u。
+    if [[ -n "${r38_uid:-}" ]]; then
+        db_q "DELETE FROM sys_user_domain WHERE user_id = ${r38_uid}" >/dev/null 2>&1 || true
+    fi
 }
 trap 'r37_probe_cleanup; exit 130' INT
 trap 'r37_probe_cleanup; exit 143' TERM
@@ -350,12 +361,54 @@ else
         "③ 计数未增=TEMP_ACCOUNT_PATTERNS 里少了能命中 ${r37_probe} 的前缀（probe）；② 插入失败=sys_user 的 name/password_hash 非空约束；④ 清理后仍有=DATABASE 里有并发写入"
 fi
 
+# r38 第 5 条：孤儿 join 行归零 + 内置负向自检（只断言，不自愈）。
+# 判据与删除同源：两个计数都来自 temp_orphan_join_where 渲染的同一条谓词；这里只对
+# temp_orphan_join_left 的整行输出做整串比较，不 awk/cut 取 token（半行会被当合法值）。
+# 413 条 domain 孤儿是 r38 之前攒下的历史债：门禁只报红并指路 orphan-join-purge.sh --apply，
+# 代删会掩盖「谓词又被复制后各自演化」这类回归（r36 的 527 条就是这么攒出来的）。
+r38_bad=""
+r38_join="$(temp_orphan_join_left)" || r38_join="ERR"
+[[ "$r38_join" == 'orphans_role=0 orphans_domain=0' ]] \
+    || r38_bad+="①残留 ${r38_join:-ERR}（期望 orphans_role=0 orphans_domain=0） "
+
+# domain_id 取 biz_domain（TECH-CHANGE 里的 sys_domain 不存在）；该表无外键，取不到也不能跳过自检，退化 1。
+r38_domain_id=""
+if [[ -n "${TID2:-}" ]]; then
+    r38_domain_id="$(db_q "SELECT id FROM biz_domain WHERE tenant_id=${TID2} ORDER BY id LIMIT 1" 2>/dev/null | head -n1)"
+fi
+[[ "${r38_domain_id:-}" =~ ^[0-9]+$ ]] || r38_domain_id=1
+
+r38_d0="$(temp_orphan_domain_left)" || r38_d0="ERR"
+r38_ins_rc=0
+db_q "INSERT INTO sys_user_domain (tenant_id, user_id, domain_id) VALUES (${TID2:-0}, ${r38_uid}, ${r38_domain_id})" >/dev/null 2>&1 \
+    || r38_ins_rc=$?
+(( r38_ins_rc == 0 )) || r38_bad+="②插入无主 join 行失败(rc=${r38_ins_rc}) "
+
+r38_d1="$(temp_orphan_domain_left)" || r38_d1="ERR"
+if [[ "${r38_d1:-x}" =~ ^[0-9]+$ ]] && (( r38_d1 >= 1 )); then
+    :
+else
+    r38_bad+="③插入后 domain 计数未增(${r38_d1}，期望 ≥1) "
+fi
+
+r37_probe_cleanup   # 同一把伞：user 探针 + r38 domain 行一起走
+r38_d2="$(temp_orphan_domain_left)" || r38_d2="ERR"
+# 回起跳值而不是硬编码 0：历史债未清时 ① 已红，这里只证「本探针删得掉」，两种红不混在一起。
+[[ "${r38_d2:-x}" == "${r38_d0:-y}" ]] || r38_bad+="④清理后未回起跳值(${r38_d2}，期望 ${r38_d0}) "
+
+if [[ -z "$r38_bad" ]]; then
+    hit "收尾：孤儿 join 行 role=0 domain=0（负向自检 ${r38_d0}→${r38_d1}→${r38_d2}，谓词没有退化成永不命中）"
+else
+    miss "孤儿 join 行检查失败：${r38_bad}" \
+        "修复：bash scripts/orphan-join-purge.sh --apply（默认 dry-run 只报数；删的是 sys_user_role / sys_user_domain 的无主行，不动账号）后复跑本门禁"
+fi
+
 # ---------------------------------------------------------------- 汇总
 printf '\n'
-if (( FAIL_N == 0 && TOTAL_N == 19 )); then
-    ok "gate-order-verify: 19/19 —— A/B 两种顺序跑完基线一致（门禁顺序无关，临时账号口径单一真源）"
+if (( FAIL_N == 0 && TOTAL_N == 20 )); then
+    ok "gate-order-verify: 20/20 —— A/B 两种顺序跑完基线一致（门禁顺序无关，临时主体口径单一真源）"
     exit 0
 fi
-err "gate-order-verify: ${PASS_N}/${TOTAL_N}（声明 19 条）—— 失败 ${FAIL_N} 条"
+err "gate-order-verify: ${PASS_N}/${TOTAL_N}（声明 20 条）—— 失败 ${FAIL_N} 条"
 err "修复方向：先看每条 FAIL 上方的问题清单（问题: ...）；残留类问题执行 bash scripts/legacy-probe-purge.sh 或 make platform-demo-reset 后再跑"
 exit 1

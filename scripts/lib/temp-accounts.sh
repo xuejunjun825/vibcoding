@@ -7,7 +7,7 @@
 # r36 之前每个消费方各写一份「前缀 + 删除」：断言查的与清理删的各自演化，攒下 527 条残号；
 # r37 把这些前缀、保护名单与清理收敛到本文件，四个消费方共用同一份正则。
 #
-# 依赖方向单向：lib.sh（db_q / db_up）→ 本模块 → {legacy-probe-purge.sh, gate-order-verify.sh, platform-demo-reset.sh}
+# 依赖方向单向：lib.sh（db_q / db_up）→ 本模块 → {orphan-join-purge.sh, legacy-probe-purge.sh, gate-order-verify.sh, platform-demo-reset.sh}
 # 本文件**不** source lib.sh：账号白名单是门禁语义而非通用环境层，塞进被 30+ 脚本 source 的 lib.sh
 # 会污染所有调用方；调用方先 source scripts/lib.sh，再 source 本文件。
 #
@@ -16,8 +16,11 @@
 #   temp_accounts_db_ready || exit 1
 #   temp_accounts_guard    || exit 1          # 保护名单自检 + 种子齐全，失败即零删除
 #   n="$(temp_purge_disabled)" || exit 1      # stdout 只给删除条数
+#   w="$(temp_orphan_join_where sys_user_domain d)" || exit 1   # 查/删孤儿共用的唯一谓词
+#   temp_orphan_join_left                     # → 恰好一行 orphans_role=<n> orphans_domain=<n>
 #
 # 约定：所有计数/列表函数只在 stdout 打一个数字（或每行一个 username），失败一律 return 1 并在 stderr 说明。
+#      唯一例外是 temp_orphan_join_left()：它打一整行两个计数，下游整行比较，禁止 awk/cut 取 token。
 
 if [[ -n "${TEMP_ACCOUNTS_LIB_LOADED:-}" ]]; then
     return 0
@@ -153,12 +156,58 @@ temp_protected_active_count() { # 租户内 14 名种子里 ACTIVE 的条数，�
         "租户 ${TEMP_TENANT_CODE} 内保护账号 ACTIVE"
 }
 
-temp_orphan_join_left() { # 全库 sys_user_role 孤儿条数，期望 0
-    # 刻意**不含** sys_user_domain：实测全库该表有 413 条历史孤儿（r37 之前攒的），
-    # 把它做成全局判据会让门禁从第一天永红（TECHNICAL §10-10）。域关系的证据改为
-    # 「本次删除 id 集合内 join 行 0」——由 temp_purge_disabled 逐次复核。
-    _temp_count "SELECT COUNT(*) FROM sys_user_role ur LEFT JOIN sys_user u ON u.id = ur.user_id AND u.tenant_id = ur.tenant_id WHERE u.id IS NULL" \
-        'sys_user_role 孤儿行'
+# ---- 孤儿 join 行：判定与删除共用的唯一谓词生成点（r38，AC-1..AC-3）----
+# 背景：r36 残留 527 条、r37 遗留 413 条，根因都是这段谓词被复制到多处后各自演化。
+# 因此凡「查孤儿」与「删孤儿」的 SQL，都必须由本函数渲染，禁止任何一处手写 LEFT JOIN。
+# 返回值只含 JOIN + WHERE（FROM 由调用方用自己的表名/别名拼），**恰好一行**：
+#   LEFT JOIN sys_user u ON u.id = <alias>.user_id AND u.tenant_id = <alias>.tenant_id WHERE u.id IS NULL
+# 语义是「同租户无主」：比「全库无此 user_id」更强，跨租户错配的 join 行也会被判红。
+temp_orphan_join_where() { # temp_orphan_join_where <join_table> <alias>
+    local table="${1:-}" alias="${2:-}"
+    # 表名参与校验而非渲染：本谓词只引用别名。登记制避免把谓词指到非 join 表上（那会静默查出 0）。
+    if [[ ! "${table}" =~ ^(sys_user_role|sys_user_domain)$ ]]; then
+        _temp_err "temp_orphan_join_where：未知的 join 表 '${table}'（仅支持 sys_user_role / sys_user_domain；新增表请先在这里登记）"
+        return 1
+    fi
+    if [[ ! "${alias}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ || "${alias}" == 'u' ]]; then
+        _temp_err "temp_orphan_join_where：非法别名 '${alias}'（须匹配 ^[A-Za-z_][A-Za-z0-9_]*\$ 且不能是 u——u 已被 sys_user 占用）"
+        return 1
+    fi
+    printf 'LEFT JOIN sys_user u ON u.id = %s.user_id AND u.tenant_id = %s.tenant_id WHERE u.id IS NULL\n' \
+        "${alias}" "${alias}"
+}
+
+temp_orphan_role_left() { # sys_user_role 孤儿条数，期望 0
+    local where
+    where="$(temp_orphan_join_where sys_user_role ur)" || return 1
+    _temp_count "SELECT COUNT(*) FROM sys_user_role ur ${where}" 'sys_user_role 孤儿行'
+}
+
+temp_orphan_domain_left() { # sys_user_domain 孤儿条数（r38 起纳入判据：历史上攒了 413 条），期望 0
+    local where
+    where="$(temp_orphan_join_where sys_user_domain d)" || return 1
+    _temp_count "SELECT COUNT(*) FROM sys_user_domain d ${where}" 'sys_user_domain 孤儿行'
+}
+
+temp_orphan_role_users() { # sys_user_role 孤儿行涉及的 distinct user_id 个数（dry-run 供人工核对）
+    local where
+    where="$(temp_orphan_join_where sys_user_role ur)" || return 1
+    _temp_count "SELECT COUNT(DISTINCT ur.user_id) FROM sys_user_role ur ${where}" 'sys_user_role 孤儿的 distinct user_id'
+}
+
+temp_orphan_domain_users() { # sys_user_domain 孤儿行涉及的 distinct user_id 个数（历史上是 59）
+    local where
+    where="$(temp_orphan_join_where sys_user_domain d)" || return 1
+    _temp_count "SELECT COUNT(DISTINCT d.user_id) FROM sys_user_domain d ${where}" 'sys_user_domain 孤儿的 distinct user_id'
+}
+
+temp_orphan_join_left() { # → stdout 恰好一行：orphans_role=<n> orphans_domain=<n>，期望 0 0
+    # 整行契约：下游（legacy-probe-purge / gate-order）只做整串比较，不解析 token。
+    # 两个分量都先算进变量，任一失败就 return 1——绝不输出半行（半行会被下游当合法值）。
+    local role domain
+    role="$(temp_orphan_role_left)" || return 1
+    domain="$(temp_orphan_domain_left)" || return 1
+    printf 'orphans_role=%s orphans_domain=%s\n' "${role}" "${domain}"
 }
 
 temp_roles_left() { # 租户内门禁自建角色（^(S5|S7|S8)）条数，期望 0
