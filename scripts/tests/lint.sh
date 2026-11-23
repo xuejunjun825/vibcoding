@@ -14,6 +14,8 @@
 #      聚合单点 / 分析取数单点 / 403 处理 / 动作码来源 / 授权判定单点 / 权限总览只读）
 #   L21 automation 包边界（r39）：不改状态/审批/发布单、不拼隔离列、禁动作码只在拒绝名单、
 #      assignOwner 只允许 AutomationOwnerAssigner 一处调用、限流键只能是 tenantId（TECHNICAL §5.4）
+#   L22 需求视图必带标签（r39 Q-1）：View 构造器无默认空标签、无把 tags 写死的构造点，
+#      详情与版本详情都经 RequirementTagQuery 显式查标签（列表与详情同源，AC-14 §9.2）
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/lib.sh"
 
 TOTAL=0
@@ -621,6 +623,65 @@ automation_boundary() {
     return "$bad"
 }
 
+# ---- L22 需求视图必带标签（r39 Q-1）：同一个需求不能在列表有 chip、在详情没有 ----
+# 缺陷类（不是那一个点位）：单条需求视图用「少一个参数的构造器/重载」构造，tags 落到默认空表。
+# 于是列表（RequirementPoolQuery 批量查标签）有「大需求」，详情（RequirementService.toView）
+# 返回 []——用户看到两个不同的需求，AC-14 §9.2 的「列表与详情同源」被静默破坏。
+# 修法：构造器只留带 tags 的唯一一个、所有构造点显式传标签；这条断言把三类回退变成红灯：
+#   ① 重新引入默认空标签的兼容构造器/重载  ② 新增未传标签的构造点  ③ 详情侧丢掉 tagsOf(...)
+# 行为侧的兜底是 automation-verify S3 的「详情 view.tags 与列表同源」真栈断言。
+requirement_view_carries_tags() {
+    local views="$ROOT/req-service/src/main/java/com/example/req/requirement/RequirementViews.java"
+    local svc="$ROOT/req-service/src/main/java/com/example/req/requirement/RequirementService.java"
+    local pool="$ROOT/req-service/src/main/java/com/example/req/requirement/RequirementPoolQuery.java"
+    local rel="$ROOT/req-service/src/main/java/com/example/req/release/ReleaseService.java"
+    local bad=0 hits n
+
+    n="$(grep -cE '^\s*public View\(' "$views" 2>/dev/null || true)"
+    if [[ "${n:-0}" != "0" ]]; then
+        echo "RequirementViews 里又出现了额外的 View 构造器（${n} 个）：tags 一旦有默认值，详情就会静默丢标签"
+        grep -nE '^\s*public View\(' "$views" || true
+        bad=1
+    fi
+    if ! grep -qE 'DecomposeGate decomposeGate, List<TagView> tags\)' "$views"; then
+        echo "View 的规范构造器不再要求 List<TagView> tags（标签必须是无默认值的必填参数）"
+        bad=1
+    fi
+
+    hits="$(grep -nE 'return toView\([^;]*List\.of\(\)\);' "$pool" 2>/dev/null || true)"
+    if [[ -n "$hits" ]]; then
+        echo "RequirementPoolQuery 出现把 tags 默认成空表的 toView 重载："
+        printf '%s\n' "$hits"
+        bad=1
+    fi
+    hits="$(grep -rnE 'decomposeGate, List\.of\(\)\)' "$ROOT/req-service/src/main/java" 2>/dev/null || true)"
+    if [[ -n "$hits" ]]; then
+        echo "仍有构造点把 tags 写死成 List.of()（Q-1 的原始形态）："
+        printf '%s\n' "$hits"
+        bad=1
+    fi
+
+    while IFS= read -r hits; do
+        [[ -z "$hits" ]] && continue
+        case "$hits" in
+            *"requirement/RequirementService.java"|*"requirement/RequirementPoolQuery.java"|*"release/ReleaseService.java") ;;
+            *)  echo "未登记的 View 构造点（须显式传标签并登记到 L22）：$hits"
+                bad=1 ;;
+        esac
+    done < <(grep -rlE 'new View\(|new RequirementViews\.View\(' "$ROOT/req-service/src/main/java" 2>/dev/null || true)
+
+    if ! grep -q 'tagsOf(entity.getId())' "$svc"; then
+        echo "RequirementService.toView 未传 tagsOf(...)：详情/写回响应会退回空标签"
+        bad=1
+    fi
+    if ! grep -q 'requirementTagQuery\.byRequirementIds' "$rel"; then
+        echo "ReleaseService 的需求行未查标签（版本详情与需求列表会两副面孔）"
+        bad=1
+    fi
+
+    return "$bad"
+}
+
 log "静态门禁：脚本语法 / 变量插值 / 单点实现 / 错误提示 / 文档一致性"
 run_check "L1 所有脚本 bash -n 语法通过且 source 目标存在" syntax_and_sources_ok
 run_check "L2 无 \$VAR 紧跟全角标点（防 set -u 吞变量名）" no_bare_var_before_wide_char
@@ -645,6 +706,7 @@ run_check "L18 路由表把需求/缺陷动作端点交给 bodyAction（动作�
 run_check "L19 授权判定只有 PermissionService 一个入口（无直连常量矩阵）" no_runtime_matrix_access
 run_check "L20 前端不复刻矩阵 + 权限总览只读" readonly_permission_overview
 run_check "L21 automation 包边界：不改状态/审批/发布单、不拼隔离列、禁动作码只在拒绝名单、assignOwner 单点、限流只按租户" automation_boundary
+run_check "L22 需求视图必带标签：无默认空标签构造器/重载，详情与版本详情都显式查标签" requirement_view_carries_tags
 
 if (( FAILED > 0 )); then
     err "lint 失败 ${FAILED}/${TOTAL} 项：按上面的行号修正后重跑 make lint"

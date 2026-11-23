@@ -75,9 +75,15 @@ public class RequirementService {
      * （提交单据要读需求），直接构造会成环。
      */
     private final ObjectProvider<WbsEstimateService> estimateGate;
+    /**
+     * 需求标签读路径（r39 Q-1）：详情与写回响应必须和列表走同一个查询，否则同一需求
+     * 「列表有 chip、详情没有」。产品代码一律经 {@link #tagsOf(long)} 读，List 页面走
+     * {@code RequirementPoolQuery} 的批量版（一次一页，避免 N+1）。
+     */
+    private final RequirementTagQuery tagQuery;
 
 
-    /** 十参构造：保留给既有单测（不装配评估门时门与 estimate 块均不生效）。 */
+    /** 十参构造：保留给既有单测（不装配评估门与标签端口时门/estimate/tags 均不生效）。 */
     public RequirementService(RequirementRepository repository,
                               RequirementDomainRelRepository domainRelRepository,
                               RequirementStateMachine stateMachine,
@@ -90,7 +96,7 @@ public class RequirementService {
                               ActionPermissionResolver actionPermissions) {
         this(repository, domainRelRepository, stateMachine, codeGenerator, auditService,
                 notificationWriter, gatePort, approvalStarter, jdbcTemplate, actionPermissions,
-                null);
+                null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -104,7 +110,8 @@ public class RequirementService {
                               ObjectProvider<RequirementApprovalStarter> approvalStarter,
                               JdbcTemplate jdbcTemplate,
                               ActionPermissionResolver actionPermissions,
-                              ObjectProvider<WbsEstimateService> estimateGate) {
+                              ObjectProvider<WbsEstimateService> estimateGate,
+                              RequirementTagQuery tagQuery) {
         this.repository = repository;
         this.domainRelRepository = domainRelRepository;
         this.stateMachine = stateMachine;
@@ -116,6 +123,7 @@ public class RequirementService {
         this.jdbcTemplate = jdbcTemplate;
         this.actionPermissions = actionPermissions;
         this.estimateGate = estimateGate;
+        this.tagQuery = tagQuery;
     }
 
     // ---------------------------------------------------------------- create
@@ -971,7 +979,24 @@ public class RequirementService {
                 Map.of(),
                 RequirementViews.DecomposeGate.from(
                         RequirementRules.decomposeGate(entity.getType(), entity.getStatus()),
-                        entity.getStatus()));
+                        entity.getStatus()),
+                tagsOf(entity.getId()));
+    }
+
+    /**
+     * 单条需求的标签（r39 Q-1）。
+     *
+     * <p>详情、create/update 写回、转派与交付响应都经 {@link #toView} 出视图，所以标签只能在这一个
+     * 地方补齐：任何一处另写「空标签」都会让同一个需求在列表与详情里长得不一样（AC-14 §9.2）。</p>
+     *
+     * <p>十参构造（单测）不装配标签端口，此时返回空表；产品代码由 Spring 注入十一参构造。</p>
+     */
+    private List<RequirementViews.TagView> tagsOf(long requirementId) {
+        if (tagQuery == null) {
+            return List.of();
+        }
+        return tagQuery.byRequirementIds(List.of(requirementId))
+                .getOrDefault(requirementId, List.of());
     }
 
     private void rejectStatusInBody(Map<String, Object> extra) {

@@ -215,10 +215,11 @@ class WbsEstimateGateTest {
                                        RequirementStateMachine machine, AuditService audit,
                                        NotificationWriter notifications) {
         ObjectProvider<WbsEstimateService> gateProvider = provider(estimates);
+        // 标签端口传 null：本测试只关心人天门，tagsOf(null 端口) 返回空表（见 RequirementService 注释）。
         return new RequirementService(repository,
                 mock(RequirementDomainRelRepository.class), machine, mock(CodeGenerator.class),
                 audit, notifications, provider(null), provider(null),
-                mock(JdbcTemplate.class), ALLOW_ALL, gateProvider);
+                mock(JdbcTemplate.class), ALLOW_ALL, gateProvider, null);
     }
 
     private void given(ApprovalInstance instance) {

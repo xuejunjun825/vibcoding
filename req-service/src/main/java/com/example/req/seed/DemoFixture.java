@@ -55,6 +55,13 @@ public final class DemoFixture {
     public static final long PLAN_COUNT = 1;
     public static final long PLAN_CASE_COUNT = 10;
     public static final long DEFECT_COUNT = 3;
+    /**
+     * 种子通知 4 条——不是"重置后全表通知数"。
+     *
+     * <p>重置事务（Tx1）写完这 4 条后，同一命令还会跑一遍演示审批链（Tx2/Tx3），再写 22 条
+     * {@code APPROVAL}/{@code APPROVAL_RESULT} 通知；直接用 {@code SELECT COUNT(*)} 会看到 26
+     * （r39 Q-5 的口径误会，不是回归）。要复核种子数，看自检 counts 而不是全表行数。</p>
+     */
     public static final long NOTIFICATION_COUNT = 4;
     /** r15-fix：派生实例数据没有种子，重置后必须为 0（否则是 release 已删的孤儿）。 */
     public static final long TEST_STRATEGY_COUNT = 0;

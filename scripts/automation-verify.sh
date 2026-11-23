@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# automation-verify.sh — r39 自动化规则引擎真栈门禁（S1–S6，共 39 条）。
+# automation-verify.sh — r39 自动化规则引擎真栈门禁（S1–S6，共 40 条）。
 #
 # 这个脚本要证明的不是「接口能返回 200」，而是五件靠代码结构保证的事：
 #   1. 事件只从审计旁路产生，前端没有上报入口（/automation/events 必须 404）；
@@ -9,11 +9,11 @@
 #   5. 动作只有四类白名单，能写库的先提交、通知与外呼后置。
 #
 # 用法：
-#   bash scripts/automation-verify.sh                # 全量 39 条（需 make platform-up）
+#   bash scripts/automation-verify.sh                # 全量 40 条（需 make platform-up）
 #   bash scripts/automation-verify.sh --static-only  # 不连栈，只查契约自洽（S2/S5 的静态部分）
 #
 # 约定（与 release-flow-verify / platform-demo-reset 一致）：
-#   - 脚本自声明 AUTOMATION_TOTAL=39，CASE 必须等于 TOTAL，少跑一段就是红；
+#   - 脚本自声明 AUTOMATION_TOTAL=40，CASE 必须等于 TOTAL，少跑一段就是红；
 #   - 前置缺失（栈没起、admin/vendor1 登录失败）直接 die，不 skip（条件跳过=假绿）；
 #   - 独立 RUN_TAG + EXIT 清理：跑完不残留规则/需求/事件/运行/标签，
 #     demo-reset 之后仍然 80/80（本脚本自己造的数据自己收走）。
@@ -23,7 +23,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${ROOT}/scripts/lib.sh"
 set +e
 
-AUTOMATION_TOTAL=39
+AUTOMATION_TOTAL=40
 CASE=0
 PASS=0
 FAIL=0
@@ -79,10 +79,10 @@ static_checks() {
 
     printf '\n\033[1;36m== automation 门禁静态部分：事件入口 / 动作白名单 / 错误码 / 种子与门禁自洽 ==\033[0m\n'
 
-    if [[ "$(grep -c '^AUTOMATION_TOTAL=39$' "${BASH_SOURCE[0]}")" == "1" ]]; then
-        s_pass "脚本自声明 AUTOMATION_TOTAL=39（TECHNICAL §12.2 的分母唯一）"
+    if [[ "$(grep -c '^AUTOMATION_TOTAL=40$' "${BASH_SOURCE[0]}")" == "1" ]]; then
+        s_pass "脚本自声明 AUTOMATION_TOTAL=40（TECHNICAL §12.2 的分母唯一）"
     else
-        s_fail "AUTOMATION_TOTAL 不是 39 或重复声明" "断言数变化必须同步 TECHNICAL §12.2"
+        s_fail "AUTOMATION_TOTAL 不是 40 或重复声明" "断言数变化必须同步 TECHNICAL §12.2"
     fi
 
     if [[ -f "$api" ]] && ! grep -qE 'DeleteMapping|@RequestMapping\(value *= *"/events|"/events"' "$api" \
@@ -424,9 +424,9 @@ api_call PUT "${RULE_URL}/${S2_RULE:-0}" "$(jq -cn --arg t "S2-新-${RUN_TAG}" \
 deny "旧 version 更新 → 409 AUTOMATION_RULE_VERSION_CONFLICT" 409 AUTOMATION_RULE_VERSION_CONFLICT \
     "启停与编辑都带 version：防止「停用覆盖别人刚改的条件」（AC-7）"
 
-# --------------------------------------------------------------------------- S3 幂等（6）
+# --------------------------------------------------------------------------- S3 幂等（7）
 
-section "S3 幂等：同一 event_id 重投两次，run/通知/标签/审计各一次（6 条）"
+section "S3 幂等：同一 event_id 重投两次，run/通知/标签/审计各一次（7 条）"
 
 create_req "S3-幂等-${RUN_TAG}" P0 "[${DOMAIN_ORD}]"
 S3_REQ="$REQ_ID"
@@ -485,6 +485,18 @@ if [[ "$S3_TAGS" == "1" ]]; then
     pass "ADD_TAG 幂等：uk_req_tag 命中时返回 SUCCESS+exists，标签恰 1 行"
 else
     fail "标签 ${S3_TAGS} 行（应 1）" "AutomationTagWriter 必须 INSERT IGNORE，重复即成功而不是报错"
+fi
+
+# 标签只在列表可见、详情不可见 —— 同一个需求在列表有 chip、在详情没有（AC-14 §9.2 要求同源）。
+# 这条断言是 Q-1 那个「类」的真栈门禁：详情视图必须经 RequirementTagQuery 读标签，
+# 而不是由某个兼容构造器静默填空表。静态那一半见 lint L22。
+api_call GET "/api/req/requirements/${S3_REQ:-0}"
+S3_DETAIL_TAGS="$(jqv '[.view.tags[]? | select(.tag=="幂等标签" and .source=="RULE")] | length' "$HTTP_BODY")"
+if [[ "$S3_DETAIL_TAGS" == "1" ]]; then
+    pass "详情 view.tags 与列表同源（「幂等标签」/RULE 在详情可见）"
+else
+    fail "详情 view.tags 缺「幂等标签」（库 ${S3_TAGS} 行，详 Matches=${S3_DETAIL_TAGS:-0}）" \
+        "RequirementService.toView 必须经 RequirementTagQuery.byRequirementIds 补标签；空兼容构造器会让详情静默丢标签"
 fi
 
 create_rule "S3-指派-${RUN_TAG}" REQUIREMENT_CREATED DOMAIN "$DOMAIN_ORD" 120 \

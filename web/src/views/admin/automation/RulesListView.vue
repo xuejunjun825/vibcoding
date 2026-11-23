@@ -461,7 +461,8 @@ const forbidden = computed(
               </template>
             </el-table-column>
 
-            <el-table-column label="状态" width="96">
+            <!-- 宽度按「开关 + 已停用（3 字）+ 单元格内边距」实测给足：96 会把启用态压成「启用 ..」（r39 Q-4） -->
+            <el-table-column label="状态" width="116">
               <template #default="{ row }">
                 <div class="auto-state">
                   <el-switch
@@ -476,6 +477,7 @@ const forbidden = computed(
                   <span
                     class="auto-state__pill"
                     :class="row.enabled ? 'auto-state__pill--on' : 'auto-state__pill--off'"
+                    :title="row.enabled ? '启用' : '已停用'"
                   >
                     {{ row.enabled ? '启用' : '已停用' }}
                   </span>

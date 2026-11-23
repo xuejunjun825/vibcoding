@@ -243,10 +243,6 @@ public class RequirementPoolQuery {
         return tagQuery.byRequirementIds(ids);
     }
 
-    View toView(Map<String, Object> row, Rollup rollup, List<String> allowedActions) {
-        return toView(row, rollup, allowedActions, List.of());
-    }
-
     View toView(Map<String, Object> row, Rollup rollup, List<String> allowedActions,
                 List<RequirementViews.TagView> tags) {
         Long id = Rows.toLong(Rows.object(row, "id"));

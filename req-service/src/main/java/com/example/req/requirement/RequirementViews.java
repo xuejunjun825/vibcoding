@@ -48,25 +48,14 @@ public final class RequirementViews {
                        Rollup rollup, List<String> allowedActions, Map<String, Boolean> permissions,
                        DecomposeGate decomposeGate, List<TagView> tags) {
 
-        /**
-         * Compatibility constructor for the call sites that do not need tags (detail and release
-         * views build their own view). Keeps the tag work strictly additive: a caller that ignores
-         * tags still compiles and still gets a valid (empty) list.
+        /*
+         * 只有一个构造器，`tags` 是必填参数（r39 Q-1）。
+         *
+         * 原来还有一个把 tags 默认成 List.of() 的兼容构造器，结果详情路径（RequirementService.toView）
+         * 每次都拿到空标签：列表有「大需求」chip、详情没有，用户看到的是两个不同的需求
+         * （AC-14 §9.2 要求列表与详情同源）。删掉兼容构造器后，「忘记传标签」从运行期静默丢数据
+         * 变成编译错误——新增调用点无法再悄悄丢掉标签。lint L22 静态锁住这条。
          */
-        public View(Long id, String code, String type, String status, String priority, String title,
-                    String description, Long parentId, String parentCode, Long domainId,
-                    Long originOrgId, Long ownerUserId, Long ownerVendorId, Long assigneeVendorId,
-                    Long releaseId, BigDecimal estimateDays, BigDecimal actualDays, String mrUrl,
-                    LocalDate expectedDeliveryDate, LocalDate planStartDate, LocalDate planEndDate,
-                    LocalDateTime closedAt, LocalDateTime updatedAt, Rollup rollup,
-                    List<String> allowedActions, Map<String, Boolean> permissions,
-                    DecomposeGate decomposeGate) {
-            this(id, code, type, status, priority, title, description, parentId, parentCode,
-                    domainId, originOrgId, ownerUserId, ownerVendorId, assigneeVendorId, releaseId,
-                    estimateDays, actualDays, mrUrl, expectedDeliveryDate, planStartDate,
-                    planEndDate, closedAt, updatedAt, rollup, allowedActions, permissions,
-                    decomposeGate, List.of());
-        }
     }
 
     /** 需求标签（r39）：{@code source} 区分人工打标与规则打标，前端据此给出不同样式。 */

@@ -273,5 +273,5 @@ r1 的四步（`dev-up / verify / test-negative / dev-down`）与 `/api/demo/**`
 
 数据面：`V15__automation_rule.sql` 建四表（`automation_rule` / `automation_event` / `automation_run` / `requirement_tag`），V1–V14 字节不变。已知代价两条：① 日志页的规则名走 `LEFT JOIN automation_rule`，规则改名后旧日志显示新名字（不存 `rule_name` 副本）；② `SCHEDULE` 截断行 `requirement_id IS NULL`，唯一键对 NULL 不去重，只能用 `INSERT … WHERE NOT EXISTS` —— 这是唯一一条不用唯一键的实现，写在 `AutomationRunWriter` 注释里。
 
-演示与门禁：`platform-demo-reset` 种 R1/R2 两条规则、自检 76 → **80** 项；新增 `make automation-verify`（6 段 39 条：正例/负例/幂等/防循环/越权/停用与动作边界）。
+演示与门禁：`platform-demo-reset` 种 R1/R2 两条规则、自检 76 → **80** 项；新增 `make automation-verify`（6 段 40 条：正例/负例/幂等/防循环/越权/停用与动作边界；S3 含「详情 view.tags 与列表同源」的回归断言）。
 

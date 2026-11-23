@@ -22,6 +22,11 @@ export const SKIP_LABELS: Record<string, string> = {
   TARGET_INVALID: '目标用户不可指派（不在作用域/已停用）',
   SCHEMA_INVALID: '规则条件或动作已无法解析（schema 非法）',
   SCHEDULE_TRUNCATED: '定时扫描达到单日 200 条上限',
+  // 动作失败的原因码（r39 Q-3）：执行器把异常归一成这几种，日志里不再只有裸 FAILED。
+  SECRET_MISSING: '集成配置缺少签名密钥',
+  SSRF_BLOCKED: '外呼地址不在允许范围，已拦截',
+  TIMEOUT: '对端响应超时',
+  UNREACHABLE: '对端不可达',
 }
 
 /** 动作结果的正常码（不是失败，别吓用户） */

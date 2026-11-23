@@ -84,7 +84,8 @@ public class AutomationActionExecutor {
                 } catch (RuntimeException ex) {
                     log.warn("automation db action failed: rule={} type={} error={}", rule.getId(),
                             action.type(), ex.getMessage());
-                    outcomes.set(i, ActionOutcomes.failed(action.type(), "FAILED", null));
+                    outcomes.set(i, ActionOutcomes.failed(action.type(),
+                            ActionOutcomes.failureCode(ex), null));
                 }
             }
         });
@@ -104,7 +105,8 @@ public class AutomationActionExecutor {
             } catch (RuntimeException ex) {
                 log.warn("automation side effect failed: rule={} type={} error={}", rule.getId(),
                         action.type(), ex.getMessage());
-                outcomes.set(i, ActionOutcomes.failed(action.type(), "FAILED", null));
+                outcomes.set(i, ActionOutcomes.failed(action.type(),
+                        ActionOutcomes.failureCode(ex), null));
             }
         }
         return outcomes;

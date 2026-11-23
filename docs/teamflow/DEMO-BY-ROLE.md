@@ -246,7 +246,8 @@ node scripts/tests/access/a4-nav-visibility.mjs       # 只跑角色可见集推
   ```bash
   make platform-demo-reset
   ```
-  该命令调内部端点 `POST /api/req/internal/demo-reset`（需 `X-Internal-Token`，且 `PLATFORM_SEED_ENABLED` 关闭时端点不存在），重建 12 条需求小链路 + 1 版本 + 1 迭代 + 12 用例 + 3 缺陷 + 1 测试计划 + 1 甘特组 8 行 + ≤5 通知 + 2 条自动化规则（§9），并自检 4 条不变量（需求 12 / `po1` 见 8 / `vendor1` 见 3 / `vendor2` 见 0）与夹具痕迹清零；不进自动门禁，属演示前手动动作。
+  该命令调内部端点 `POST /api/req/internal/demo-reset`（需 `X-Internal-Token`，且 `PLATFORM_SEED_ENABLED` 关闭时端点不存在），重建 12 条需求小链路 + 1 版本 + 1 迭代 + 12 用例 + 3 缺陷 + 1 测试计划 + 1 甘特组 8 行 + **4 条种子通知** + 2 条自动化规则（§9），并自检 4 条不变量（需求 12 / `po1` 见 8 / `vendor1` 见 3 / `vendor2` 见 0）与夹具痕迹清零；不进自动门禁，属演示前手动动作。
+  > 口径（r39 Q-5）：重置脚本断言的 **4** 是"种子通知"，即重置事务（Tx1）写完的计数；紧接着的 Tx2/Tx3 会跑一遍演示审批链，再产生 **22 条** `APPROVAL`/`APPROVAL_RESULT` 通知，所以重置后直接 `SELECT COUNT(*) FROM notification` 看到的是 **26**，这不是回归、也不是种子多写了。要复核种子数就看自检输出里的那 4 条，不要用全表行数。
 - 账号缺口已补：`biz1`/`suite1`（§1）。
 
 ---
@@ -329,7 +330,7 @@ make platform-demo-reset   # 含 2 条演示规则，自检 80 项（原 76 + �
 | 步 | 操作 | 期望（约 5 秒内可复核） | 截图 |
 |---|---|---|---|
 | 1 | 确认 R1 为「已启用」→ 需求池新建 **P0** 需求（`ORD` 域） | 「执行日志」出现 1 行 `SUCCESS`，展开可见动作 `NOTIFY` 结果为成功；`tl1`（`ORD` 域负责人）通知 +1。建需求的 HTTP 请求**不等执行**——消费在后台 worker，业务侧响应时间不受规则影响 | `demo-shots/r39-automation-r1-success.png` |
-| 2 | 把该需求 `estimate_days` 改成 **12**（≥10 命中 R2） | 日志出现 `ADD_TAG` 行 `SUCCESS`；需求列表与详情概览出现「**大需求**」chip（同一个 `TagChips` 组件，列表与详情同源） | `demo-shots/r39-automation-r2-tag.png` |
+| 2 | 把 `ORD` 域**叶子**需求 `DEMO-R-10`（RD，子需求）的 `estimateDays` 改成 **12**（≥10 命中 R2）。**不要改父需求**：父需求（P0/PDR）的人天由子需求汇总，改成父需求会 400 `PARENT_DAYS_READONLY`（r39 Q-2，原文档写的就是父需求，按字面走会撞墙） | 日志出现 `ADD_TAG` 行 `SUCCESS`；`DEMO-R-10` 在需求列表与详情概览都出现「**大需求**」chip（同一个 `TagChips` 组件，列表与详情同源——详情缺标签是 r39 Q-1，已修） | `demo-shots/r39-automation-r2-tag.png` |
 | 3 | 规则列表把 R1 **停用** → 再新建一条 P0 需求 | 日志无新行（0 run）、`tl1` 无新通知；R1 行显示「已停用」，只降字色**不降透明度**（停用恰恰是最该核对配置的时刻） | `demo-shots/r39-automation-r1-disabled.png` |
 
 三步的判据都是「**执行日志里有没有那一行**」，不是 toast：执行是异步的，页面弹一句"已触发"就是在撒谎。
@@ -343,7 +344,7 @@ make platform-demo-reset   # 含 2 条演示规则，自检 80 项（原 76 + �
 ### 9.4 自动门禁与复现
 
 ```bash
-make automation-verify                          # 6 段 39 条：正例 / 负例 / 幂等 / 防循环 / 越权 / 停用+动作边界
+make automation-verify                          # 6 段 40 条：正例 / 负例 / 幂等 / 防循环 / 越权 / 停用+动作边界
 bash scripts/automation-verify.sh --static-only # 免栈的静态部分
 ```
 

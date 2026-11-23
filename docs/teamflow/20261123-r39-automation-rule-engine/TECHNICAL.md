@@ -846,18 +846,18 @@ restrict(matrix, "PMO", ...);   // 其余角色保持默认 DENY，不写 restri
 
 ### 12.2 `scripts/automation-verify.sh`（6 段 ≥36 条，独立 `RUN_TAG`）
 
-风格照 `scripts/release-flow-verify.sh`：`AUTOMATION_TOTAL=39`、`PASS/FAIL`、缺前置直接 `die` 不 skip、`--static-only` 只跑 S2/S5 的静态断言。
+风格照 `scripts/release-flow-verify.sh`：`AUTOMATION_TOTAL=40`、`PASS/FAIL`、缺前置直接 `die` 不 skip、`--static-only` 只跑 S2/S5 的静态断言。
 
 | 段 | 条数 | 断言（摘要） |
 |---|---|---|
 | S1 正例 | 6 | 建规则 201/version=1；列表可见；建 P0 需求后 5s 内 run=SUCCESS；`actions_json` 含 NOTIFY SUCCESS；通知 +1；需求 `status`/`estimate_days` 未变 |
 | S2 负例 | 8 | 未知条件键 400；`SET_STATUS` 400 ACTION_NOT_ALLOWED；空动作 400；动作 >10 400；name >100 400；payload >8KB 400；同名 409；旧 version 409 |
-| S3 幂等 | 6 | 同 event_id 重投两次 → run 恰 1 行；通知恰 1；标签恰 1；负责人变更恰 1 次审计；同键第二条 run 不存在；日志无第二条 SUCCESS |
+| S3 幂等 | 7 | 同 event_id 重投两次 → run 恰 1 行；通知恰 1；标签恰 1；负责人变更恰 1 次审计；同键第二条 run 不存在；日志无第二条 SUCCESS；**详情 `view.tags` 与列表同源**（r39 QA Q-1 的真栈回归断言） |
 | S4 防循环 | 5 | 动作产生的事件 origin=RULE；该事件 DROPPED/RULE_ORIGIN；该事件 0 run；手工 `chain_depth=4` → DROPPED/CHAIN_DEPTH；`chain_depth=3` 仍执行 |
 | S5 越权 | 6 | 厂商 A 规则对 B 需求 0 run；0 通知；日志无 B 编号；放宽条件 400 CONDITION_WIDENS_SCOPE；失去可见性 → SCOPE_LOST；vendor1 → 403 INTERNAL_ONLY |
 | S6 停用+动作边界 | 8 | 停用后 1s 内 0 新 run；停用 version+1；121 条至少 1 条 RATE_LIMITED；NO_RECIPIENT；TARGET_INVALID；WEBHOOK 未登记 configId 400；run 响应无密钥/完整 URL；清理后 RUN_TAG 残留 0 |
 
-共 **39** 条 ≥36。连续两次运行第二次仍全绿（脚本内不复用一次性夹具，清理段按 `RUN_TAG` 前缀删 run/event/tag/notification/requirement）。运行后 `make platform-demo-reset` 仍 80/80。
+共 **40** 条 ≥36。连续两次运行第二次仍全绿（脚本内不复用一次性夹具，清理段按 `RUN_TAG` 前缀删 run/event/tag/notification/requirement）。运行后 `make platform-demo-reset` 仍 80/80。
 
 ### 12.3 既有九条门禁（不缩水口径）
 
@@ -886,7 +886,7 @@ restrict(matrix, "PMO", ...);   // 其余角色保持默认 DENY，不写 restri
 | **T4** | 规则域与权限 | `req-service/.../automation/{rule/**,spec/**,api/AutomationRuleController.java,api/AutomationDtos.java,api/AutomationInternalOnlyInterceptor.java,AutomationWebConfig.java}`、`platform-common/.../security/PermissionRouteTable.java` | §4.1、§7、§10.1 | S2 8 条负例 + S5 的 403 INTERNAL_ONLY；`GET /automation/meta` 可用 |
 | **T5** | 执行引擎与动作 | `req-service/.../automation/{engine/**,action/**,job/**}`、`req-service/.../requirement/{RequirementViews.java,RequirementPoolQuery.java,RequirementTagQuery.java}`、`req-service/.../automation/api/AutomationRunController.java` | §4.2-4.4、§5、§6、§8 | S1/S3/S4/S6 的非前端断言；单测 5 个类全绿 |
 | **T6** | 四视图与标签 | `web/src/api/{automation.ts,req.ts}`、`web/src/views/admin/automation/**`、`web/src/components/{AutomationRuleSentence,AutomationRunVerdict,TagChips}.vue`、`web/src/layouts/{nav.ts,pageRegistry.ts}`、`web/src/router/routes/deliver.routes.ts`、`web/src/views/admin/AdminLayout.vue`、`web/src/views/req/{RequirementPoolView.vue,RequirementDetailView.vue,tabs/OverviewTab.vue}` | DESIGN 全文、UI-STYLE、§7 | `npm run typecheck && npm run build`；四视图可访问；无原始 JSON 编辑器；无权限按钮 disabled+title |
-| **T7** | 演示种子与门禁 | `req-service/.../seed/{DemoFixture.java,DemoResetService.java}`、`scripts/platform-demo-reset.sh`、`scripts/automation-verify.sh`、`Makefile`、`scripts/tests/lint.sh` | §11、§12 | demo-reset **80/80** 连跑两次；`make automation-verify` 39/39 连跑两次；`make lint` 23 项 |
+| **T7** | 演示种子与门禁 | `req-service/.../seed/{DemoFixture.java,DemoResetService.java}`、`scripts/platform-demo-reset.sh`、`scripts/automation-verify.sh`、`Makefile`、`scripts/tests/lint.sh` | §11、§12 | demo-reset **80/80** 连跑两次；`make automation-verify` 40/40 连跑两次；`make lint` 24 项 |
 | **T8** | 文档与提交卫生 | `docs/teamflow/DEMO-BY-ROLE.md`、`docs/teamflow/architecture/ARCHITECTURE.md`、`docs/teamflow/memory.md`（只核 r39 行） | PRD §10 | `.gitignore` 复核（7 类产物 + `demo-shots/` 不被忽略）；提交信息含 `runId=tf-mwspkg4u-nvy5y5` 与任务夹路径；提交后九条门禁全绿 |
 
 **git 约束（逐字进 T8，也不许丢）**：在既有 `feat/automation-rules-engine` 分支开发，**不新建分支、不合并**；工作区已有的未提交任务夹 `docs/teamflow/20261123-r39-automation-rule-engine/` 与 `docs/teamflow/memory.md` 必须**一并提交、不丢弃**；提交信息含 `runId=tf-mwspkg4u-nvy5y5` 与任务夹路径；`pom.xml`/`web/package.json`/锁文件 diff 必须为空；V1–V14 字节不变。
