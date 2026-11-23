@@ -1,7 +1,7 @@
 # 已交付功能模块清单
 
-> 生成时间：2026-11-09，**最后更新 2026-11-23**（r40 交付后）· 口径：**已验收并合入 `main`** 的能力；任务夹路径见各轮目录 `docs/teamflow/20261*-r*`。
-> 分支 `main` 当前 = `d99530d`；每轮证据见对应任务夹的 `ACCEPTANCE.md`，门禁基线见 `memory.md:36`。
+> 生成时间：2026-11-09，**最后更新 2026-11-23**（r41 轮内台账订正）· 口径：**已验收并合入 `main`** 的能力（r39 起含已在分支内交付、尚未合 `main` 的轮次）；任务夹路径见各轮目录 `docs/teamflow/20261*-r*`。
+> 分支 `main` 当前 = `d99530d`；每轮证据见对应任务夹的 `ACCEPTANCE.md`，门禁基线以 [memory.md](memory.md) 的「门禁基线以实测为准」条为唯一口径（行号会随轮次漂移，只按条目标题引用）。
 
 ## 0. 版本台账
 
@@ -35,11 +35,11 @@
 | r37 | 遗留探针清理 | `lib/temp-accounts.sh`（4 前缀白名单 + 14 名保护 + 只删 DISABLED）、`legacy-probe-purge.sh`、`gate-order` 19、`reset` 76 | purge 首跑 4 · 二跑 0 | `8c39a3a` |
 | r38 | 孤儿 join 行判定 | 谓词单点 `temp_orphan_join_where()`、`orphan-join-purge.sh`、`gate-order` 20（含负向自检）、清 413 条历史域孤儿 | 20/20 · 孤儿 role/domain 0 | `d99530d` |
 | r39 | 自动化规则引擎 | `automation_rule`/`automation_event`/`automation_run`/`requirement_tag` 四表（V15）、outbox 事件、幂等抢占、`automation-verify` 6 段 40 条 | 6/6 AC · `automation` 40/40 | 分支内（未合 main） |
-| r40 | 需求变更单 | `req_change`/`req_change_item`（V16）、第 6 类 `REQ_CHANGE` 两级审批、显式 apply、`CHANGE_REQUIRED` 收口、第 10 个 Tab + 720 四步抽屉 + 深链、`change-verify` 6 段 40 条 | 20/21 AC（另 1 条文档 P1）· `change-verify` 40/40 | 分支内（未合 main） |
+| r40 | 需求变更单 | `req_change`/`req_change_item`（V16）、第 6 类 `REQ_CHANGE` 两级审批、显式 apply、`CHANGE_REQUIRED` 收口、第 10 个 Tab + 720 四步抽屉 + 深链、`change-verify` 6 段 42 条 | 20/21 AC（另 1 条文档 P1）· `change-verify` 42/42 | 分支内（未合 main） |
 
 > r6 任务夹：[docs/teamflow/20261109-r6-ccode-cteam-ctest-p0/](20261109-r6-ccode-cteam-ctest-p0/)（PRD 20 条 AC · DESIGN · TECHNICAL · QA-REPORT · ACCEPTANCE）。
 
-**规模（2026-11-23 实测，排除 `src/test`）**：Java **495** 个类（另测试 69）、Vue **140** 个页面/组件、TS **51** 个、REST 映射 **371** 处、Flyway 迁移 **16** 个（V1–V16）、顶层运维/自测脚本 **31** 个（`scripts/tests/` 下另有 45 个）。门禁（r40 实测）：`platform-verify` **194**、`platform-test-negative` **130**、`access-verify` **206**、`rbac-verify` **113**、`platform-demo-reset` **80**、`release-flow-verify` **44**、`gate-order-verify` **20**、`wbs-backfill-verify` **18**、`change-verify` **40**、`automation-verify` **40**、`unit` **392**、`lint` 22、`verify` 14。
+**规模（2026-11-23 实测，排除 `src/test`）**：Java **495** 个类（另测试 69）、Vue **140** 个页面/组件、TS **51** 个、REST 映射 **371** 处、Flyway 迁移 **16** 个（V1–V16）、顶层运维/自测脚本 **31** 个（`scripts/tests/` 下另有 45 个）。门禁（r40 实测，条数口径以 [memory.md](memory.md)「门禁基线以实测为准」条为准；本行为快照，只做同源引用、不另立数字）：`platform-verify` **194**、`platform-test-negative` **130**、`access-verify` **206**、`rbac-verify` **113**、`platform-demo-reset` **80**、`release-flow-verify` **44**、`gate-order-verify` **21**（r41 起：20 条 + 第 21 条判据不许退回硬编码的静态自证）、`wbs-backfill-verify` **18**、`change-verify` **42**、`automation-verify` **40**、`unit` **475**、`lint` 24、`verify` 14。
 
 ## 1. 平台基座（r1）
 
