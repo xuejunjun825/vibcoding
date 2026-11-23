@@ -163,9 +163,21 @@ public class RequirementService {
             refreshParentRollup(parent);
         }
 
-        auditService.record("CREATE", BIZ_TYPE, saved.getId(), Map.of(
-                "type", type, "code", saved.getCode(), "status", saved.getStatus(),
-                "parentId", Objects.requireNonNullElse(saved.getParentId(), 0L)));
+        // 审计同时是自动化事件的唯一来源（r39）：这里除既有键外补齐 §4.2 的整份快照键，
+        // 缺的写 null 占位 —— 条件求值只认快照，缺键就是不命中，绝不回读实时行。
+        Map<String, Object> createDetail = new LinkedHashMap<>();
+        createDetail.put("type", type);
+        createDetail.put("code", saved.getCode());
+        createDetail.put("status", saved.getStatus());
+        createDetail.put("parentId", Objects.requireNonNullElse(saved.getParentId(), 0L));
+        createDetail.put("priority", saved.getPriority());
+        createDetail.put("estimateDays", saved.getEstimateDays());
+        createDetail.put("domainId", saved.getDomainId());
+        createDetail.put("ownerUserId", saved.getOwnerUserId());
+        createDetail.put("releaseId", saved.getReleaseId());
+        createDetail.put("ownerVendorId", saved.getOwnerVendorId());
+        createDetail.put("assigneeVendorId", saved.getAssigneeVendorId());
+        auditService.record("CREATE", BIZ_TYPE, saved.getId(), createDetail);
         return new Created(saved.getId(), saved.getCode(), saved.getType(), saved.getStatus(),
                 allowedActions(saved.getType(), saved.getStatus(), saved.getReporterId()));
     }
@@ -178,12 +190,13 @@ public class RequirementService {
         rejectStatusInBody(req.extra());
         RequirementEntity entity = requireWritable(id);
         Long oldParentId = entity.getParentId();
+        // 真正的 before 必须在 applyXxx 之前取：applyDaysChange 会直接写 entity.estimateDays，
+        // 放在后面取快照会把「新值」当成旧值，FIELD_CHANGE 就永远不产生。
+        Map<String, Object> before = auditSnapshot(entity,
+                String.valueOf(entity.getExpectedDeliveryDate()));
         applyParentChange(entity, req.extra());
         applyDaysChange(entity, req.extra());
         applySonarKeyChange(entity, req.extra());
-        Map<String, Object> before = Map.of("title", entity.getTitle(),
-                "priority", entity.getPriority(),
-                "expectedDeliveryDate", String.valueOf(entity.getExpectedDeliveryDate()));
 
         if (req.title != null) {
             entity.setTitle(requireTitle(req.title));
@@ -211,8 +224,8 @@ public class RequirementService {
         if (entity.getParentId() != null) {
             refreshParentRollup(requireVisible(entity.getParentId()));
         }
-        auditService.record("UPDATE", BIZ_TYPE, entity.getId(), Map.of("before", before,
-                "after", Map.of("title", entity.getTitle(), "priority", entity.getPriority())));
+        auditService.record("UPDATE", BIZ_TYPE, entity.getId(), Map.of(
+                "before", before, "after", auditSnapshot(entity, null)));
         return toView(entity, null);
     }
 
@@ -372,12 +385,29 @@ public class RequirementService {
 
     @Transactional
     public TransitionResult transition(long id, String action, String comment, String source) {
-        return transition(id, action, comment, source, null);
+        // 显式转型：r39 新增了同样四参 + Map 的重载，裸 null 会在这里产生歧义
+        return transition(id, action, comment, source, (Long) null);
     }
 
     @Transactional
     public TransitionResult transition(long id, String action, String comment, String source,
                                        Long definitionId) {
+        return transition(id, action, comment, source, definitionId, null);
+    }
+
+    /**
+     * 审批路径用（r39）：把 {@code approvalInstanceId / approvalResult / automationOrigin} 这类
+     * 事件需要的键随 STATE_CHANGE 一起写进审计 detail（只加键，不改既有键）。
+     */
+    @Transactional
+    public TransitionResult transition(long id, String action, String comment, String source,
+                                       Map<String, Object> extra) {
+        return transition(id, action, comment, source, null, extra);
+    }
+
+    @Transactional
+    public TransitionResult transition(long id, String action, String comment, String source,
+                                       Long definitionId, Map<String, Object> extra) {
         DataScope scope = TenantContext.require();
         RequirementEntity entity = requireWritable(id);
         // r17 顺序即契约：先鉴权（403，不泄露 from/allowedTargets）后状态（409）。
@@ -452,9 +482,20 @@ public class RequirementService {
         // 实际期与状态流转同源：进入 IN_DEV 开实际起点、交付类终态收实际终点（V9 回填同口径）。
         ActualPeriodRecorder.record(BIZ_TYPE, entity.getId(), from, target);
 
-        auditService.record("STATE_CHANGE", BIZ_TYPE, entity.getId(), Map.of(
-                "from", from, "to", target, "action", action, "source", source,
-                "comment", Objects.requireNonNullElse(comment, ""), "operator", scope.userId()));
+        // 审计是自动化事件的唯一来源：既有的 from/to/action/source/comment/operator 全部保留，
+        // 另补 §4.2 快照键（type/priority/estimateDays/...），否则「按类型 + 按优先级」的条件
+        // 在状态变更事件上永远拿不到值。
+        Map<String, Object> stateDetail = auditSnapshot(entity, null);
+        stateDetail.put("from", Objects.requireNonNullElse(from, ""));
+        stateDetail.put("to", target);
+        stateDetail.put("action", action);
+        stateDetail.put("source", source);
+        stateDetail.put("comment", Objects.requireNonNullElse(comment, ""));
+        stateDetail.put("operator", scope.userId());
+        if (extra != null) {
+            stateDetail.putAll(extra);
+        }
+        auditService.record("STATE_CHANGE", BIZ_TYPE, entity.getId(), stateDetail);
         notifyTransition(entity, from, target, comment);
         return new TransitionResult(entity.getId(), target,
                 gateFiltered(entity,
@@ -462,6 +503,32 @@ public class RequirementService {
     }
 
     // -------------------------------------------------------- estimate callback
+
+    /**
+     * 需求当前值的审计快照（r39 §4.2）。审计 detail 里的这些键会被
+     * {@code AutomationEventMapper} 原样搬进事件 payload：条件求值只读快照，所以「缺键」等价
+     * 「不命中」，绝不能靠运行时回读行来补。
+     *
+     * @param expectedDeliveryDate 为 null 时不带该键（update 的 after 只关心可比字段）
+     */
+    private static Map<String, Object> auditSnapshot(RequirementEntity entity,
+                                                     String expectedDeliveryDate) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("title", entity.getTitle());
+        snapshot.put("type", entity.getType());
+        snapshot.put("priority", entity.getPriority());
+        snapshot.put("status", entity.getStatus());
+        snapshot.put("estimateDays", entity.getEstimateDays());
+        snapshot.put("domainId", entity.getDomainId());
+        snapshot.put("ownerUserId", entity.getOwnerUserId());
+        snapshot.put("releaseId", entity.getReleaseId());
+        snapshot.put("ownerVendorId", entity.getOwnerVendorId());
+        snapshot.put("assigneeVendorId", entity.getAssigneeVendorId());
+        if (expectedDeliveryDate != null) {
+            snapshot.put("expectedDeliveryDate", expectedDeliveryDate);
+        }
+        return snapshot;
+    }
 
     /**
      * 评估通过后落人天（r26，由 {@code WbsEstimateCallback} 在引擎事务内调用）。
@@ -475,15 +542,22 @@ public class RequirementService {
         DataScope scope = TenantContext.require();
         RequirementEntity entity = repository.findByIdAndTenantId(requirementId, scope.tenantId())
                 .orElseThrow(() -> RequirementErrors.notFound("需求", requirementId));
+        BigDecimal previousDays = entity.getEstimateDays();
         entity.setEstimateDays(RequirementRollup.scale(approvedDays));
         entity.setUpdatedBy(scope.userId());
         repository.save(entity);
         if (entity.getParentId() != null) {
             refreshParentRollup(requireVisible(entity.getParentId()));
         }
-        auditService.record("ESTIMATE_APPLIED", BIZ_TYPE, requirementId, Map.of(
-                "instanceId", instanceId,
-                "estimateDays", entity.getEstimateDays()));
+        // before.estimateDays 是 FIELD_CHANGE 的「旧值」来源：没有它，人天变化事件只有新值，
+        // 规则无法区分「涨了」和「降了」。
+        Map<String, Object> estimateBefore = new LinkedHashMap<>();
+        estimateBefore.put("estimateDays", previousDays);
+        Map<String, Object> estimateDetail = auditSnapshot(entity, null);
+        estimateDetail.put("instanceId", instanceId);
+        estimateDetail.put("estimateDays", entity.getEstimateDays());
+        estimateDetail.put("before", estimateBefore);
+        auditService.record("ESTIMATE_APPLIED", BIZ_TYPE, requirementId, estimateDetail);
     }
 
     /** 写一条需求动态（评估提交/通过/驳回/撤回），审计表即动态数据源。 */
@@ -527,9 +601,12 @@ public class RequirementService {
             throw RequirementErrors.validation("vendorId 必填");
         }
         RequirementEntity entity = requireWritable(id);
-        Map<String, Object> before = Map.of(
-                "assigneeVendorId", Objects.requireNonNullElse(entity.getAssigneeVendorId(), 0L),
-                "ownerVendorId", Objects.requireNonNullElse(entity.getOwnerVendorId(), 0L));
+        // 用可空 Map（不是 Map.of + 0L 占位）：0 会被事件层当成真实旧值，"0 -> 新厂商" 会凭空
+        // 产生一条 owner_vendor_id 变更事件。
+        Map<String, Object> before = new LinkedHashMap<>();
+        before.put("assigneeVendorId", entity.getAssigneeVendorId());
+        before.put("ownerVendorId", entity.getOwnerVendorId());
+        before.put("ownerUserId", entity.getOwnerUserId());
 
         entity.setAssigneeVendorId(req.vendorId());
         entity.setOwnerVendorId(req.vendorId());
@@ -538,14 +615,68 @@ public class RequirementService {
         }
         entity.setUpdatedBy(scope.userId());
         repository.save(entity);
-        auditService.record("VENDOR_TRANSFER", BIZ_TYPE, entity.getId(), Map.of(
-                "before", before, "after", Map.of("assigneeVendorId", req.vendorId()),
-                "reason", req.reason()));
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("assigneeVendorId", entity.getAssigneeVendorId());
+        after.put("ownerVendorId", entity.getOwnerVendorId());
+        after.put("ownerUserId", entity.getOwnerUserId());
+        auditService.record("VENDOR_TRANSFER", BIZ_TYPE, entity.getId(),
+                Map.of("before", before, "after", after, "reason", req.reason()));
         if (entity.getOwnerUserId() != null) {
             notificationWriter.send(entity.getOwnerUserId(), "VENDOR_TRANSFER", "需求转派",
                     "需求 " + entity.getCode() + " 已转派：" + req.reason(), BIZ_TYPE, entity.getId());
         }
         return toView(entity, null);
+    }
+
+    // -------------------------------------------------------- assignOwner (r39)
+
+    /**
+     * 自动化动作 ASSIGN_OWNER 的唯一入口（r39）。
+     *
+     * <p>为什么需要独立入口：借 {@code transition} 改负责人会把「状态机 + 审批 + 门禁」全部卷进来，
+     * 语义直接错位；而 {@code assignVendor} 是转厂商、不是转人。改负责人不动状态，所以它必须是一条
+     * 不走状态机的窄路径，lint L21 只在这里放行自动化包写入。</p>
+     */
+    @Transactional
+    public void assignOwner(long requirementId, long ownerUserId, String reason) {
+        assignOwner(requirementId, ownerUserId, reason, 0L, 0L, 0);
+    }
+
+    /**
+     * @param ruleId      触发本次指派的规则（0 = 非规则来源）
+     * @param runId       本次执行 id（0 = 非规则来源）
+     * @param chainDepth  规则链深度；动作执行器传入「父事件 + 1」，0 表示不设置（默认 1）
+     */
+    @Transactional
+    public void assignOwner(long requirementId, long ownerUserId, String reason,
+                            long ruleId, long runId, int chainDepth) {
+        DataScope scope = TenantContext.require();
+        RequirementEntity entity = requireWritable(requirementId);
+        Long previousOwner = entity.getOwnerUserId();
+        if (previousOwner != null && previousOwner == ownerUserId) {
+            // 值没变就不写事件：否则「指向自己的规则」会靠审计自己喂自己，防循环只能靠深度兜底。
+            return;
+        }
+        entity.setOwnerUserId(ownerUserId);
+        entity.setUpdatedBy(scope.userId());
+        repository.save(entity);
+
+        Map<String, Object> change = new LinkedHashMap<>();
+        change.put("before", previousOwner);
+        change.put("after", ownerUserId);
+        Map<String, Object> detail = auditSnapshot(entity, null);
+        detail.put("ownerUserId", change);
+        detail.put("source", "RULE");
+        detail.put("reason", reason == null ? "" : reason);
+        detail.put("ruleId", ruleId);
+        detail.put("runId", runId);
+        detail.put("automationOrigin", "RULE");
+        if (chainDepth > 0) {
+            detail.put("automationChainDepth", chainDepth);
+        }
+        auditService.record("OWNER_ASSIGN", BIZ_TYPE, requirementId, detail);
+        notificationWriter.send(ownerUserId, "ASSIGN_OWNER", "需求指派",
+                "需求 " + entity.getCode() + " 已指派给你", BIZ_TYPE, requirementId);
     }
 
     // ---------------------------------------------------------------- deliver
@@ -579,11 +710,16 @@ public class RequirementService {
         if (entity.getParentId() != null) {
             refreshParentRollup(requireVisible(entity.getParentId()));
         }
-        auditService.record("DELIVER", BIZ_TYPE, entity.getId(), Map.of(
-                "before", Map.of("estimateDays", String.valueOf(beforeEstimate),
-                        "actualDays", String.valueOf(beforeActual)),
-                "after", Map.of("estimateDays", String.valueOf(entity.getEstimateDays()),
-                        "mrUrl", Objects.requireNonNullElse(entity.getMrUrl(), ""))));
+        // 数值不要写成字符串：事件层按数值比较/比较符求值，字符串会退化成字典序。
+        Map<String, Object> deliverBefore = new LinkedHashMap<>();
+        deliverBefore.put("estimateDays", beforeEstimate);
+        deliverBefore.put("actualDays", beforeActual);
+        Map<String, Object> deliverAfter = new LinkedHashMap<>();
+        deliverAfter.put("estimateDays", entity.getEstimateDays());
+        deliverAfter.put("actualDays", entity.getActualDays());
+        deliverAfter.put("mrUrl", Objects.requireNonNullElse(entity.getMrUrl(), ""));
+        auditService.record("DELIVER", BIZ_TYPE, entity.getId(),
+                Map.of("before", deliverBefore, "after", deliverAfter));
         return toView(entity, null);
     }
 

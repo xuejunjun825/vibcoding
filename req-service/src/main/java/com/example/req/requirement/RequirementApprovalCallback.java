@@ -3,6 +3,9 @@ package com.example.req.requirement;
 import com.example.platform.contract.ApprovalCallback;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * 需求提报审批（REQ_SUBMIT）的结果回调：APPROVING → PENDING_REVIEW。
  *
@@ -30,7 +33,8 @@ public class RequirementApprovalCallback implements ApprovalCallback {
         if (!isInStatus(bizId, "APPROVING")) {
             return;
         }
-        requirementService.transition(bizId, "approve", "提报审批通过（实例 " + instanceId + "）", "APPROVAL");
+        requirementService.transition(bizId, "approve", "提报审批通过（实例 " + instanceId + "）",
+                "APPROVAL", approvalDetail(instanceId, "APPROVED"));
     }
 
     @Override
@@ -39,7 +43,8 @@ public class RequirementApprovalCallback implements ApprovalCallback {
             return;
         }
         requirementService.transition(bizId, "reject",
-                reason == null || reason.isBlank() ? "提报审批驳回" : reason, "APPROVAL");
+                reason == null || reason.isBlank() ? "提报审批驳回" : reason,
+                "APPROVAL", approvalDetail(instanceId, "REJECTED"));
     }
 
     @Override
@@ -47,7 +52,23 @@ public class RequirementApprovalCallback implements ApprovalCallback {
         if (!isInStatus(bizId, "APPROVING")) {
             return;
         }
-        requirementService.transition(bizId, "withdraw", "提报审批撤回", "APPROVAL");
+        requirementService.transition(bizId, "withdraw", "提报审批撤回",
+                "APPROVAL", approvalDetail(instanceId, "WITHDRAWN"));
+    }
+
+    /**
+     * 审批结论随 STATE_CHANGE 一起进审计 detail（r39 §3.3）：自动化条件里的
+     * {@code approvalResult} 只能在审批路径上有值，手工流转拿不到——这正是要补它的原因。
+     *
+     * <p>注意：{@link ApprovalCallback} 的回调签名只带 {@code instanceId}，没有 taskId，
+     * 所以 {@code approvalTaskId} 此处无法填（已作为 OUT-OF-SCOPE 上报，需扩 platform-contract）。</p>
+     */
+    private static Map<String, Object> approvalDetail(long instanceId, String result) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("approvalInstanceId", instanceId);
+        detail.put("approvalBizType", BIZ_TYPE);
+        detail.put("approvalResult", result);
+        return detail;
     }
 
     private boolean isInStatus(long requirementId, String expected) {

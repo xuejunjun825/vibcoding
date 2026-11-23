@@ -21,11 +21,11 @@ import org.junit.jupiter.api.Test;
 class RbacRegistryTest {
 
     @Test
-    void pageRegistryHasThirtySixUniquePagesInSixModules() {
-        assertEquals(36, MenuRegistry.pages().size(), "r18 authorises exactly 36 pages");
-        assertEquals(36, new HashSet<>(MenuRegistry.codes()).size(), "page codes must be unique");
-        assertEquals(6, MenuRegistry.modules().size(), "36 pages grouped in 6 modules");
-        assertEquals(35, MenuRegistry.pages().stream()
+    void pageRegistryHasThirtySevenUniquePagesInSixModules() {
+        assertEquals(37, MenuRegistry.pages().size(), "r39 appends the automation page to r18's 36");
+        assertEquals(37, new HashSet<>(MenuRegistry.codes()).size(), "page codes must be unique");
+        assertEquals(6, MenuRegistry.modules().size(), "37 pages grouped in 6 modules");
+        assertEquals(36, MenuRegistry.pages().stream()
                 .map(MenuRegistry.MenuPage::routeName).distinct().count(),
                 "route names are unique except /requirements, which two pages share");
         assertTrue(MenuRegistry.isRegistered("admin.roles"));
@@ -34,9 +34,10 @@ class RbacRegistryTest {
     }
 
     @Test
-    void actionRegistryHasSeventyTwoUniqueActions() {
-        assertEquals(72, ActionRegistry.actions().size(), "60 verbs over 36 pages collapse to 72");
-        assertEquals(72, new HashSet<>(ActionRegistry.codes()).size(), "action codes must be unique");
+    void actionRegistryHasSeventyThreeUniqueActions() {
+        assertEquals(73, ActionRegistry.actions().size(),
+                "r39 appends automation.action.manage to r18's 72");
+        assertEquals(73, new HashSet<>(ActionRegistry.codes()).size(), "action codes must be unique");
         assertEquals(ActionRegistry.codes(),
                 ActionRegistry.actions().stream().map(ActionRegistry.ActionDef::code).toList(),
                 "codes() must follow the registry order the admin table renders");
@@ -101,10 +102,10 @@ class RbacRegistryTest {
             bound.addAll(page.functionCodes());
         }
         List<String> unbound = MenuRegistry.unboundFunctionCodes();
-        assertEquals(60, all.size(), "the matrix authorises 60 function codes");
-        assertEquals(30, bound.size(), "30 are bound to a page");
+        assertEquals(61, all.size(), "the matrix authorises 61 function codes (r39 +1)");
+        assertEquals(31, bound.size(), "31 are bound to a page");
         assertEquals(30, unbound.size(), "the other 30 are the group the admin tree now shows");
-        assertEquals(all.size(), bound.size() + unbound.size(), "bound + unbound == 60");
+        assertEquals(all.size(), bound.size() + unbound.size(), "bound + unbound == 61");
         assertTrue(new HashSet<>(all).containsAll(unbound), "unbound must come from the matrix");
         Set<String> overlap = new HashSet<>(bound);
         overlap.retainAll(unbound);

@@ -43,12 +43,16 @@ public class RequirementPoolQuery {
      * 与详情共用同一条链（状态机 ∩ 权限矩阵 → r26 评估门）。本类只负责取行列与拼视图。
      */
     private final RequirementService requirementService;
+    /** 标签批量读路径（r39）：整页一次 join，避免列表 N+1。 */
+    private final RequirementTagQuery tagQuery;
 
     public RequirementPoolQuery(ScopedJdbc jdbc, RequirementStateMachine stateMachine,
-                                RequirementService requirementService) {
+                                RequirementService requirementService,
+                                RequirementTagQuery tagQuery) {
         this.jdbc = jdbc;
         this.stateMachine = stateMachine;
         this.requirementService = requirementService;
+        this.tagQuery = tagQuery;
     }
 
     public Page<View> page(PoolFilter filter) {
@@ -70,10 +74,12 @@ public class RequirementPoolQuery {
 
         Map<Long, Rollup> rollups = filter.aggregate() ? rollups(rows) : Map.of();
         Map<Long, List<String>> actions = actionsByRow(rows);
+        Map<Long, List<RequirementViews.TagView>> tags = tagsByRow(rows);
         List<View> items = new ArrayList<>(rows.size());
         for (Map<String, Object> row : rows) {
             Long id = Rows.toLong(Rows.object(row, "id"));
-            items.add(toView(row, rollups.get(id), actions.getOrDefault(id, List.of())));
+            items.add(toView(row, rollups.get(id), actions.getOrDefault(id, List.of()),
+                    tags.getOrDefault(id, List.of())));
         }
         return new Page<>(items, total, filter.page(), filter.size());
     }
@@ -119,10 +125,12 @@ public class RequirementPoolQuery {
                         + " AND r.id > :afterId ORDER BY r.id LIMIT :limit",
                 params);
         Map<Long, List<String>> actions = actionsByRow(rows);
+        Map<Long, List<RequirementViews.TagView>> tags = tagsByRow(rows);
         List<View> items = new ArrayList<>(rows.size());
         for (Map<String, Object> row : rows) {
             Long id = Rows.toLong(Rows.object(row, "id"));
-            items.add(toView(row, null, actions.getOrDefault(id, List.of())));
+            items.add(toView(row, null, actions.getOrDefault(id, List.of()),
+                    tags.getOrDefault(id, List.of())));
         }
         return items;
     }
@@ -223,7 +231,24 @@ public class RequirementPoolQuery {
         return params;
     }
 
+    /** 整页标签一次取回（r39）：键为需求 id，值为空时前端不渲染标签行。 */
+    private Map<Long, List<RequirementViews.TagView>> tagsByRow(List<Map<String, Object>> rows) {
+        List<Long> ids = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Long id = Rows.toLong(Rows.object(row, "id"));
+            if (id != null) {
+                ids.add(id);
+            }
+        }
+        return tagQuery.byRequirementIds(ids);
+    }
+
     View toView(Map<String, Object> row, Rollup rollup, List<String> allowedActions) {
+        return toView(row, rollup, allowedActions, List.of());
+    }
+
+    View toView(Map<String, Object> row, Rollup rollup, List<String> allowedActions,
+                List<RequirementViews.TagView> tags) {
         Long id = Rows.toLong(Rows.object(row, "id"));
         String type = Rows.str(row, "type");
         String status = Rows.str(row, "status");
@@ -244,6 +269,6 @@ public class RequirementPoolQuery {
                 Rows.toDate(Rows.object(row, "plan_end_date")),
                 Rows.toDateTime(Rows.object(row, "closed_at")),
                 Rows.toDateTime(Rows.object(row, "updated_at")),
-                rollup, allowedActions, Map.of(), null);
+                rollup, allowedActions, Map.of(), null, tags);
     }
 }

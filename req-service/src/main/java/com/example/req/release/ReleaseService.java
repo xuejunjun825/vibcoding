@@ -248,6 +248,7 @@ public class ReleaseService {
         if (requirementIds == null || requirementIds.isEmpty()) {
             throw RequirementErrors.validation("requirementIds 不能为空");
         }
+        List<Map<String, Object>> added = new ArrayList<>();
         for (Long requirementId : new LinkedHashSet<>(requirementIds)) {
             if (requirementId == null) {
                 continue;
@@ -268,12 +269,23 @@ public class ReleaseService {
                 rel.setAddedBy(scope.userId());
                 releaseRequirementRepository.save(rel);
             }
+            long previousReleaseId = requirement.getReleaseId() == null ? 0L : requirement.getReleaseId();
             requirement.setReleaseId(releaseId);
             requirement.setUpdatedBy(scope.userId());
             requirementRepository.save(requirement);
+            // changed[] 让事件层按「每条需求一条 FIELD_CHANGE」展开（r39 §3.2）：只在版本真的
+            // 变了时才记，重复加入同版本不产生事件。
+            if (previousReleaseId != releaseId) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("id", requirementId);
+                entry.put("before", previousReleaseId == 0L ? null : previousReleaseId);
+                entry.put("after", releaseId);
+                added.add(entry);
+            }
         }
         auditService.record("RELEASE_MEMBER_ADD", BIZ_TYPE, releaseId, Map.of(
-                "requirementIds", requirementIds, "count", requirementIds.size()));
+                "requirementIds", requirementIds, "count", requirementIds.size(),
+                "changed", added));
         return detail(releaseId);
     }
 
@@ -284,15 +296,21 @@ public class ReleaseService {
         requireEditable(release);
         releaseRequirementRepository.deleteByTenantIdAndReleaseIdAndRequirementId(
                 scope.tenantId(), releaseId, requirementId);
+        List<Map<String, Object>> changed = new ArrayList<>();
         requirementRepository.findByIdAndTenantId(requirementId, scope.tenantId())
                 .filter(requirement -> Objects.equals(requirement.getReleaseId(), releaseId))
                 .ifPresent(requirement -> {
                     requirement.setReleaseId(null);
                     requirement.setUpdatedBy(scope.userId());
                     requirementRepository.save(requirement);
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("id", requirementId);
+                    entry.put("before", releaseId);
+                    entry.put("after", null);
+                    changed.add(entry);
                 });
         auditService.record("RELEASE_MEMBER_REMOVE", BIZ_TYPE, releaseId, Map.of(
-                "requirementId", requirementId));
+                "requirementId", requirementId, "changed", changed));
     }
 
     // ------------------------------------------------------------------- lock

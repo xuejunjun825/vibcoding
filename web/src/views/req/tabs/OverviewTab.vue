@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { submitEstimate } from '@/api/req'
+import { submitEstimate, tagsOf } from '@/api/req'
 import type {
   ApprovalInstanceDetail,
   ApprovalTimelineEvent,
@@ -10,6 +10,7 @@ import type {
 } from '@/api/types'
 import ApprovalTimeline from '@/components/ApprovalTimeline.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import TagChips from '@/components/TagChips.vue'
 import { usePermission } from '@/composables/usePermission'
 import { formatDate, formatDateTime, formatDays } from '@/utils/format'
 import {
@@ -319,6 +320,10 @@ async function submitForm(): Promise<void> {
             <dd>{{ formatDateTime(detail.updatedAt) }}</dd>
           </div>
         </dl>
+        <div v-if="tagsOf(detail).length" class="overview__tags">
+          <span class="overview__tags-label">标签</span>
+          <TagChips :tags="tagsOf(detail)" />
+        </div>
         <p v-if="detail.description" class="overview__desc">{{ detail.description }}</p>
       </section>
 
@@ -627,6 +632,19 @@ async function submitForm(): Promise<void> {
 .lock {
   margin-left: 6px;
   font-size: 11px;
+  color: var(--text-muted-aa);
+}
+.overview__tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider);
+}
+.overview__tags-label {
+  font-size: 12px;
   color: var(--text-muted-aa);
 }
 .overview__desc {

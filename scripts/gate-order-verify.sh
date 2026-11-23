@@ -4,7 +4,7 @@
 # 为什么需要独立门禁：顺序依赖只能由「两种顺序都跑」证伪，单序列 + 人肉推理证明不了。
 #   A 序列：reset → release-flow-verify → access-verify → access-verify
 #   B 序列：reset → access-verify → release-flow-verify → access-verify → rbac-verify
-# 每一步同时看两件事：该门禁自己的分母（76/76、CASE=44 PASS=44 FAIL=0、206/206、113/113），
+# 每一步同时看两件事：该门禁自己的分母（80/80、CASE=44 PASS=44 FAIL=0、206/206、113/113），
 # 以及 scripts/lib/gate-fixture.sh 的 gate_fixture_problems 为空（足迹/非夹具需求/演示不变量）。
 #
 # r36：rbac 只进 B 末尾，不进 A。rbac 段内 s8 会调两次 /internal/demo-reset（复位演示库），
@@ -123,12 +123,12 @@ else
     miss "仍有静默清理: ${bad}" "复位只走 gate_fixture_reset；失败必须把退出码变差，不能只打 WARN"
 fi
 
-if grep -q '^TOTAL_CHECKS=76' "${ROOT}/scripts/platform-demo-reset.sh" \
+if grep -q '^TOTAL_CHECKS=80' "${ROOT}/scripts/platform-demo-reset.sh" \
     && grep -q 'NON_FIXTURE_REQS' "${ROOT}/scripts/platform-demo-reset.sh" \
     && grep -q "NOT LIKE 'DEMO-R-%'" "${ROOT}/scripts/platform-demo-reset.sh"; then
-    hit "干净基线单点定义：demo-reset TOTAL_CHECKS=76 且含「非夹具需求 0 条」"
+    hit "干净基线单点定义：demo-reset TOTAL_CHECKS=80 且含「非夹具需求 0 条」"
 else
-    miss "demo-reset 分母/断言缺失" "TOTAL_CHECKS 必须为 76（r37 起含第 76 条停用账号清理），并含 NON_FIXTURE_REQS（code NOT LIKE 'DEMO-R-%' 期望 0）"
+    miss "demo-reset 分母/断言缺失" "TOTAL_CHECKS 必须为 80（r39 起含 4 条自动化复核），并含 NON_FIXTURE_REQS（code NOT LIKE 'DEMO-R-%' 期望 0）"
 fi
 
 if grep -q '^gate-order-verify:' "${ROOT}/Makefile" \

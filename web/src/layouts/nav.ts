@@ -390,6 +390,15 @@ export const NAV_GROUPS: NavGroup[] = [
         functionCode: 'audit:view',
         pageCode: 'admin.audit',
       },
+      {
+        // r39：四个路由共用这一项与同一页面码（DESIGN §2「导航只加 1 项」）
+        label: '自动化规则',
+        to: '/automation/rules',
+        icon: 'flow',
+        routeName: 'automation-rules',
+        functionCode: 'automation:manage',
+        pageCode: 'automation.rules',
+      },
     ],
   },
 ]

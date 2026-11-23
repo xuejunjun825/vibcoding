@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The single definition of "who may do what": 11 roles × 60 function codes.
+ * The single definition of "who may do what": 11 roles × 61 function codes.
  *
  * <p>The 26 r2 codes cover requirement/defect/delivery operations; M6 appended 15 quality codes
  * (strategy, plan lifecycle, report, gate, waiver, review, metrics) and M7 the integration code;
@@ -120,7 +120,10 @@ public final class PermissionMatrix {
             "PORTAL_VIEW",
             "PORTAL_CONFIG",
             "REPORT_VIEW",
-            "REPORT_SHARE");
+            "REPORT_SHARE",
+            // ---- r39 自动化规则（append-only；TECHNICAL §10.1）----
+            // 只有平台管理员与内部 PMO 管理规则；厂商账号由 INTERNAL_ONLY 拦截器再挡一层。
+            "automation:manage");
 
     /**
      * Role codes, matching PRD §6.1 and {@code sys_role.code} seeded by SeedService.
@@ -390,8 +393,14 @@ public final class PermissionMatrix {
         allow(matrix, "MGMT", "REPORT_SHARE");
         allow(matrix, "SUB_BUSINESS_LEADER", "REPORT_SHARE");
 
+        // ---- r39: 自动化规则（append-only）----
+        // 规则是平台治理动作：PLATFORM_ADMIN 已由上面的 catch-all 拿到，再显式给内部 PMO 一档；
+        // 其余九个角色保持 DENY（厂商侧另由 INTERNAL_ONLY 拦截器挡在入口）。
+        allow(matrix, "PLATFORM_ADMIN", "automation:manage");
+        allow(matrix, "PMO", "automation:manage");
+
         // ---- r24: 第 11 个内置角色「厂商项目经理」（VENDOR_PM） ----
-        // 12 ALLOW / 1 RESTRICTED / 47 DENY。本矩阵的契约是「角色 × 60 功能码」，不含动作维度：
+        // 12 ALLOW / 1 RESTRICTED / 47 DENY。本矩阵的契约是「角色 × 61 功能码」，不含动作维度：
         // release:plan / task:manage / case:manage / plan:manage 四个码是四个页面能被看见的前提
         // （MENU 准入 = 页面非 DENY 且绑定 FUNCTION 非 DENY），写能力由 RbacSeeder 的 11 条
         // ACTION 显式 DENY 收口——把写口收在这一层会破坏本类的网格契约与 s2 的 max 公式。

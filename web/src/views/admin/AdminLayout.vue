@@ -35,6 +35,7 @@ const items: AdminNavItem[] = [
   { to: '/admin/integrations', routeName: 'admin-integrations', label: '集成配置', functionCode: 'integration:manage', pageCode: 'admin.integrations', hint: 'Jenkins · GitLab · Sonar · Nexus 四槽接线与同步日志' },
   { to: '/admin/metrics', routeName: 'admin-metrics', label: '指标字典', functionCode: 'metric:manage', pageCode: 'admin.metrics', hint: '指标编码、公式与生效版本' },
   { to: '/admin/audit', routeName: 'admin-audit', label: '审计日志', functionCode: 'audit:view', pageCode: 'admin.audit', hint: '越权、强制放行与关键写操作留痕' },
+  { to: '/automation/rules', routeName: 'automation-rules', label: '自动化规则', functionCode: 'automation:manage', pageCode: 'automation.rules', hint: '事件触发的规则与执行日志；动作只做通知 / 指派 / 打标 / webhook' },
 ]
 
 const ctx: NavContext = {

@@ -17,21 +17,22 @@ import org.junit.jupiter.api.Test;
 /**
  * AC-5: the matrix is asserted cell by cell, not spot-checked.
  *
- * <p>Every one of the 11 roles × 60 functions is covered, so a silently changed cell (the usual
+ * <p>Every one of the 11 roles × 61 functions is covered, so a silently changed cell (the usual
  * way a permission bug ships) fails here instead of in production. The 26 r2 codes are asserted
  * exactly as before; M6 appended 15 quality codes (grid 260 → 410), M7 appended
  * {@code integration:manage} (420), M8 appended 14 collaboration/code/test codes (560), M9
  * appended 4 analytics/portal codes (PORTAL_VIEW / PORTAL_CONFIG / REPORT_VIEW / REPORT_SHARE)
- * (600), and r24 appended the eleventh role {@code VENDOR_PM} (660).</p>
+ * (600), r24 appended the eleventh role {@code VENDOR_PM} (660), and r39 appended
+ * {@code automation:manage} (671).</p>
  */
 class PermissionMatrixGridTest {
 
     @Test
-    @DisplayName("11 roles × 60 functions: every cell exists and is defined exactly once")
+    @DisplayName("11 roles × 61 functions: every cell exists and is defined exactly once")
     void everyCellIsDefined() {
         List<PermissionMatrix.Cell> cells = PermissionMatrix.cells();
         int expected = PermissionMatrix.roles().size() * PermissionMatrix.functions().size();
-        assertEquals(660, expected, "the matrix is 11 roles × 60 functions");
+        assertEquals(671, expected, "the matrix is 11 roles × 61 functions");
         assertEquals(expected, cells.size(), "cells() must enumerate the whole grid");
         Set<String> seen = new HashSet<>();
         for (PermissionMatrix.Cell cell : cells) {
@@ -45,7 +46,7 @@ class PermissionMatrixGridTest {
     }
 
     @Test
-    @DisplayName("r24: VENDOR_PM is 12 ALLOW + 1 RESTRICTED + 47 DENY, and the old 10 rows did not move")
+    @DisplayName("r24: VENDOR_PM is 12 ALLOW + 1 RESTRICTED + 48 DENY, and the old 10 rows did not move")
     void vendorPmRow() {
         // The whole point of appending the role instead of editing the ten existing rows: the
         // upgrade must not change a single pre-existing cell. Assert the 12 allowed codes by name
@@ -69,7 +70,7 @@ class PermissionMatrixGridTest {
                 "trace:view is the only RESTRICTED cell (page visible, rows still narrowed)");
         assertEquals(12, allowed.size(), "12 ALLOW");
         assertEquals(1, restricted.size(), "1 RESTRICTED");
-        assertEquals(47, denied, "47 DENY cells (60 − 12 ALLOW − 1 RESTRICTED)");
+        assertEquals(48, denied, "48 DENY cells (61 − 12 ALLOW − 1 RESTRICTED)");
 
         // The four page-admission keys are what keeps 版本/迭代/用例/测试计划 pages visible: a DENY
         // here hides the page entirely, and no ACTION override can bring it back.
@@ -90,7 +91,7 @@ class PermissionMatrixGridTest {
     }
 
     @Test
-    @DisplayName("PLATFORM_ADMIN is ALLOW on all 60 functions; no other role holds tenant:manage")
+    @DisplayName("PLATFORM_ADMIN is ALLOW on all 61 functions; no other role holds tenant:manage")
     void platformAdminIsUnrestricted() {
         for (String function : PermissionMatrix.functions()) {
             assertEquals(Access.ALLOW, PermissionMatrix.accessFor("PLATFORM_ADMIN", function),

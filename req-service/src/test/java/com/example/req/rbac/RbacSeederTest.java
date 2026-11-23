@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The preset grid is the one place all three write paths agree on (startup bootstrap, tenant
- * provisioning, demo reset), so it is asserted here without a database: 168 rows per built-in role,
+ * provisioning, demo reset), so it is asserted here without a database: 171 rows per built-in role,
  * the row set being exactly the registries, and the four pages that bind no function code staying
  * {@code ALLOW}. {@link RbacSeedEquivalenceTest} checks the derivation against the matrix cell by
  * cell; this test checks the shape the write path depends on.
@@ -28,17 +28,17 @@ class RbacSeederTest {
             List.of("me.todo", "me.tasks", "req.pool", "defect.list");
 
     @Test
-    void presetHoldsOneHundredSixtyEightRowsPerRole() {
+    void presetHoldsOneHundredSeventyOneRowsPerRole() {
         int functions = PermissionMatrix.functions().size();
         int pages = MenuRegistry.pages().size();
         int actions = ActionRegistry.actions().size();
-        assertEquals(60, functions, "FUNCTION layer is the 60-cell matrix row");
-        assertEquals(36, pages, "MENU layer is one row per registered page");
-        assertEquals(72, actions, "ACTION layer is one row per registered action");
+        assertEquals(61, functions, "FUNCTION layer is the 61-cell matrix row (r39 +1)");
+        assertEquals(37, pages, "MENU layer is one row per registered page (r39 +1)");
+        assertEquals(73, actions, "ACTION layer is one row per registered action (r39 +1)");
 
         for (String role : PermissionMatrix.roles()) {
             List<RbacSeeder.Row> rows = RbacSeeder.preset(role);
-            assertEquals(168, rows.size(), "role " + role);
+            assertEquals(171, rows.size(), "role " + role);
             assertEquals(functions, count(rows, "FUNCTION"), "function rows of " + role);
             assertEquals(pages, count(rows, "MENU"), "menu rows of " + role);
             assertEquals(actions, count(rows, "ACTION"), "action rows of " + role);
@@ -76,10 +76,10 @@ class RbacSeederTest {
         }
         // PLATFORM_ADMIN is all-ALLOW by design; restricted roles are where DENY appears. What
         // matters is that DENY is never expressed by omitting the row: every role still gets its
-        // full 168, and a denied cell is a row carrying 'DENY'.
+        // full 171, and a denied cell is a row carrying 'DENY'.
         for (String role : PermissionMatrix.roles()) {
             List<RbacSeeder.Row> rows = RbacSeeder.preset(role);
-            assertEquals(168, rows.size(), "DENY rows are written, not skipped (role " + role + ")");
+            assertEquals(171, rows.size(), "DENY rows are written, not skipped (role " + role + ")");
         }
         assertTrue(RbacSeeder.preset("QA").stream().anyMatch(row -> row.access().equals("DENY")),
                 "QA must carry at least one explicit DENY row");
@@ -127,12 +127,12 @@ class RbacSeederTest {
         assertEquals(7, rows.stream()
                         .filter(row -> row.subjectType().equals("ACTION") && row.access().equals("ALLOW"))
                         .count(),
-                "7 ACTION rows remain ALLOW (72 − 11 overrides − 54 derivation)");
+                "7 ACTION rows remain ALLOW (73 − 11 overrides − 55 derivation)");
         // Functional layer is untouched by the override: still the matrix cell.
         assertEquals(PermissionMatrix.accessFor("VENDOR_PM", "release:plan").name(),
                 single(rows, "FUNCTION", "release:plan").access(),
                 "the override lives on the ACTION layer only");
-        assertEquals(168, rows.size(), "the row count never moves: overrides flip a value, not a row");
+        assertEquals(171, rows.size(), "the row count never moves: overrides flip a value, not a row");
     }
 
     @Test

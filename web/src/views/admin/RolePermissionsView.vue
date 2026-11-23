@@ -14,7 +14,7 @@ import type { AccessLevel, ActionGrant, FunctionGrant, GrantSaveResult, PageGran
  *
  * 三条主链路：
  * 1. 草稿即改即算：所有档位写进 `useRoleGrants` 的 draft，未保存计数/预警/生效预览
- *    全部由它派生，保存只发**一次** PUT（该角色 168 行）。
+ *    全部由它派生，保存只发**一次** PUT（该角色 171 行）。
  * 2. 一次点击到达：进入即选中「第一个有动作授权的页面」，从列表点「授权」到改档 = 2 击。
  * 3. 失败不弹 toast：409 用 480 对话框、400/403/网络用保存条上方内联条（DESIGN §3.2）。
  */

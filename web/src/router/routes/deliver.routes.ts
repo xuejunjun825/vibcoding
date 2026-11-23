@@ -213,6 +213,67 @@ const deliverRoutes: RouteRecordRaw[] = [
       },
     ],
   },
+  {
+    // r39 自动化：四个路由共用页面码 automation.rules / 导航项 automation-rules（DESIGN §2）
+    path: '/automation',
+    component: () => import('@/views/admin/AdminLayout.vue'),
+    redirect: { name: 'automation-rules' },
+    children: [
+      {
+        path: 'rules',
+        name: 'automation-rules',
+        component: lazyView('admin/automation/RulesListView.vue'),
+        meta: {
+          title: '自动化规则',
+          navKey: 'automation-rules',
+          functionCode: 'automation:manage',
+          pageCode: 'automation.rules',
+          internalOnly: true,
+        },
+      },
+      {
+        path: 'rules/new',
+        name: 'automation-rule-create',
+        component: lazyView('admin/automation/RuleEditorView.vue'),
+        props: { mode: 'create' },
+        meta: {
+          title: '新建规则',
+          navKey: 'automation-rules',
+          parentPath: '/automation/rules',
+          functionCode: 'automation:manage',
+          pageCode: 'automation.rules',
+          internalOnly: true,
+        },
+      },
+      {
+        path: 'rules/:id(\\d+)/edit',
+        name: 'automation-rule-edit',
+        component: lazyView('admin/automation/RuleEditorView.vue'),
+        props: (route) => ({ mode: 'edit', id: Number(route.params.id) }),
+        meta: {
+          title: '编辑规则',
+          navKey: 'automation-rules',
+          parentPath: '/automation/rules',
+          functionCode: 'automation:manage',
+          pageCode: 'automation.rules',
+          internalOnly: true,
+        },
+      },
+      {
+        path: 'runs',
+        name: 'automation-runs',
+        component: lazyView('admin/automation/RunsView.vue'),
+        meta: {
+          title: '执行日志',
+          navKey: 'automation-rules',
+          parentPath: '/automation/rules',
+          functionCode: 'automation:manage',
+          pageCode: 'automation.rules',
+          internalOnly: true,
+        },
+      },
+    ],
+  },
 ]
 
 export default deliverRoutes

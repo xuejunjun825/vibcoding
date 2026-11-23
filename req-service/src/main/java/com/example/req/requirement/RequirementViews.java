@@ -46,7 +46,31 @@ public final class RequirementViews {
                        LocalDate expectedDeliveryDate, LocalDate planStartDate, LocalDate planEndDate,
                        LocalDateTime closedAt, LocalDateTime updatedAt,
                        Rollup rollup, List<String> allowedActions, Map<String, Boolean> permissions,
-                       DecomposeGate decomposeGate) {
+                       DecomposeGate decomposeGate, List<TagView> tags) {
+
+        /**
+         * Compatibility constructor for the call sites that do not need tags (detail and release
+         * views build their own view). Keeps the tag work strictly additive: a caller that ignores
+         * tags still compiles and still gets a valid (empty) list.
+         */
+        public View(Long id, String code, String type, String status, String priority, String title,
+                    String description, Long parentId, String parentCode, Long domainId,
+                    Long originOrgId, Long ownerUserId, Long ownerVendorId, Long assigneeVendorId,
+                    Long releaseId, BigDecimal estimateDays, BigDecimal actualDays, String mrUrl,
+                    LocalDate expectedDeliveryDate, LocalDate planStartDate, LocalDate planEndDate,
+                    LocalDateTime closedAt, LocalDateTime updatedAt, Rollup rollup,
+                    List<String> allowedActions, Map<String, Boolean> permissions,
+                    DecomposeGate decomposeGate) {
+            this(id, code, type, status, priority, title, description, parentId, parentCode,
+                    domainId, originOrgId, ownerUserId, ownerVendorId, assigneeVendorId, releaseId,
+                    estimateDays, actualDays, mrUrl, expectedDeliveryDate, planStartDate,
+                    planEndDate, closedAt, updatedAt, rollup, allowedActions, permissions,
+                    decomposeGate, List.of());
+        }
+    }
+
+    /** 需求标签（r39）：{@code source} 区分人工打标与规则打标，前端据此给出不同样式。 */
+    public record TagView(String tag, String source) {
     }
 
     public record Detail(View view, List<Child> children, List<String> allowedActions,

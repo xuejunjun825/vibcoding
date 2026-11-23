@@ -81,6 +81,32 @@ platform:
     log-retention-days: ${INTEGRATION_LOG_RETENTION_DAYS:30}
     # 内网/回环地址默认拒绝；本地桩（127.0.0.1:19090）必须在此显式登记才可出站。
     egress-allow-hosts: ${INTEGRATION_EGRESS_ALLOW_HOSTS:}
+  # M9/r39 自动化规则引擎。十个键默认值都等于 TECHNICAL §3.4/§3.5/§3.6/§5/§6 里写死的
+  # 常数：代码侧 @Scheduled / @Value 用同一个 ``${...:default}`` 兜底，yml 只把它们变成可运维项
+  # （不配也能起，且行为与文档一致）。所有键只影响 worker/扫描侧，不改变 HTTP 写路径。
+  automation:
+    # §3.5 worker 轮询间隔（固定延迟，上一轮跑完才计时）。
+    worker-poll-ms: ${PLATFORM_AUTOMATION_WORKER_POLL_MS:1000}
+    # §3.5 同时在飞的事件数；同一事件内的候选规则始终串行，这个值只控制事件间并发。
+    worker-concurrency: ${PLATFORM_AUTOMATION_WORKER_CONCURRENCY:2}
+    # §3.4 每轮 claim 的事件条数（FOR UPDATE SKIP LOCKED，独立短事务）。
+    claim-batch-size: ${PLATFORM_AUTOMATION_CLAIM_BATCH_SIZE:20}
+    # §3.4 PROCESSING 超过该秒数视为崩溃遗留：事件回 PENDING，run 置 FAILED（不重放动作）。
+    stale-seconds: ${PLATFORM_AUTOMATION_STALE_SECONDS:60}
+    # §6.2 租户分钟级限流上限。单实例内存计数：多实例会按实例数放大，已登记为技术债。
+    max-runs-per-minute: ${PLATFORM_AUTOMATION_MAX_RUNS_PER_MINUTE:120}
+    # §5.1 单条规则的动作条数上限（建/改规则时校验，超出 400）。
+    max-actions-per-rule: ${PLATFORM_AUTOMATION_MAX_ACTIONS_PER_RULE:10}
+    # §5.2 通知收件人上限：超过即 SKIPPED/TOO_MANY_RECIPIENTS，一条都不发（避免「发一半」）。
+    max-recipients: ${PLATFORM_AUTOMATION_MAX_RECIPIENTS:50}
+    # §3.6 每日扫描时刻（Spring 6 段 cron，秒 分 时 日 月 周），zone 固定 Asia/Shanghai。
+    # 必须加引号：cron 里的 ``*`` 在 YAML 纯量里有别名歧义。
+    schedule-cron: "${PLATFORM_AUTOMATION_SCHEDULE_CRON:0 30 8 * * *}"
+    # §3.6 单规则单日扫描上限；候选查询取 limit+1 判断是否截断，截断写一条
+    # requirement_id IS NULL 的 SKIPPED/SCHEDULE_TRUNCATED run 并告警，不静默丢弃。
+    schedule-max-per-rule: ${PLATFORM_AUTOMATION_SCHEDULE_MAX_PER_RULE:200}
+    # §6.3 防循环深度闸：chain_depth ≥ 该值一律 DROPPED/CHAIN_DEPTH，且不产生 run。
+    max-chain-depth: ${PLATFORM_AUTOMATION_MAX_CHAIN_DEPTH:4}
   openapi:
     qps: ${PLATFORM_OPENAPI_QPS:100}
   perf:

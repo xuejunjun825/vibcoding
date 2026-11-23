@@ -13,12 +13,12 @@ import type {
 /**
  * 授权草稿模型（DESIGN §3.2 / TECHNICAL §4.4）。
  *
- * 两层状态：`baseline` 是服务端最近一次确认的 168 行（60 FUNCTION + 36 MENU + 72 ACTION，
+ * 两层状态：`baseline` 是服务端最近一次确认的 171 行（61 FUNCTION + 37 MENU + 73 ACTION，
  * 其中 30 个 FUNCTION 来自顶层 `unboundFunctions` 分组、不属任何页面），`draft` 是用户此刻看到的档位。
  * 未保存计数、离开拦截、重置、diff 都从这一对 map 推导——不额外维护第二份状态，
  * 否则「改了又改回去」会被记成脏，「重置」也会和界面对不上。
  *
- * 保存是**一次 PUT 全量**（该角色 60+36+72 = 168 行）：成功后只把 baseline 换成
+ * 保存是**一次 PUT 全量**（该角色 61+37+73 = 171 行）：成功后只把 baseline 换成
  * 当前 draft，**不重新 GET** —— 重取会覆盖用户在保存期间继续做的修改，
  * 也会让「一次保存 = 一条审计」在服务端多出一次读。
  */
@@ -53,9 +53,9 @@ export function useRoleGrants(roleId: Ref<number>) {
   const savedHighRisk = ref<string[]>([])
 
   /**
-   * 把一次 GET 的授权视图拍平成 168 个草稿键：60 FUNCTION + 36 MENU + 72 ACTION。
+   * 把一次 GET 的授权视图拍平成 171 个草稿键：61 FUNCTION + 37 MENU + 73 ACTION。
    *
-   * 页面里的 `functionCodes` 只覆盖**绑定到页面的 30 个** FUNCTION 码；剩下 30 个不属任何页面、
+   * 页面里的 `functionCodes` 只覆盖**绑定到页面的 31 个** FUNCTION 码；剩下 30 个不属任何页面、
    * 却仍能被角色授权的码在顶层 `unboundFunctions` 分组里。漏掉它们就是 r19 BUG-1 的读侧一半：
    * 原样保存时 draft 少 30 行，服务端按「少发=DELETE」把它们静默写成 DENY
    * （`req.action.approve`、`deploy.action.force_release`、`wiki.action.edit` 这些动作随之失效）。
@@ -164,7 +164,7 @@ export function useRoleGrants(roleId: Ref<number>) {
 
   /**
    * 顶层「未绑定页面的功能码」分组（r20）。它是 `modules[]` 的兄弟而不是第 7 个 module：
-   * 页面集合被树、s1、s2 当绑定关系消费，合成页会把 168 撑成 169 并伪造页面可见性语义。
+   * 页面集合被树、s1、s2 当绑定关系消费，合成页会把 171 撑成 172 并伪造页面可见性语义。
    * 旧后端/旧 fixture 不带该键时为 null → 视图不渲染分组（与 30 条全 DENY 的展示口径一致）。
    */
   const unboundGroup = computed<UnboundFunctionGroup | null>(

@@ -369,6 +369,17 @@ public final class PermissionRouteTable {
         rules.add(rule(null, "^/admin/metrics.*$", page("admin.metrics")));
         rules.add(rule(null, "^/admin/audit.*$", page("admin.audit")));
 
+        // ---------------------------------------------------------------- automation (r39)
+        // 页面码只有一个（automation.rules），「规则 / 执行日志」是页内双 tab，所以四条路由共用它；
+        // 写操作额外要动作码 automation.action.manage（页面判定先于动作，顺序不能倒）。
+        rules.add(rule("POST", "^/automation/rules$",
+                action("automation.rules", "automation.action.manage")));
+        rules.add(rule("PUT", "^/automation/rules/\\d+$",
+                action("automation.rules", "automation.action.manage")));
+        rules.add(rule("PATCH", "^/automation/rules/\\d+/enabled$",
+                action("automation.rules", "automation.action.manage")));
+        rules.add(rule(null, "^/automation.*$", page("automation.rules")));
+
         // ---------------------------------------------------------------- attachments
         rules.add(rule(null, "^/attachments.*$",
                 page("req.pool", "defect.list", "test.cases", "collab.wiki")));

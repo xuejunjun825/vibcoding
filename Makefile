@@ -5,7 +5,7 @@ SHELL := /bin/bash
         platform-up platform-down platform-web platform-verify platform-test-negative \
         platform-seed platform-unit platform-perf quality-verify quality-e2e integration-verify \
         collab-verify collab-perf access-verify rbac-verify analytics-i18n-verify platform-demo-reset \
-        wbs-backfill-verify release-flow-verify release-flow-upgrade gate-order-verify
+        wbs-backfill-verify release-flow-verify release-flow-upgrade gate-order-verify automation-verify
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
@@ -92,7 +92,7 @@ rbac-verify: ## r18 三层授权：迁移/注册表三向/种子等价/三序判
 analytics-i18n-verify: ## 分析域中文化：三方一致 + 四页/导出 0 英文枚举码（先 make platform-up；--static-only 免栈）
 	@./scripts/analytics-i18n-verify.sh
 
-platform-demo-reset: ## 单事务重建演示数据（75 条断言：26 计数键 + 评估 11/0/11 + 非夹具需求 0 + 演示不变量；先 make platform-up && platform-seed）
+platform-demo-reset: ## 四段事务重建演示数据（80 条断言：26 计数键 + 评估 11/0/11 + 非夹具需求 0 + 两条自动化规则 + 演示不变量；先 make platform-up && platform-seed）
 	@./scripts/platform-demo-reset.sh
 
 # ---- r29 存量回填 (20261118-r29) ----
@@ -105,6 +105,10 @@ release-flow-verify: ## 分级审批/四段链路/不可变快照门禁 S1–S8 
 
 gate-order-verify: ## A/B 双序列证明门禁顺序无关（20 条，独占演示栈）
 	@./scripts/gate-order-verify.sh
+
+# ---- r39 自动化规则引擎 (20261123-r39) ----
+automation-verify: ## 自动化规则引擎门禁 S1–S6 共 39 条（正例/负例/幂等/防循环/越权/停用与动作边界；先 make platform-up && platform-seed && platform-demo-reset；--static-only 免栈）
+	@./scripts/automation-verify.sh
 
 release-flow-upgrade: ## 存量库幂等升级：连跑两次 /internal/seed，定义/绑定/version 不增（先 make platform-up）
 	@./scripts/release-flow-upgrade.sh

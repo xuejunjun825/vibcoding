@@ -97,6 +97,8 @@ public class ReleasePublishCascade {
                 "to", to,
                 "action", action,
                 "source", "RELEASE_PUBLISH",
-                "comment", "版本 " + releaseId + " 发布级联"));
+                "comment", "版本 " + releaseId + " 发布级联",
+                "type", String.valueOf(entity.getType()),
+                "priority", String.valueOf(entity.getPriority())));
     }
 }

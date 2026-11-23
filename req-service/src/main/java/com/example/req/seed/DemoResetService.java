@@ -39,11 +39,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>四个设计约束（PRD AC-13 / AC-14）：</p>
  * <ol>
- *   <li><b>两段事务</b>：{@link #reset()} 只是编排入口，Tx1 {@link #resetBusiness()} 用 JDBC 重建业务
+ *   <li><b>四段事务</b>：{@link #reset()} 只是编排入口，Tx1 {@link #resetBusiness()} 用 JDBC 重建业务
  *       实例数据，Tx2 {@link DemoEstimateFixture#seedDemo()} 走审批引擎（JPA）建 11 张已通过的工时
- *       评估单。为什么不能同事务：引擎写入在同一事务里尚未 flush，Tx1 末尾的 {@code counts()} 查
- *       {@code wf_instance} 会看不到行，自检就把「刚建好的评估单」判成缺失。两段各自失败各自回滚，
- *       任何一步失败（含不变量违反）都不会留下半套演示数据。</li>
+ *       评估单，Tx3 {@link DemoApprovalFixture#seed()} 走同一引擎补审批链与交付事实，Tx4 收口历史
+ *       事件并种两条自动化规则（r39）。为什么不能同事务：引擎写入在同一事务里尚未 flush，Tx1 末尾的
+ *       {@code counts()} 查 {@code wf_instance} 会看不到行，自检就把「刚建好的评估单」判成缺失。
+ *       四段各自失败各自回滚，任何一步失败（含不变量违反）都不会留下半套演示数据。</li>
  *   <li><b>只删行</b>：绝不 {@code TRUNCATE}/{@code DROP}，逐表 {@code DELETE ... WHERE tenant_id = ?}；
  *       账号/角色/域/厂商/组织/指标定义/字典/集成配置一律保留；{@code test_module}/{@code wf_definition}/
  *       {@code test_env} 的<b>种子行</b>也保留，只清门禁按 RUN_TAG 命名的探针行
@@ -122,7 +123,7 @@ public class DemoResetService {
     }
 
     /**
-     * 清空并重建演示数据（两段事务编排），返回计数表（表名 → 行数 + 不变量实测值）。
+     * 清空并重建演示数据（四段事务编排），返回计数表（表名 → 行数 + 不变量实测值）。
      *
      * @throws ApiException 409 {@code DEMO_RESET_INVARIANT}——不变量不满足，当前段整体回滚
      * @throws ApiException 409 {@code DEMO_RESET_TENANT}——租户或种子数据缺失（先跑 platform-seed）
@@ -147,6 +148,14 @@ public class DemoResetService {
         });
         merged.putAll(approvalCounts());
 
+        // Tx4（r39）：先把重置期间留下的历史事件收口（再清表），最后种两条自动化演示规则。顺序不可交换：
+        // 规则先落库的话，worker 会把 Tx3 的 deliver 事件按 R2 打上「大需求」标签，
+        // requirement_tag 就不再是 0 行。三步同事务，worker 只见「重置之后」的新事件。
+        transactions.execute(status -> {
+            seedAutomationRules();
+            return null;
+        });
+
         List<String> violations = estimateViolations(merged);
         if (!violations.isEmpty()) {
             throw new ApiException(409, "DEMO_RESET_INVARIANT",
@@ -155,6 +164,38 @@ public class DemoResetService {
         }
         log.info("demo-reset: tenant={} 重建完成，评估单 {} 张 counts={}", tenantCode, seeded, merged);
         return merged;
+    }
+
+    /**
+     * Tx4（r39）：历史事件收口 + 两条自动化演示规则（TECHNICAL §11.1）。
+     *
+     * <p>规则名走 {@code uk_rule_name}：Tx1 已清空 {@code automation_rule}，所以这里用普通 INSERT
+     * 而不是 upsert——连跑两次重置是先删后插，不会撞唯一键。{@code domain:ORD}/{@code admin}
+     * 是 {@link #references(long)} 已强制要求存在的引用，缺失时同样给 409 而不是 500。</p>
+     */
+    private void seedAutomationRules() {
+        long tenantId = tenantId();
+        long domainId = db.row(
+                "SELECT id FROM biz_domain WHERE tenant_id = ? AND code = 'ORD'", tenantId)
+                .map(row -> SysDb.asLong(row[0]))
+                .orElseThrow(() -> new ApiException(409, "DEMO_RESET_TENANT",
+                        "种子数据缺失（domain:ORD）：先执行 make platform-seed 再重置演示数据",
+                        Map.of()));
+        long adminId = db.row(
+                "SELECT id FROM sys_user WHERE tenant_id = ? AND username = 'admin'", tenantId)
+                .map(row -> SysDb.asLong(row[0]))
+                .orElseThrow(() -> new ApiException(409, "DEMO_RESET_TENANT",
+                        "种子数据缺失（user:admin）：先执行 make platform-seed 再重置演示数据",
+                        Map.of()));
+
+        int drained = db.update(DemoFixture.AUTOMATION_EVENT_DRAIN, tenantId);
+        // 收口之后清表：0 行是演示重置的承诺，而 DONE 只保护「已领取」的那几条。
+        int purged = db.update(DemoFixture.AUTOMATION_EVENT_PURGE, tenantId);
+        for (Object[] row : DemoFixture.automationRuleRows(tenantId, domainId, adminId)) {
+            db.insert(DemoFixture.AUTOMATION_RULE_INSERT, row);
+        }
+        log.info("demo-reset: tenant={} 收口 {} 条、清理 {} 条历史事件，种 2 条自动化规则",
+                tenantCode, drained, purged);
     }
 
     /**

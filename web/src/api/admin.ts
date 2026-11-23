@@ -317,13 +317,13 @@ export function deleteRole(id: number): Promise<void> {
   return http.del<void>(`${ADMIN}/roles/${id}`)
 }
 
-/** 三级授权快照：模块 → 页面 → (功能码, 动作) 全量 1680 行 */
+/** 三级授权快照：模块 → 页面 → (功能码, 动作) 该角色全量 171 行 */
 export function getRoleGrants(id: number): Promise<RoleGrantView> {
   return http.get<RoleGrantView>(`${ADMIN}/roles/${id}/permissions`)
 }
 
 /**
- * 全量覆盖保存（一次 PUT 写满 1680 行 + 1 条审计）。
+ * 全量覆盖保存（一次 PUT 写满该角色 171 行 + 1 条审计）。
  * 409 `ADMIN_LOCKOUT_RISK` / `HIGH_RISK_REQUIRES_CONFIRM` 由页面渲染，不要 toast。
  */
 export function saveRoleGrants(
