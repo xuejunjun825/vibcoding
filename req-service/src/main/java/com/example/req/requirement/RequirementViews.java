@@ -46,7 +46,20 @@ public final class RequirementViews {
                        LocalDate expectedDeliveryDate, LocalDate planStartDate, LocalDate planEndDate,
                        LocalDateTime closedAt, LocalDateTime updatedAt,
                        Rollup rollup, List<String> allowedActions, Map<String, Boolean> permissions,
-                       DecomposeGate decomposeGate) {
+                       DecomposeGate decomposeGate, List<TagView> tags) {
+
+        /*
+         * 只有一个构造器，`tags` 是必填参数（r39 Q-1）。
+         *
+         * 原来还有一个把 tags 默认成 List.of() 的兼容构造器，结果详情路径（RequirementService.toView）
+         * 每次都拿到空标签：列表有「大需求」chip、详情没有，用户看到的是两个不同的需求
+         * （AC-14 §9.2 要求列表与详情同源）。删掉兼容构造器后，「忘记传标签」从运行期静默丢数据
+         * 变成编译错误——新增调用点无法再悄悄丢掉标签。lint L22 静态锁住这条。
+         */
+    }
+
+    /** 需求标签（r39）：{@code source} 区分人工打标与规则打标，前端据此给出不同样式。 */
+    public record TagView(String tag, String source) {
     }
 
     public record Detail(View view, List<Child> children, List<String> allowedActions,

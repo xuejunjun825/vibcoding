@@ -18,7 +18,7 @@ import com.example.req.seed.RbacSeeder;
 import org.junit.jupiter.api.Test;
 
 /**
- * AC-3 as executable evidence: the 1848 seeded rows per tenant are not hand-written, they are
+ * AC-3 as executable evidence: the 1881 seeded rows per tenant are not hand-written, they are
  * derived — {@code FUNCTION = the matrix cell}, {@code MENU = max(function codes the page binds)},
  * {@code ACTION = max(function codes the action needs) unless the role carries an explicit
  * override}. If the derivation ever drifts from the matrix, upgrading quietly changes who can do
@@ -89,7 +89,8 @@ class RbacSeedEquivalenceTest {
         long allowed = ActionRegistry.actions().stream()
                 .filter(action -> RbacSeeder.actionAccessFor("VENDOR_PM", action) == Access.ALLOW)
                 .count();
-        assertEquals(7L, allowed, "VENDOR_PM keeps 7 actions (72 − 11 overrides − 54 derived DENY)");
+        assertEquals(7L, allowed,
+                "VENDOR_PM keeps 7 actions (73 − 11 overrides − 55 derived DENY)");
     }
 
     /** A page that binds no function code is not narrowed by the function layer. */
@@ -116,9 +117,9 @@ class RbacSeedEquivalenceTest {
     }
 
     @Test
-    void totalRowsAreEighteenFortyEight() {
-        assertEquals(1848L, rowCount(),
-                "11 roles × (60 functions + 36 pages + 72 actions) seeded rows per tenant");
+    void totalRowsAreEighteenEightyOne() {
+        assertEquals(1881L, rowCount(),
+                "11 roles × (61 functions + 37 pages + 73 actions) seeded rows per tenant");
     }
 
     private static long rowCount() {

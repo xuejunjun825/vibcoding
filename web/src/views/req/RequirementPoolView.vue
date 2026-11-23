@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { actOnRequirement, exportRequirementsCsv, getRequirement, listRequirements } from '@/api/req'
+import { actOnRequirement, exportRequirementsCsv, getRequirement, listRequirements, tagsOf } from '@/api/req'
 import type { RequirementListQuery } from '@/api/req'
 import type { PageResponse, RequirementDetail, RequirementRow } from '@/api/types'
 import { ApiError } from '@/api/client'
@@ -16,6 +16,7 @@ import ErrorState from '@/components/ErrorState.vue'
 import PriorityDot from '@/components/PriorityDot.vue'
 import ScopeChip from '@/components/ScopeChip.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import TagChips from '@/components/TagChips.vue'
 import { formatDate, formatDays } from '@/utils/format'
 import {
   ACTION_IMPACT,
@@ -532,6 +533,7 @@ async function openRowMore(command: string, row: RequirementRow): Promise<void> 
                   <span v-if="!summaryMode && (row.vendorName || row.vendorId)" class="req-card__tag">
                     {{ row.vendorName ?? vendorName(row.vendorId) }}
                   </span>
+                  <TagChips v-if="tagsOf(row).length" :tags="tagsOf(row)" :max="3" />
                 </span>
                 <span class="req-card__foot">
                   <span v-if="childInfo(row).childCount">

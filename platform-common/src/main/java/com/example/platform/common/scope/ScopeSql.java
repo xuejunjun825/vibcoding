@@ -125,6 +125,21 @@ public final class ScopeSql {
         // "platform level"), not an isolation column - restricting on it would hide the platform
         // executors from every domain caller. Writes are gated by TEST_EXECUTOR_MANAGE instead.
         map.put("test_executor", TableSpec.NONE);
+
+        // ---- M9/r39 automation: rules, their outbox, their run log, requirement tags ----
+        // automation_rule is deliberately NONE: its isolation dimension is an *alternative* pair
+        // of columns (scope_type = DOMAIN|VENDOR with scope_id pointing at either biz_domain.id or
+        // vendor.id), which a single-column TableSpec cannot express. Registering domain_id here
+        // would silently drop every VENDOR-scoped rule from a domain caller's list; the scope
+        // dimension is therefore validated on write (AutomationRuleValidation / CONDITION_WIDENS_SCOPE)
+        // and enforced at dispatch time through the *requirement* predicate.
+        // Event / run / tag rows are products of a rule or a requirement and carry no isolation
+        // column of their own (requirement_tag has requirement_id, reached through `requirement`),
+        // so they must be registered - an unregistered table throws - with the tenant predicate only.
+        map.put("automation_rule", TableSpec.NONE);
+        map.put("automation_event", TableSpec.NONE);
+        map.put("automation_run", TableSpec.NONE);
+        map.put("requirement_tag", TableSpec.NONE);
         return Map.copyOf(map);
     }
 

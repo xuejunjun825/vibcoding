@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>审批引擎选型：自研 vs Flowable 8</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:980px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+td:first-child,th:first-child{white-space:nowrap}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+h1.title{display:none}
+</style></head><body><div class="page">
+<div class="toc"><div class="toc-title">目录</div>
+<ul>
+<li><a href="#审批引擎选型自研轻量引擎-vs-flowable-8"
+id="toc-审批引擎选型自研轻量引擎-vs-flowable-8">审批引擎选型：自研轻量引擎
+vs Flowable 8</a>
+<ul>
+<li><a href="#1-一句话结论" id="toc-1-一句话结论">1. 一句话结论</a></li>
+<li><a href="#2-现状我们的引擎做了什么"
+id="toc-2-现状我们的引擎做了什么">2. 现状：我们的引擎做了什么</a></li>
+<li><a href="#3-flowable-侧事实本机实测2026-11-23"
+id="toc-3-flowable-侧事实本机实测2026-11-23">3. Flowable
+侧事实（本机实测，2026-11-23）</a></li>
+<li><a href="#4-置换成本为什么建议不换"
+id="toc-4-置换成本为什么建议不换">4. 置换成本（为什么建议不换）</a></li>
+<li><a href="#5-什么时候值得换触发条件"
+id="toc-5-什么时候值得换触发条件">5. 什么时候值得换（触发条件）</a></li>
+<li><a href="#6-三条路径对比" id="toc-6-三条路径对比">6.
+三条路径对比</a></li>
+<li><a href="#7-若未来启动spike-方案时间盒-23-天"
+id="toc-7-若未来启动spike-方案时间盒-23-天">7. 若未来启动：spike
+方案（时间盒 2–3 天）</a></li>
+<li><a href="#8-复现命令本文结论的取证方式"
+id="toc-8-复现命令本文结论的取证方式">8.
+复现命令（本文结论的取证方式）</a></li>
+<li><a href="#9-决策状态" id="toc-9-决策状态">9. 决策状态</a></li>
+</ul></li>
+</ul></div>
+<blockquote>
+<p><strong>决策记录（暂缓，非终局）</strong> · 2026-11-23 ·
+提出人：产品负责人（"自定义审批流是不是可以结合 Flowable
+的开源插件实现？"）· 结论：<strong>技术上可行（Flowable 8.0.0 对齐 Boot
+4），但不建议现在整体替换；留 spike 路径待触发。</strong></p>
+<p>本文只做技术判断存档，不改变任何既有实现与验收口径。基线：<code>main = 448ab4f</code>（r38
+合回后）。</p>
+</blockquote>
+<h1
+id="审批引擎选型自研轻量引擎-vs-flowable-8">审批引擎选型：自研轻量引擎
+vs Flowable 8</h1>
+<h2 id="1-一句话结论">1. 一句话结论</h2>
+<p>现栈（JDK 25 + Spring Boot 4.0.9）<strong>能</strong>跑
+Flowable——注意是 <strong>8.0.0</strong>，不是
+7.x；但整体替换的代价大于收益：现有自研引擎 4570
+行已覆盖我们全部单据语义并有 34
+条门禁断言钉着，替换需要重做「加签/减签」这个最难的部分、把隔离变成两层、并重跑全部验收证据。<strong>建议保持自研，把
+BPMN 只在"业务人员要自己画流程图"成为真实需求时再评估。</strong></p>
+<h2 id="2-现状我们的引擎做了什么">2. 现状：我们的引擎做了什么</h2>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>现状</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>规模</td>
+<td><code>req-service/src/main/java/com/example/req/approval/</code> 共
+<strong>39 个文件 / 4570 行</strong></td>
+</tr>
+<tr>
+<td>数据表</td>
+<td><code>wf_definition</code> / <code>wf_instance</code> /
+<code>wf_task</code> / <code>wf_history</code>（V1 建表，V14
+扩三级链）</td>
+</tr>
+<tr>
+<td>单据类型</td>
+<td>5
+类：<code>REQ_SUBMIT</code>、<code>REQ_REVIEW</code>、<code>RELEASE</code>、<code>REQ_DEPLOY</code>、<code>WBS_ESTIMATE</code></td>
+</tr>
+<tr>
+<td>节点能力</td>
+<td>审批（会签/或签）、条件分支（类型/域/优先级/人天）、抄送</td>
+</tr>
+<tr>
+<td>审批人来源</td>
+<td>指定人 / 角色 / 发起人直属主管 / 域负责人 / 厂商负责人</td>
+</tr>
+<tr>
+<td>操作</td>
+<td>通过、驳回（必填原因）、<strong>加签（前加签/后加签）</strong>、<strong>减签（必填原因
++ 通知）</strong>、转办、撤回、催办</td>
+</tr>
+<tr>
+<td>生命周期</td>
+<td>定义版本化（发布后不可改，在途实例按启动版本走）；5
+类单据可各设默认流程、可启停</td>
+</tr>
+<tr>
+<td>联动</td>
+<td><code>ApprovalCallback</code> 回调单据状态机；审批结果进
+<code>audit_log</code>；通知站内 + 邮件 + webhook（M7 适配层）</td>
+</tr>
+<tr>
+<td>门禁证据</td>
+<td><code>release-flow-verify</code> <strong>44</strong>
+条（含三级链、分级链、不可变快照）、<code>platform-verify</code>
+<strong>194</strong>、<code>negative</code>
+<strong>130</strong>、<code>rbac</code>
+<strong>113</strong>、<code>gate-order</code> <strong>20</strong></td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-flowable-侧事实本机实测2026-11-23">3. Flowable
+侧事实（本机实测，2026-11-23）</h2>
+<h3 id="31-版本与-boot-对齐关系决定能不能上">3.1 版本与 Boot
+对齐关系（决定能不能上）</h3>
+<table>
+<thead>
+<tr>
+<th>Flowable</th>
+<th>传递依赖的 Spring Boot</th>
+<th>能否配我们的 Boot 4.0.9</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>7.1.0</strong></td>
+<td><code>spring-boot-autoconfigure:3.3.4</code></td>
+<td>❌ 不是一条线</td>
+</tr>
+<tr>
+<td><strong>8.0.0</strong></td>
+<td><code>spring-boot-autoconfigure:4.0.2</code></td>
+<td>✅ 同线（我们 4.0.9 更高）</td>
+</tr>
+</tbody>
+</table>
+<p>Maven Central 上 <code>flowable-spring-boot-starter</code>
+现有版本：<code>7.0.0 / 7.0.1 / 7.1.0 / 7.2.0 / 8.0.0</code>（metadata
+<code>lastUpdated=20260227</code>）。</p>
+<p><strong>这条最容易被踩</strong>：网上大量"Spring Boot 3 + Flowable
+7"的资料，直接抄到我们栈上会在自动配置阶段炸；必须锁 8.0.0。</p>
+<h3 id="32-最小可跑验证已通过">3.2 最小可跑验证（已通过）</h3>
+<ul>
+<li>组合：JDK 25 + Spring Boot <strong>4.0.9</strong> +
+<code>flowable-spring-boot-starter-process:8.0.0</code> + H2</li>
+<li>结果：<code>Started App in 1.627 seconds</code>；<code>common / engine / history / identity / eventregistry</code>
+五套表自动创建；异步 Job Executor 正常启动；Tomcat 监听正常</li>
+<li>依赖体积：starter 展开 <strong>114 个节点</strong>，新增 MyBatis
+3.5.19、Jackson 2.20 等</li>
+</ul>
+<p>结论：<strong>运行时兼容性不是障碍</strong>。</p>
+<h2 id="4-置换成本为什么建议不换">4. 置换成本（为什么建议不换）</h2>
+<ol type="1">
+<li><strong>回调要重写</strong>：现在 5 类单据由
+<code>ApprovalCallback</code> 回调状态机；换成 BPMN
+后改为监听器/服务任务，需重做 5
+个回调，并保证"引擎派发失败时单据状态不被半改"（我们现在的做法是回调失败整段回滚）。</li>
+<li><strong>加签/减签是最大的坑</strong>：Flowable
+的多实例会签原生支持，但<strong>动态减少会签实例</strong>支持很差（通常要
+custom behavior 或直接 <code>deleteTask</code> +
+自维护计数）。而"加签/减签"正是我们 PRD 的
+AC-11，等于把最难的那条重做一遍。</li>
+<li><strong>隔离会变两层</strong>：Flowable 的 <code>tenantId</code>
+是软过滤（查询处处要带），我们的隔离是<strong>行级 <code>ScopeSql</code>
++ 域×厂商</strong>。混用后最容易出的 bug 是某条路径漏带
+<code>tenantId</code>，表现为"数据变多了"而没人报警。</li>
+<li><strong>表与运维</strong>：ACT_* 三十来张表 +
+定时作业表；应与业务库分 schema/库，否则和 V1–V14 的 Flyway
+混在一张库上，备份/归档/清理策略全变。</li>
+<li><strong>证据要重做</strong>：168/194/206/113/44 这些数字背后一大半
+AC 是围绕我们引擎语义写的，换引擎要重新验证一遍，且要重写
+<code>release-flow-verify</code> 的多级链条目。</li>
+<li><strong>在途实例迁移</strong>：库里已有历史实例，切换时要一次性迁移或双跑——双跑期间"同一单据两个引擎"的一致性风险高于收益。</li>
+</ol>
+<h2 id="5-什么时候值得换触发条件">5. 什么时候值得换（触发条件）</h2>
+<p>出现以下任一情况，再启动评估：</p>
+<ul>
+<li>业务要<strong>业务人员自己画流程图</strong>（BPMN 2.0
+图形化建模），而不是由我们预置流程模板</li>
+<li>需要<strong>并行网关 / 子流程 / 事件补偿 /
+补偿事务</strong>这类我们引擎不具备的结构</li>
+<li>需要<strong>流程仿真、回放</strong>或满足要求 BPMN
+标准的合规审计</li>
+<li>流程定义要<strong>跨系统复用</strong>（例如与集团其他系统共用一套流程定义仓库）</li>
+</ul>
+<p>这些目前都在 PRD 的"二期/不做"清单里。</p>
+<h2 id="6-三条路径对比">6. 三条路径对比</h2>
+<table>
+<thead>
+<tr>
+<th>路径</th>
+<th>做法</th>
+<th>代价</th>
+<th>适用前提</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A. 保持自研（当前选择）</strong></td>
+<td>继续扩 <code>wf_*</code> 体系</td>
+<td>每加一种节点类型要改代码 + 加断言</td>
+<td>流程结构由我们预置、变化有限</td>
+</tr>
+<tr>
+<td><strong>B. 双引擎（推荐备选）</strong></td>
+<td><code>wf_definition</code> 增加 <code>engine=BPMN/INTERNAL</code> 与
+<code>bpmn_xml</code>，仅特定单据类型走 Flowable，其余仍走自研</td>
+<td>中等：多一套运行时与运维，但可灰度、可回退</td>
+<td>只有个别流程需要复杂结构</td>
+</tr>
+<tr>
+<td><strong>C. 整体替换</strong></td>
+<td>全量迁到 Flowable 8</td>
+<td>大：重做回调/加减签/隔离/证据/迁移</td>
+<td>触发条件全部成立、且愿意停功能开发 2–3 周</td>
+</tr>
+</tbody>
+</table>
+<h2 id="7-若未来启动spike-方案时间盒-23-天">7. 若未来启动：spike
+方案（时间盒 2–3 天）</h2>
+<p>只验证、不动主干：</p>
+<ol type="1">
+<li>用 Flowable 8.0.0 + Boot 4.0.9 起一个独立 spike
+服务（已完成最小可跑验证）</li>
+<li>只把「发布版本三级审批」一条链做成
+BPMN，部署、启动、逐级审批、会签、驳回</li>
+<li>量三件事：<strong>代码量对比</strong>（BPMN 定义 vs 现有 Java
+定义）、<strong>端到端延迟</strong>（含引擎表写入）、<strong>加签/减签在
+BPMN 下的自定义代码量</strong></li>
+<li>产出成本表 → 再决定 A 维持 / B 灰度 / C 替换</li>
+</ol>
+<h2 id="8-复现命令本文结论的取证方式">8.
+复现命令（本文结论的取证方式）</h2>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1) 版本对齐关系：看 Flowable 传递依赖的 Boot 版本</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> /tmp/flowable-probe <span class="kw">&amp;&amp;</span> <span class="bu">cd</span> /tmp/flowable-probe</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="co"># pom.xml 中只放 org.flowable:flowable-spring-boot-starter:8.0.0</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> <span class="at">-B</span> dependency:tree <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-E</span> <span class="st">&quot;spring-boot-autoconfigure|flowable-engine&quot;</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 2) 最小可跑：JDK25 + Boot 4.0.9 + starter-process 8.0.0 + H2</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="ex">mvn</span> <span class="at">-B</span> spring-boot:run     <span class="co"># 观察 &quot;Started App in ...&quot; 与五套 create 脚本日志</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="co"># 3) 我们现在的引擎规模</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="fu">find</span> req-service/src/main/java/com/example/req/approval <span class="at">-name</span> <span class="st">&#39;*.java&#39;</span> <span class="kw">|</span> <span class="fu">wc</span> <span class="at">-l</span>   <span class="co"># 39</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="fu">find</span> req-service/src/main/java/com/example/req/approval <span class="at">-name</span> <span class="st">&#39;*.java&#39;</span> <span class="kw">|</span> <span class="fu">xargs</span> grep <span class="at">-c</span> <span class="st">&#39;&#39;</span> <span class="kw">|</span> <span class="fu">awk</span> <span class="at">-F:</span> <span class="st">&#39;{s+=$2} END{print s}&#39;</span>  <span class="co"># 4570</span></span></code></pre></div>
+<h2 id="9-决策状态">9. 决策状态</h2>
+<ul>
+<li><strong>2026-11-23：暂缓</strong>。保持自研；Flowable 8
+作为已知可行备选记录在案。</li>
+<li>触发条件见 §5；届时按 §7 的 spike 先取数，不做"拍脑袋替换"。</li>
+</ul>
+</div></body></html>

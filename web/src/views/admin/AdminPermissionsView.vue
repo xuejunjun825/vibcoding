@@ -152,7 +152,7 @@ onMounted(load)
       </section>
 
       <p class="perm-foot">
-        恢复预设：<code>make platform-demo-reset</code>（10 个内置角色回到 1680 行预设授权）
+        恢复预设：<code>make platform-demo-reset</code>（11 个内置角色回到 1881 行预设授权）
       </p>
     </template>
   </div>

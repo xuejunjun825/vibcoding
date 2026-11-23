@@ -33,6 +33,11 @@ for (const group of NAV_GROUPS) {
   }
 }
 
+// r39：自动化四个路由共用同一页面码（导航只加 1 项，页内双 tab）
+registerPageRoute('automation-runs', ['automation.rules'])
+registerPageRoute('automation-rule-create', ['automation.rules'])
+registerPageRoute('automation-rule-edit', ['automation.rules'])
+
 /** 该路由接受的页面码（any-of）；空数组 = 不受页面保护 */
 export function pageCodesFor(routeName?: string | null): string[] {
   if (!routeName) return []

@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * The 36 authorizable pages, in one place (r18).
+ * The 37 authorizable pages, in one place (r18; r39 appends the automation page).
  *
  * <p>A page code is the subject a role is granted in {@code sys_role_permission}
  * ({@code subject_type = 'MENU'}) and the thing the frontend route guard, the navigation and the
@@ -124,7 +124,11 @@ public final class MenuRegistry {
             new MenuPage("admin.metrics", "设置", "指标字典", "admin-metrics",
                     List.of("metric:manage"), 90),
             new MenuPage("admin.audit", "设置", "审计日志", "admin-audit",
-                    List.of("audit:view"), 100));
+                    List.of("audit:view"), 100),
+            // r39：自动化规则页。module 沿用既有「设置」（= 前端「平台管理」组），新增模块会让
+            // RoleAdminService 的树多出一个只有一页的分组，也会破坏「6 modules」的注册表契约。
+            new MenuPage("automation.rules", "设置", "自动化规则", "automation-rules",
+                    List.of("automation:manage"), 90));
 
     private MenuRegistry() {
     }

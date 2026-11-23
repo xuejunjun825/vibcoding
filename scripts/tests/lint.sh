@@ -10,6 +10,12 @@
 #   L5 Nacos token secret 必须可用 NACOS_TOKEN_SECRET 覆盖（D6）
 #   L6 错误路径提示实测可用：下载失败必须输出「下载失败: <url>」且退出码为 1（D1）
 #   L7 文档与实测基线一致：README / ARCHITECTURE 不得残留过期描述（D2/D3）
+#   L8–L20 见下方各函数的头部注释（平台路由 / ScopedJdbc 单点 / 迁移只增 / 前端文案 / 文档 /
+#      聚合单点 / 分析取数单点 / 403 处理 / 动作码来源 / 授权判定单点 / 权限总览只读）
+#   L21 automation 包边界（r39）：不改状态/审批/发布单、不拼隔离列、禁动作码只在拒绝名单、
+#      assignOwner 只允许 AutomationOwnerAssigner 一处调用、限流键只能是 tenantId（TECHNICAL §5.4）
+#   L22 需求视图必带标签（r39 Q-1）：View 构造器无默认空标签、无把 tags 写死的构造点，
+#      详情与版本详情都经 RequirementTagQuery 显式查标签（列表与详情同源，AC-14 §9.2）
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/lib.sh"
 
 TOTAL=0
@@ -208,8 +214,17 @@ platform_routes_preserve_demo() {
 #                                            `SELECT ... FOR UPDATE` 后 UPDATE；读路径仍走 ScopedJdbc（jdbcRead）。
 #   analytics/AnalyticsDirectory.java        只读「角色 code → sys_role.id」的授权目录（组装共享可见性
 #                                            Viewer.roleIds）；不取业务数据、不参与行级过滤，故不走 ScopedJdbc。
+#   automation/                              r39 自动化域：事件 outbox 落库、automation_run 幂等位抢占、
+#                                            需求打标都需要在同一事务里「唯一键抢占 → 读 → 写」，而
+#                                            ScopedJdbc 只有读入口；worker 与每日 08:30 定时扫描按 tenant
+#                                            遍历，请求里没有 TenantContext。所有直连语句显式
+#                                            `tenant_id = ?` 绑定；业务数据读取仍经 ScopedJdbc +
+#                                            AutomationScopes.withScope（规则作用域线程绑定）。
 scoped_jdbc_single_source() {
-    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/|integration/|collab/|flow/|review/|executor/|testplan/TestPlanService\.java|analytics/AnalyticsDirectory\.java'
+    # r39：automation/ 整体登记。理由（TECHNICAL §12.4）：outbox/run/tag 需要在同一事务里读改写 +
+    # 用唯一键抢占，而 ScopedJdbc 只有读入口；worker 与定时任务按 tenant 遍历，请求里没有
+    # TenantContext，所以必须直连，且每条语句都显式绑定 tenant_id = ?。这批直连正是 L21 要盯的对象。
+    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/|integration/|collab/|flow/|review/|executor/|testplan/TestPlanService\.java|analytics/AnalyticsDirectory\.java|automation/'
     local hits
     hits="$(grep -rl 'JdbcTemplate' "$ROOT/req-service/src/main/java" "$ROOT/deliver-service/src/main/java" 2>/dev/null \
         | grep -v '/seed/' | grep -Ev "$allow_re" || true)"
@@ -533,6 +548,140 @@ readonly_permission_overview() {
         || { echo "总览页未走 api/admin 的只读 listPermissions：数据源不是授权行"; return 1; }
 }
 
+# ---- L21 automation 包边界（r39）：越权与作用域字面量变成红灯 ----
+# 缺陷类：自动化规则最容易被「顺手」扩成万能执行器——加一个 SET_STATUS 分支就绕过状态机与审批，
+# 自己拼 domain_id 就绕过 ScopeSql 的数据隔离。TECHNICAL §5.4 的四条在这里变成可执行断言，
+# 与 automation-verify S5/S6 的行为断言互为兜底（行为断言只能覆盖今天写下的分支，静态断言覆盖明天新增的）。
+# 注释行（* / // / /* 开头）不算违规：解释「为什么禁止」正是要保留的知识。
+automation_boundary() {
+    local dir="$ROOT/req-service/src/main/java/com/example/req/automation"
+    local hits bad=0
+    [[ -d "$dir" ]] || { echo "缺少 automation 包目录: ${dir}"; return 1; }
+    local comment=':[0-9]+:[[:space:]]*(\*|//|/\*)'
+
+    # 1) 禁止改状态 / 走审批 / 碰发布单：自动化只能做四类白名单动作。
+    hits="$(grep -rnE 'ApprovalEngine|ApprovalStarter|ReleaseService|DeployOrderService|\.transition\(' \
+            "$dir" 2>/dev/null | grep -vE "$comment" || true)"
+    if [[ -n "$hits" ]]; then
+        echo "automation 包出现改状态/审批/发布单入口（自动化只能 NOTIFY/ASSIGN_OWNER/ADD_TAG/WEBHOOK）："
+        printf '%s\n' "$hits"
+        bad=1
+    fi
+
+    # 2) 禁止把隔离列拼进谓词：作用域只能来自 ScopeSql/ScopedJdbc，自己拼 `domain_id = ?` 就是
+    #    绕过数据隔离。判据只认「列名 + 比较/IN/LIKE」——审计 detail 里的同名键（AutomationEventMapper
+    #    把 domain_id 从审计载荷搬进事件 payload）是输入数据，不是查询，不能被这条误伤。
+    hits="$(grep -rnE '(domain_id|owner_vendor_id|assignee_vendor_id)[[:space:]]*(=|<|>|!=|IN\b|in\b|LIKE\b|like\b|IS\b|is\b)' \
+            "$dir" 2>/dev/null | grep -vE "$comment" || true)"
+    if [[ -n "$hits" ]]; then
+        echo "automation 包出现隔离列字面量（作用域必须经 ScopeSql，见 TECHNICAL §4.3）："
+        printf '%s\n' "$hits"
+        bad=1
+    fi
+
+    # 3) 被禁动作码只许出现在拒绝名单常量里（AutomationActionType.forbiddenTable）。
+    #    「禁动作」写成可执行分支 = 规则可以改状态/批审批，这是 PRD 明令禁止的越权。
+    hits="$(grep -rlnE '\b(SET_STATUS|APPROVE|SKIP_APPROVAL|CREATE_RELEASE|EDIT_ROLLUP)\b' \
+            "$dir" 2>/dev/null | grep -v '/AutomationActionType\.java$' || true)"
+    if [[ -n "$hits" ]]; then
+        echo "被禁动作码出现在拒绝名单之外（应只在 AutomationActionType.forbiddenTable 里）："
+        printf '%s\n' "$hits"
+        bad=1
+    fi
+
+    # 4) 指派动作只有一个调用点，且需求域不反向依赖 automation 包（依赖方向 req -> automation 单向）。
+    hits="$(grep -rn '\.assignOwner(' "$dir" 2>/dev/null \
+            | grep -v '/AutomationOwnerAssigner\.java:' || true)"
+    if [[ -n "$hits" ]]; then
+        echo "assignOwner 只允许 AutomationOwnerAssigner 一处调用："
+        printf '%s\n' "$hits"
+        bad=1
+    fi
+    hits="$(grep -rn 'com\.example\.req\.automation' \
+            "$ROOT/req-service/src/main/java/com/example/req/requirement" 2>/dev/null || true)"
+    if [[ -n "$hits" ]]; then
+        echo "需求域反向依赖 automation 包（会让「谁调 assignOwner」无法静态收口）："
+        printf '%s\n' "$hits"
+        bad=1
+    fi
+
+    # 5) 限流键只能是租户：AC-11 的 120 是「租户/分钟」，带上 ruleId 就把上限乘成
+    #    120 × 启用规则数，配置写的 120 与实际执行的 1200 不一致（r39 QA D-5）。
+    local dispatcher="$ROOT/req-service/src/main/java/com/example/req/automation/engine/AutomationDispatcher.java"
+    if ! grep -qE 'rateLimiter\.tryAcquire\(event\.tenantId\(\)\)' "$dispatcher"; then
+        echo "AutomationDispatcher 未按租户调用限流（AC-11 键是 tenantId）："
+        grep -n 'rateLimiter\.tryAcquire' "$dispatcher" || true
+        bad=1
+    fi
+    hits="$(grep -rnE 'tryAcquire\([^)]*,' "$dir" 2>/dev/null | grep -vE "$comment" || true)"
+    if [[ -n "$hits" ]]; then
+        echo "限流出现多参数键（AC-11 只允许 tenantId）："
+        printf '%s\n' "$hits"
+        bad=1
+    fi
+
+    return "$bad"
+}
+
+# ---- L22 需求视图必带标签（r39 Q-1）：同一个需求不能在列表有 chip、在详情没有 ----
+# 缺陷类（不是那一个点位）：单条需求视图用「少一个参数的构造器/重载」构造，tags 落到默认空表。
+# 于是列表（RequirementPoolQuery 批量查标签）有「大需求」，详情（RequirementService.toView）
+# 返回 []——用户看到两个不同的需求，AC-14 §9.2 的「列表与详情同源」被静默破坏。
+# 修法：构造器只留带 tags 的唯一一个、所有构造点显式传标签；这条断言把三类回退变成红灯：
+#   ① 重新引入默认空标签的兼容构造器/重载  ② 新增未传标签的构造点  ③ 详情侧丢掉 tagsOf(...)
+# 行为侧的兜底是 automation-verify S3 的「详情 view.tags 与列表同源」真栈断言。
+requirement_view_carries_tags() {
+    local views="$ROOT/req-service/src/main/java/com/example/req/requirement/RequirementViews.java"
+    local svc="$ROOT/req-service/src/main/java/com/example/req/requirement/RequirementService.java"
+    local pool="$ROOT/req-service/src/main/java/com/example/req/requirement/RequirementPoolQuery.java"
+    local rel="$ROOT/req-service/src/main/java/com/example/req/release/ReleaseService.java"
+    local bad=0 hits n
+
+    n="$(grep -cE '^\s*public View\(' "$views" 2>/dev/null || true)"
+    if [[ "${n:-0}" != "0" ]]; then
+        echo "RequirementViews 里又出现了额外的 View 构造器（${n} 个）：tags 一旦有默认值，详情就会静默丢标签"
+        grep -nE '^\s*public View\(' "$views" || true
+        bad=1
+    fi
+    if ! grep -qE 'DecomposeGate decomposeGate, List<TagView> tags\)' "$views"; then
+        echo "View 的规范构造器不再要求 List<TagView> tags（标签必须是无默认值的必填参数）"
+        bad=1
+    fi
+
+    hits="$(grep -nE 'return toView\([^;]*List\.of\(\)\);' "$pool" 2>/dev/null || true)"
+    if [[ -n "$hits" ]]; then
+        echo "RequirementPoolQuery 出现把 tags 默认成空表的 toView 重载："
+        printf '%s\n' "$hits"
+        bad=1
+    fi
+    hits="$(grep -rnE 'decomposeGate, List\.of\(\)\)' "$ROOT/req-service/src/main/java" 2>/dev/null || true)"
+    if [[ -n "$hits" ]]; then
+        echo "仍有构造点把 tags 写死成 List.of()（Q-1 的原始形态）："
+        printf '%s\n' "$hits"
+        bad=1
+    fi
+
+    while IFS= read -r hits; do
+        [[ -z "$hits" ]] && continue
+        case "$hits" in
+            *"requirement/RequirementService.java"|*"requirement/RequirementPoolQuery.java"|*"release/ReleaseService.java") ;;
+            *)  echo "未登记的 View 构造点（须显式传标签并登记到 L22）：$hits"
+                bad=1 ;;
+        esac
+    done < <(grep -rlE 'new View\(|new RequirementViews\.View\(' "$ROOT/req-service/src/main/java" 2>/dev/null || true)
+
+    if ! grep -q 'tagsOf(entity.getId())' "$svc"; then
+        echo "RequirementService.toView 未传 tagsOf(...)：详情/写回响应会退回空标签"
+        bad=1
+    fi
+    if ! grep -q 'requirementTagQuery\.byRequirementIds' "$rel"; then
+        echo "ReleaseService 的需求行未查标签（版本详情与需求列表会两副面孔）"
+        bad=1
+    fi
+
+    return "$bad"
+}
+
 log "静态门禁：脚本语法 / 变量插值 / 单点实现 / 错误提示 / 文档一致性"
 run_check "L1 所有脚本 bash -n 语法通过且 source 目标存在" syntax_and_sources_ok
 run_check "L2 无 \$VAR 紧跟全角标点（防 set -u 吞变量名）" no_bare_var_before_wide_char
@@ -556,6 +705,8 @@ run_check "L17 需求动作前端单点真相：403 就地处理 + 无本地二�
 run_check "L18 路由表把需求/缺陷动作端点交给 bodyAction（动作码从请求体取）" route_table_defers_requirement_actions
 run_check "L19 授权判定只有 PermissionService 一个入口（无直连常量矩阵）" no_runtime_matrix_access
 run_check "L20 前端不复刻矩阵 + 权限总览只读" readonly_permission_overview
+run_check "L21 automation 包边界：不改状态/审批/发布单、不拼隔离列、禁动作码只在拒绝名单、assignOwner 单点、限流只按租户" automation_boundary
+run_check "L22 需求视图必带标签：无默认空标签构造器/重载，详情与版本详情都显式查标签" requirement_view_carries_tags
 
 if (( FAILED > 0 )); then
     err "lint 失败 ${FAILED}/${TOTAL} 项：按上面的行号修正后重跑 make lint"

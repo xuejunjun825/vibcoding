@@ -15,23 +15,23 @@ make platform-down          # 演示结束
 
 | 账号 | 姓名 | 角色 | 密码 | 权限码 | 可见需求数 |
 |---|---|---|---|---|---|
-| `admin` | 平台管理员 | PLATFORM_ADMIN | `Admin@12345` | 56 | 12 |
-| `pm` | 产品经理-张 | PRODUCT | `Passw0rd!` | 26 | 12 |
-| `tl1` | 项目域负责人-李 | PMO（域负责人） | `Passw0rd!` | 40 | 12 |
-| `po1` | 二级企业负责人-王 | SUB_BUSINESS_LEADER | `Passw0rd!` | 11 | **8**（仅本企业提报） |
-| `dev1` | 研发-赵 | DEV | `Passw0rd!` | 24 | 12 |
-| `dev2` | 研发-钱 | DEV | `Passw0rd!` | 24 | 12 |
-| `qa1` | 测试-孙 | QA | `Passw0rd!` | 33 | 12 |
-| `qa2` | 测试-周 | QA | `Passw0rd!` | 33 | 12 |
-| `vendor1` | 厂商管理员-钱 | PMO + 厂商 VEN-A | `Passw0rd!` | 40 | **3**（仅本厂商承接） |
-| `vendor2` | 厂商研发-郑 | DEV + 厂商 VEN-B | `Passw0rd!` | 24 | **0**（未承接） |
+| `admin` | 平台管理员 | PLATFORM_ADMIN | `Admin@12345` | 61 | 12 |
+| `pm` | 产品经理-张 | PRODUCT | `Passw0rd!` | 29 | 12 |
+| `tl1` | 项目域负责人-李 | PMO（域负责人） | `Passw0rd!` | 44 | 12 |
+| `po1` | 二级企业负责人-王 | SUB_BUSINESS_LEADER | `Passw0rd!` | 14 | **8**（仅本企业提报） |
+| `dev1` | 研发-赵 | DEV | `Passw0rd!` | 26 | 12 |
+| `dev2` | 研发-钱 | DEV | `Passw0rd!` | 26 | 12 |
+| `qa1` | 测试-孙 | QA | `Passw0rd!` | 35 | 12 |
+| `qa2` | 测试-周 | QA | `Passw0rd!` | 35 | 12 |
+| `vendor1` | 厂商管理员-钱 | PMO + 厂商 VEN-A | `Passw0rd!` | 44 | **3**（仅本厂商承接） |
+| `vendor2` | 厂商研发-郑 | DEV + 厂商 VEN-B | `Passw0rd!` | 26 | **0**（未承接） |
 | `vpm1` ᵈ | 厂商项目经理-冯 | VENDOR_PM + 厂商 VEN-A | `Passw0rd!` | 13 ᵈ | **3**（仅本厂商承接，与 `vendor1` 同源） |
-| `biz1` ᵃ | 陈业务 | BUSINESS（业务部门） | `Passw0rd!` | 8 ᵃ | 8 ᵃ |
-| `suite1` ᵃ | 许二级 | SUB_BUSINESS_LEADER（二级企业业务） | `Passw0rd!` | 11 ᵃ | 8 ᵃ |
+| `biz1` ᵃ | 陈业务 | BUSINESS（业务部门） | `Passw0rd!` | 10 ᵃ | 8 ᵃ |
+| `suite1` ᵃ | 许二级 | SUB_BUSINESS_LEADER（二级企业业务） | `Passw0rd!` | 14 ᵃ | 8 ᵃ |
 
 ᵃ 本轮新增的两个种子账号。权限码由 `PermissionMatrix` 推导（`node logs/teamflow/tf-mw9yzocw-5kv3pt/scripts/t10-role-grants.mjs`，该推导口径已用 admin/pm/tl1/po1/dev1/qa1 六个账号的既有实测值对账通过）；「可见需求数」中 12/8/3/0 由 `make platform-demo-reset` 的 4 条不变量断言，`biz1`/`suite1` 的两个 8 是按 po1 同组织同域口径推导、未被不变量单独断言。
 
-ᵈ r24 新增的第 11 个内置角色演示账号（`VENDOR_PM`，`sys_user_role` 恰 1 条，权限行 168 格/租户）。`13` = FUNCTION 层 12 个 `ALLOW` + 1 个 `RESTRICTED`（`trace:view`）；ACTION 层另有 7 条 `ALLOW`（`req.action.schedule` + 6 个缺陷处理动作），其余 65 条 DENY（其中 11 条为显式覆盖：`release.action.create/update/approve/close`、`task.action.*`4 条、`sprint.action.create/close`、`test.action.case_edit`）。数字按 `PermissionMatrix` 与 PRD §3.3/§3.4 推导，实测以授权页 `/admin/roles/{id}/permissions` 的 168 格为准。
+ᵈ r24 新增的第 11 个内置角色演示账号（`VENDOR_PM`，`sys_user_role` 恰 1 条，权限行 171 格/租户）。`13` = FUNCTION 层 12 个 `ALLOW` + 1 个 `RESTRICTED`（`trace:view`）；ACTION 层另有 7 条 `ALLOW`（`req.action.schedule` + 6 个缺陷处理动作），其余 66 条 DENY（其中 11 条为显式覆盖：`release.action.create/update/approve/close`、`task.action.*`4 条、`sprint.action.create/close`、`test.action.case_edit`）。数字按 `PermissionMatrix` 与 PRD §3.3/§3.4 推导，实测以授权页 `/admin/roles/{id}/permissions` 的 168 格为准。
 
 **隔离是真实生效的**：同一租户下全量角色看到 12 条（`make platform-demo-reset` 后的干净数据集），`po1`（二级企业负责人）只看到本企业 8 条，`vendor1` 只看到本厂商承接的 3 条，`vendor2` 0 条。
 
@@ -51,13 +51,13 @@ make platform-down          # 演示结束
 | 测试 | 用例库（版本化）、用例评审单、测试计划（策略/轮次/执行/分配）、测试报告三签、质量门、豁免、环境台账、执行器健康 | `/testcases` `/test-plans` `/test-reports` `/quality-gates` `/test-envs` `/test-executors` |
 | 协作（M8） | 甘特（版本/迭代/需求三视图、拖拽改期落库+审计）、Wiki（空间隔离/版本回滚/全文检索/回收站）、价值流（7 阶段、WIP、P90 停留、流动效率、瓶颈） | `/gantt` `/wiki` `/value-stream` |
 | 代码与集成（M7/M8） | 分支策略登记与 GitLab 现状核验（MATCH/DRIFT/UNVERIFIED）、CR 行级评论、Sonar 质量摘要、四系统集成配置 | `/code-policies` `/admin/integrations` |
-| 平台治理 | 组织/租户/用户/角色/权限矩阵（10 角色 × 56 功能码）、指标字典、审计日志、API 客户端 | `/admin/*` |
+| 平台治理 | 组织/租户/用户/角色/权限矩阵（11 角色 × 61 功能码）、指标字典、审计日志、API 客户端 | `/admin/*` |
 
 规模：REST 接口 196 个映射、前端 54 个页面、业务表 53 张、验证套件（r1 14 / platform 168 / quality 348 / integration 230 / collab 263 / access 约 85 / negative 25 / unit 234 / lint 16）。
 
 ---
 
-## 3. 角色 × 页面可用性矩阵（r24 起 · 10 账号 × 13 页，新增 `vpm1`）
+## 3. 角色 × 页面可用性矩阵（r24 起 · 10 账号 × 14 页，r39 新增 `/automation/rules`）
 
 | 页面 | admin | pm | tl1 | po1 | dev1 | qa1 | vendor1 | vpm1 | biz1 | suite1 |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -74,6 +74,7 @@ make platform-down          # 演示结束
 | 质量门 `/quality-gates` | ✅ | ✅ | ✅ | ⛔² | ✅ | ✅ | ✅ | ⛔² | ⛔² | ⛔² |
 | 分支策略 `/code-policies` | ✅ | ⛔² | ✅ | ⛔² | ✅ | ⛔² | ✅ | ⛔² | ⛔² | ⛔² |
 | 用户与角色 `/admin/users` | ✅ | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² | ⛔² |
+| 自动化规则 `/automation/rules` | ✅ | ⛔² | ✅ | ⛔² | ⛔² | ⛔² | ⛔⁸ | ⛔⁸ | ⛔² | ⛔² |
 
 ¹ `po1`/`biz1`/`suite1` 无 `case:manage`，用例库入口不渲染，深链落 `/403`。
 ² 角色确实没有该功能码（`DENY`），入口隐藏且深链 403 —— 这是权限矩阵的正确拒绝，不是故障。
@@ -82,6 +83,8 @@ make platform-down          # 演示结束
 ⁵ **厂商账号的版本列表会是空的（r24 起，预期，不是故障）**：版本可见性由 `ScopeSql` 的派生谓词决定 —— `EXISTS(SELECT 1 FROM release_requirement rr JOIN requirement r ON r.id = rr.requirement_id WHERE rr.release_id = release.id AND (r.owner_vendor_id = :vendor OR r.assignee_vendor_id = :vendor))`，即「版本里必须含本厂商承接的需求」才可见。演示夹具里唯一的版本 `2026 Q4` 只含 8 条内部需求（VEN-A 的 R-09/R-10/R-11 都还没排进版本），所以 `vendor1` 的版本列表从 1 条变成 0 条、`vpm1` 也是 0 条 —— 这是「严格按本厂商需求派生」的正确结果。想让版本页有内容，就用 `pm` 把 R-09 排进该版本，或用 `scripts/platform-test-negative.sh` 里的 VEN-A 版本夹具；**不要为此放宽谓词**（放宽就等于让厂商看见别家的版本）。详情与写口共用同一条谓词，他厂商版本详情一律 403 `OUT_OF_SCOPE`。
 ⁶ `me.approvals` 不是 `MenuRegistry` 页面（无 MENU 行、路由无 `internalOnly`），它是所有账号的个人待办中心，`vpm1` 仍可打开自己的待办；但 `approve`/`review_*` 等审批**动作**全部 `DENY`，点了就是 403。这与 PRD AC-10 的字面「`me.approvals` 不渲染」有出入，已记为口径修正 C2（见 `docs/teamflow/20261116-r24-vendor-pm-role/TECHNICAL.md` §0）。
 ⁷ **`VENDOR_PM` 是用例库 `internalOnly` 的唯一例外**（r24 定点取代 r7 AC-5）：路由 `meta.vendorPmAllowed` + 导航 `vendorPmAllowed` + 深链守卫三处同源，仅当角色码含 `VENDOR_PM` 时放行；其余 `vendorId != null` 的账号（`vendor1`/`vendor2`）维持 ⛔ 与 `/403?code=INTERNAL_ONLY`。例外只开「进入页面看」：导入/新建/复制/删除/保存新版本全部由 `test.action.case_edit` 关掉，用例数据本身仍由 `test_case.vendor_id` 经 `ScopeSql` 收敛。
+
+⁸ **自动化规则页对厂商账号一律 `INTERNAL_ONLY`（r39）**：`vendor1` 的角色是 `PMO`，角色矩阵里 `automation:manage` 是 `ALLOW`，所以这一格不是「权限不够」；拦截发生得更早——`AutomationInternalOnlyInterceptor` 以 `order(-100)` 注册（`PermissionInterceptor` 是默认 0），对任何 `vendorId != null` 的账号直接 403 `INTERNAL_ONLY`。`vpm1`（`VENDOR_PM`）与 `vendor2`（`DEV`）角色层本来也拒绝，服务端仍先回 `INTERNAL_ONLY`（更早的闸先说话）。导航隐藏与深链 403 同源：`/automation/**` 的路由 `meta.internalOnly`。
 
 > 判据是**两段同源**：菜单看 `navVisible()`，路由看 `meta.functionCode`，`nav` 的码是 `meta` 的码的子集，故"看得见"与"点得开"不会再分叉（§6 P0-2）。
 
@@ -101,7 +104,7 @@ make platform-down          # 演示结束
 7. 价值流 `/value-stream`：7 阶段 WIP、P90 停留、瓶颈阶段、流动效率（数据全部取自 `audit_log`）。
 8. Wiki `/wiki`：建空间（可见范围 继承/仅本域/仅本厂商）、写页、看版本对比与回滚、回收站。
 9. 分支策略 `/code-policies`：登记规则 → "对照核验" GitLab 现状（未配置集成时 必须显示 UNVERIFIED，不得假绿）。
-10. 设置 `/admin/users`、`/admin/permissions`（10×56 权限矩阵）、`/admin/audit`（审计日志）。
+10. 设置 `/admin/users`、`/admin/permissions`（11×61 权限矩阵）、`/admin/audit`（审计日志）。
 
 ### 4.2 产品经理 `pm`（权限 26）
 - 可演示：`/requirements`、`/releases`、`/approvals`、`/testcases`、`/defects`、`/gantt`、`/wiki`、`/value-stream`、`/traceability`、`/quality-gates`、`/admin/workflows`。
@@ -152,7 +155,7 @@ make platform-down          # 演示结束
 - 首次登录即验证：两个账号都不出现测试计划/分支策略/管理后台菜单（`make access-verify` 的 a4 段断言关键隐藏项）。
 
 ### 4.9 厂商项目经理 `vpm1`（r24 新增第 11 角色，本厂商交付的只读驾驶舱 + 排期扳手）
-- 账号：`VENDOR_PM` + 厂商 `VEN-A`，密码 `Passw0rd!`；一个账号恰 1 条角色绑定，168 格授权（授权页 `/admin/roles/{id}/permissions` 可逐格看）。
+- 账号：`VENDOR_PM` + 厂商 `VEN-A`，密码 `Passw0rd!`；一个账号恰 1 条角色绑定，171 格授权（授权页 `/admin/roles/{id}/permissions` 可逐格看）。
 - **能看的**：需求池（只有 VEN-A 承接的 3 条 + 既有内部行）、版本计划、迭代、缺陷、用例库（唯一只读例外）、测试计划、追溯矩阵、甘特、Wiki、缺陷看板、质量指标；侧栏另有个人待办中心（见 §3 脚注 ⁶）。
 - **不能做的**（每一条都能当场表演 403，且状态不变）：版本新建/编辑/审批/关闭、需求评审/审批/验收/分解/指派厂商/交付/合并/完成、测试计划新建/审批/执行、用例维护（导入/新建/复制/删除/保存新版本）、甘特调整、Wiki 编辑、组织/用户/厂商/角色/权限/流程管理。
 - **唯一保留的写动作**：排期 `req.action.schedule`。在需求池里对一条可排期需求点「排期」→ 进版本，`allowedActions` 只含 `schedule`；同一条需求上看不到「评审通过」「分解」「指派厂商」（这些按钮的显示条件读 ACTION 快照，不读 `req:review`/`req:split` 等功能码）。
@@ -243,7 +246,8 @@ node scripts/tests/access/a4-nav-visibility.mjs       # 只跑角色可见集推
   ```bash
   make platform-demo-reset
   ```
-  该命令调内部端点 `POST /api/req/internal/demo-reset`（需 `X-Internal-Token`，且 `PLATFORM_SEED_ENABLED` 关闭时端点不存在），重建 12 条需求小链路 + 1 版本 + 1 迭代 + 12 用例 + 3 缺陷 + 1 测试计划 + 1 甘特组 8 行 + ≤5 通知，并自检 4 条不变量（需求 12 / `po1` 见 8 / `vendor1` 见 3 / `vendor2` 见 0）与夹具痕迹清零；不进自动门禁，属演示前手动动作。
+  该命令调内部端点 `POST /api/req/internal/demo-reset`（需 `X-Internal-Token`，且 `PLATFORM_SEED_ENABLED` 关闭时端点不存在），重建 12 条需求小链路 + 1 版本 + 1 迭代 + 12 用例 + 3 缺陷 + 1 测试计划 + 1 甘特组 8 行 + **4 条种子通知** + 2 条自动化规则（§9），并自检 4 条不变量（需求 12 / `po1` 见 8 / `vendor1` 见 3 / `vendor2` 见 0）与夹具痕迹清零；不进自动门禁，属演示前手动动作。
+  > 口径（r39 Q-5）：重置脚本断言的 **4** 是"种子通知"，即重置事务（Tx1）写完的计数；紧接着的 Tx2/Tx3 会跑一遍演示审批链，再产生 **22 条** `APPROVAL`/`APPROVAL_RESULT` 通知，所以重置后直接 `SELECT COUNT(*) FROM notification` 看到的是 **26**，这不是回归、也不是种子多写了。要复核种子数就看自检输出里的那 4 条，不要用全表行数。
 - 账号缺口已补：`biz1`/`suite1`（§1）。
 
 ---
@@ -259,7 +263,7 @@ node scripts/tests/access/a4-nav-visibility.mjs       # 只跑角色可见集推
 | ![需求池](demo-shots/admin-requirements.png)<br>需求池：类型 Tab、父子聚合/平铺、CSV 导出 | ![版本计划](demo-shots/admin-releases.png)<br>版本计划 + 里程碑 |
 | ![甘特](demo-shots/admin-gantt.png)<br>甘特：版本/迭代/需求三视图、拖拽改期、逾期标红 | ![价值流](demo-shots/admin-value-stream.png)<br>价值流：7 阶段 WIP、P90 停留、瓶颈阶段 |
 | ![追溯矩阵](demo-shots/admin-traceability.png)<br>追溯矩阵：需求→任务→MR→测试→缺陷→发布 | ![质量门](demo-shots/admin-quality-gates.png)<br>质量门总览 |
-| ![Wiki](demo-shots/admin-wiki.png)<br>Wiki：空间/页面树/版本 | ![用户与角色](demo-shots/admin-users.png)<br>用户与角色（10 角色 × 56 功能码） |
+| ![Wiki](demo-shots/admin-wiki.png)<br>Wiki：空间/页面树/版本 | ![用户与角色](demo-shots/admin-users.png)<br>用户与角色（11 角色 × 61 功能码） |
 
 ### 7.2 业务角色视角
 
@@ -273,7 +277,7 @@ node scripts/tests/access/a4-nav-visibility.mjs       # 只跑角色可见集推
 
 ![dev1 分支策略（修复后）](demo-shots/dev1-code-policies-fixed.png)
 
-`dev1`（DEV，24 权限码）打开 `/code-policies` 的实测：URL 停在 `/code-policies`、筛选器与表格正常渲染 2 行、顶部常驻黄条写明「当前账号无法读取 GitLab 集成配置（需 integration:manage）」，行内 pill 为「未核验」。这张图是**页面级**证据：状态码 200 证明不了表格真的挂载、也证明不了黄条说的是权限原因。取证脚本 `logs/teamflow/tf-mwa402ox-br1nqs/scripts/shot-dev1-code-policies.mjs`（12 条断言：停留 / 无整页错误 / 表格 ≥1 行 / 黄条三关键词 / 禁词 / 1440×900）。
+`dev1`（DEV，26 权限码）打开 `/code-policies` 的实测：URL 停在 `/code-policies`、筛选器与表格正常渲染 2 行、顶部常驻黄条写明「当前账号无法读取 GitLab 集成配置（需 integration:manage）」，行内 pill 为「未核验」。这张图是**页面级**证据：状态码 200 证明不了表格真的挂载、也证明不了黄条说的是权限原因。取证脚本 `logs/teamflow/tf-mwa402ox-br1nqs/scripts/shot-dev1-code-policies.mjs`（12 条断言：停留 / 无整页错误 / 表格 ≥1 行 / 黄条三关键词 / 禁词 / 1440×900）。
 
 ### 7.3 修复前证据（历史对照）
 
@@ -297,4 +301,53 @@ make platform-demo-reset   # 干净演示数据（12 需求 / po1 见 8 / vendor
 
 1. **P1 收口**：岗位工作台、自助报表 —— 补齐实现或把 `DELIVERED-MODULES.md` 改成"设计已定、未排期"（本轮按 PRD 非目标处理，未动）。
 2. **r7 遗留观察项**：`/testcases` 对 `dev1` 可见源自 `DEV` 对 `case:manage` 的 `RESTRICTED`（收窄而非拒绝）。若产品要求 `dev1` 不可见，需改权限矩阵，属独立需求。
-3. 之后再做 M8-B（自动化规则引擎、风险与基线、敏感信息扫描）。
+3. M8-B 剩余：风险与基线、敏感信息扫描（其中的自动化规则引擎已由 r39 交付，见 §9）。
+
+---
+
+## 9. 自动化规则引擎（r39 · 三步脚本 + 3 张截图）
+
+一条规则 = **触发事件 + 条件 + 动作**，可启停、有执行日志、能防循环。动作只有 4 类（通知 / 指派负责人 / 打标签 / 调 Webhook），**不改状态、不进审批、不动人天与发布单**——规则是"帮你做事"，不是"替你签字"。事件由服务端审计旁路产出（同一事务写 `automation_event`），前端没有任何上报入口：`/automation/events` 不存在，直接请求是 404。
+
+### 9.1 前置
+
+```bash
+make platform-up
+make platform-demo-reset   # 含 2 条演示规则，自检 80 项（原 76 + 自动化 4 项）
+```
+
+演示规则（`automation_rule`，作用域 = `ORD` 域）：
+
+| 代号 | 规则名 | 触发 | 条件 | 动作 |
+|---|---|---|---|---|
+| R1 | P0/P1 新建通知域负责人 | `REQUIREMENT_CREATED` | `priorityIn = [P0,P1]` | `NOTIFY` → `DOMAIN_OWNER` |
+| R2 | 大需求自动打标 | `FIELD_CHANGE` | `fields 含 estimate_days` 且 `estimateDays ≥ 10` | `ADD_TAG` → `大需求` |
+
+导航「自动化规则」`http://127.0.0.1:5173/automation/rules`，页内双 tab：**规则** / **执行日志**（`/automation/runs`）。规则行是一句因果句 `[触发][作用域] 且 [条件] → [动作]`，列表、编辑器摘要、编辑回显三处同一组件渲染，不靠文案对齐。
+
+### 9.2 三步脚本（admin）
+
+| 步 | 操作 | 期望（约 5 秒内可复核） | 截图 |
+|---|---|---|---|
+| 1 | 确认 R1 为「已启用」→ 需求池新建 **P0** 需求（`ORD` 域） | 「执行日志」出现 1 行 `SUCCESS`，展开可见动作 `NOTIFY` 结果为成功；`tl1`（`ORD` 域负责人）通知 +1。建需求的 HTTP 请求**不等执行**——消费在后台 worker，业务侧响应时间不受规则影响 | `demo-shots/r39-automation-r1-success.png` |
+| 2 | 把 `ORD` 域**叶子**需求 `DEMO-R-10`（RD，子需求）的 `estimateDays` 改成 **12**（≥10 命中 R2）。**不要改父需求**：父需求（P0/PDR）的人天由子需求汇总，改成父需求会 400 `PARENT_DAYS_READONLY`（r39 Q-2，原文档写的就是父需求，按字面走会撞墙） | 日志出现 `ADD_TAG` 行 `SUCCESS`；`DEMO-R-10` 在需求列表与详情概览都出现「**大需求**」chip（同一个 `TagChips` 组件，列表与详情同源——详情缺标签是 r39 Q-1，已修） | `demo-shots/r39-automation-r2-tag.png` |
+| 3 | 规则列表把 R1 **停用** → 再新建一条 P0 需求 | 日志无新行（0 run）、`tl1` 无新通知；R1 行显示「已停用」，只降字色**不降透明度**（停用恰恰是最该核对配置的时刻） | `demo-shots/r39-automation-r1-disabled.png` |
+
+三步的判据都是「**执行日志里有没有那一行**」，不是 toast：执行是异步的，页面弹一句"已触发"就是在撒谎。
+
+### 9.3 负向三例（不截图，`make automation-verify` 已覆盖）
+
+- **厂商账号**：`vendor1` 或 `vpm1` 深链 `/automation/rules` → 403 `INTERNAL_ONLY`（**不是** `FORBIDDEN`：`AutomationInternalOnlyInterceptor` 以 `order(-100)` 注册，早于权限校验；`vendor1` 的角色 `PMO` 本来是有 `automation:manage` 的，所以这一格证明了拦截来自"厂商"而不是"没权限"）。
+- **作用域放宽**：规则作用域选 `ORD`，条件里再塞 `INV` 的域过滤 → 400 `CONDITION_WIDENS_SCOPE`。前端把条件的域/厂商行做成只读 `= 作用域`，先让人写不出来；服务端只是兜底。
+- **动作越界**：动作只有 4 型可选，界面上没有"改状态""走审批"的入口；提交第 5 型被 400 拒绝，且 `scripts/tests/lint.sh` 的 L21 静态禁止 `automation` 包出现 `.transition(` / `ApprovalEngine` / `ReleaseService`。
+
+### 9.4 自动门禁与复现
+
+```bash
+make automation-verify                          # 6 段 40 条：正例 / 负例 / 幂等 / 防循环 / 越权 / 停用+动作边界
+bash scripts/automation-verify.sh --static-only # 免栈的静态部分
+```
+
+幂等与防循环各有一条可复述的判据：同一业务动作重放不会产生第 2 次执行（`automation_run` 的 `(tenant, rule, requirement, event)` 唯一键先抢后判）；规则触发的动作**不再**作为新事件进入求值（`origin=RULE` 直接丢弃），人工 `deliver` 后再触发也会在链深 ≥4 时丢弃。
+
+截图按 §7.4 的 CDP 流程现截（路由换 `/automation/rules` 与 `/automation/runs`），1440×900，落 `docs/teamflow/demo-shots/`。该目录必须可提交：`git check-ignore -v docs/teamflow/demo-shots/r39-automation-r1-success.png` 无输出（未被忽略）。

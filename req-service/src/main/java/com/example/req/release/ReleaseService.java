@@ -23,6 +23,7 @@ import com.example.req.requirement.RequirementEntity;
 import com.example.req.requirement.RequirementErrors;
 import com.example.req.requirement.RequirementRepository;
 import com.example.req.requirement.RequirementStateMachine;
+import com.example.req.requirement.RequirementTagQuery;
 import com.example.req.requirement.RequirementViews;
 import com.example.req.requirement.RequirementViews.MilestoneView;
 import com.example.req.requirement.RequirementViews.Page;
@@ -30,6 +31,7 @@ import com.example.req.requirement.RequirementViews.ParentGroup;
 import com.example.req.requirement.RequirementViews.ReleaseDetail;
 import com.example.req.requirement.RequirementViews.ReleaseStats;
 import com.example.req.requirement.RequirementViews.ReleaseView;
+import com.example.req.requirement.RequirementViews.TagView;
 import com.example.req.requirement.RequirementViews.View;
 import jakarta.persistence.EntityManager;
 import org.springframework.beans.factory.ObjectProvider;
@@ -99,6 +101,9 @@ public class ReleaseService {
     private final ApprovalHistoryRepository approvalHistories;
     private final ApprovalTaskRepository approvalTasks;
 
+    /** r39：版本详情里的需求行同样带标签——与需求列表/详情同一个读路径，避免三处各说各话。 */
+    private final RequirementTagQuery requirementTagQuery;
+
     /**
      * release 的 r30 新列（等级/必填项/驳回五列）不在 {@link ReleaseEntity} 里——
      * 那个实体与它的迁移是既有资产，本需求的边界只到 ReleaseService。所以这些列走
@@ -125,7 +130,8 @@ public class ReleaseService {
                           ApprovalInstanceRepository approvalInstances,
                           ApprovalHistoryRepository approvalHistories,
                           ApprovalTaskRepository approvalTasks,
-                          EntityManager entityManager) {
+                          EntityManager entityManager,
+                          RequirementTagQuery requirementTagQuery) {
         this.releaseRepository = releaseRepository;
         this.releaseRequirementRepository = releaseRequirementRepository;
         this.milestoneRepository = milestoneRepository;
@@ -145,6 +151,7 @@ public class ReleaseService {
         this.approvalHistories = approvalHistories;
         this.approvalTasks = approvalTasks;
         this.entityManager = entityManager;
+        this.requirementTagQuery = requirementTagQuery;
     }
 
     // ------------------------------------------------------------------ create
@@ -248,6 +255,7 @@ public class ReleaseService {
         if (requirementIds == null || requirementIds.isEmpty()) {
             throw RequirementErrors.validation("requirementIds 不能为空");
         }
+        List<Map<String, Object>> added = new ArrayList<>();
         for (Long requirementId : new LinkedHashSet<>(requirementIds)) {
             if (requirementId == null) {
                 continue;
@@ -268,12 +276,23 @@ public class ReleaseService {
                 rel.setAddedBy(scope.userId());
                 releaseRequirementRepository.save(rel);
             }
+            long previousReleaseId = requirement.getReleaseId() == null ? 0L : requirement.getReleaseId();
             requirement.setReleaseId(releaseId);
             requirement.setUpdatedBy(scope.userId());
             requirementRepository.save(requirement);
+            // changed[] 让事件层按「每条需求一条 FIELD_CHANGE」展开（r39 §3.2）：只在版本真的
+            // 变了时才记，重复加入同版本不产生事件。
+            if (previousReleaseId != releaseId) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("id", requirementId);
+                entry.put("before", previousReleaseId == 0L ? null : previousReleaseId);
+                entry.put("after", releaseId);
+                added.add(entry);
+            }
         }
         auditService.record("RELEASE_MEMBER_ADD", BIZ_TYPE, releaseId, Map.of(
-                "requirementIds", requirementIds, "count", requirementIds.size()));
+                "requirementIds", requirementIds, "count", requirementIds.size(),
+                "changed", added));
         return detail(releaseId);
     }
 
@@ -284,15 +303,21 @@ public class ReleaseService {
         requireEditable(release);
         releaseRequirementRepository.deleteByTenantIdAndReleaseIdAndRequirementId(
                 scope.tenantId(), releaseId, requirementId);
+        List<Map<String, Object>> changed = new ArrayList<>();
         requirementRepository.findByIdAndTenantId(requirementId, scope.tenantId())
                 .filter(requirement -> Objects.equals(requirement.getReleaseId(), releaseId))
                 .ifPresent(requirement -> {
                     requirement.setReleaseId(null);
                     requirement.setUpdatedBy(scope.userId());
                     requirementRepository.save(requirement);
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("id", requirementId);
+                    entry.put("before", releaseId);
+                    entry.put("after", null);
+                    changed.add(entry);
                 });
         auditService.record("RELEASE_MEMBER_REMOVE", BIZ_TYPE, releaseId, Map.of(
-                "requirementId", requirementId));
+                "requirementId", requirementId, "changed", changed));
     }
 
     // ------------------------------------------------------------------- lock
@@ -549,10 +574,22 @@ public class ReleaseService {
                 WHERE rr.tenant_id = :tenantId AND rr.release_id = :releaseId AND /*scope:r*/
                 ORDER BY r.type, r.id
                 """, Map.of("tenantId", release.getTenantId(), "releaseId", release.getId()));
-        return rows.stream().map(row -> toRequirementView(row, release)).toList();
+        Map<Long, List<TagView>> tags = requirementTagQuery.byRequirementIds(rows.stream()
+                .map(row -> com.example.req.requirement.Rows.toLong(
+                        com.example.req.requirement.Rows.object(row, "id")))
+                .filter(Objects::nonNull)
+                .toList());
+        List<View> views = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Long id = com.example.req.requirement.Rows.toLong(
+                    com.example.req.requirement.Rows.object(row, "id"));
+            views.add(toRequirementView(row, release, tags.getOrDefault(id, List.of())));
+        }
+        return views;
     }
 
-    private View toRequirementView(Map<String, Object> row, ReleaseEntity release) {
+    private View toRequirementView(Map<String, Object> row, ReleaseEntity release,
+                                   List<TagView> tags) {
         Long parentId = com.example.req.requirement.Rows.toLong(
                 com.example.req.requirement.Rows.object(row, "parent_id"));
         String parentCode = parentId == null ? null : requirementRepository
@@ -590,7 +627,7 @@ public class ReleaseService {
                         com.example.req.requirement.Rows.object(row, "closed_at")),
                 com.example.req.requirement.Rows.toDateTime(
                         com.example.req.requirement.Rows.object(row, "updated_at")),
-                null, actions, Map.of(), null);
+                null, actions, Map.of(), null, tags);
     }
 
     private List<ParentGroup> groups(List<View> requirements) {

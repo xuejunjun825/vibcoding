@@ -14,7 +14,7 @@
 #                           （QG-02）、CONDITIONAL 未豁免 409、EMERGENCY 缺原因 400
 #   S6 回归与卫生（2）       无发布路由 / 快照表无 UPDATE·DELETE；提交区间 BASE..HEAD 内
 #                           7 个 *pom.xml 与 web/package.json·web/pnpm-lock.yaml 无 diff，
-#                           迁移只允许 0/1 条新增 V14（M/D/其它 A 即红）；判据自检 1 正 3 反同场执行
+#                           迁移只允许 0/1 条新增 V15（r39 自动化四表；M/D/其它 A 即红）；判据自检 1 正 3 反同场执行
 #   S7 自造夹具到 PUBLISHED（8） 夹具自造 BUS→PDR→RD 并读回复核 → 版本测试 TEST_PASSED → 三签
 #                           → 清空 MR 的 409（failedRules 恰 [MR_FILLED]）→ 恢复后提交 200
 #                           + 第 1 轮快照 + 四段同源 → QG-01/02/03 全 PASS → 发布单两级
@@ -350,7 +350,7 @@ check_commit_hygiene() { # <repo> <base> <head> -> 0 合规 / 1 违规 / 2 入�
     local repo="$1" base="$2" head="$3" bad=0 st path out
     local pom_paths=('*pom.xml' 'web/package.json' 'web/pnpm-lock.yaml')
     local mig_dir='req-service/src/main/resources/db/migration'
-    local mig_allowed="${mig_dir}/V14__release_flow_chain.sql"
+    local mig_allowed="${mig_dir}/V15__automation_rule.sql"
     local mig_count=0
     [[ -n "$repo" && -n "$base" && -n "$head" ]] || return 2
 
@@ -364,8 +364,8 @@ check_commit_hygiene() { # <repo> <base> <head> -> 0 合规 / 1 违规 / 2 入�
         bad=1
     done <<<"$out"
 
-    # 2) 迁移：只允许 0 或 1 条 `A .../V14__release_flow_chain.sql`（合并后 BASE 已含 V14 时
-    #    区间为空也必须绿）；M/D/R 与其它 A（V15+、R__*.sql）一律红。
+    # 2) 迁移：只允许 0 或 1 条 `A .../V15__automation_rule.sql`（合并后 BASE 已含 V15 时
+    #    区间为空也必须绿）；M/D/R 与其它 A（V16+、R__*.sql）一律红。
     out="$(git -C "$repo" diff --name-status --no-renames "$base" "$head" -- "$mig_dir")" || return 2
     while IFS=$'\t' read -r st path; do
         [[ -n "$path" ]] || continue
@@ -429,13 +429,13 @@ hygiene_self_test() { # <base> -> 0 判据按预期红/绿 / 1 判据退化或 w
         fi
         git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 a 无法还原\n'; exit 1; }
 
-        # 反例 b：已提交新增 V15 → 必须红
-        : >"$mig_dir/V15__mutation_probe.sql"
+        # 反例 b：已提交新增 V16 → 必须红
+        : >"$mig_dir/V16__mutation_probe.sql"
         "${g[@]}" add -A >/dev/null 2>&1 && "${g[@]}" commit -qm 'hygiene mutation b' >/dev/null 2>&1 \
             || { printf '自检失败：变异 b 无法提交\n'; exit 1; }
         mut="$(git -C "$wt" rev-parse HEAD)"
         if check_commit_hygiene "$wt" "$orig" "$mut" >/dev/null 2>&1; then
-            printf '自检反例 b 未变红：已提交新增 V15 仍被判合规\n'; exit 1
+            printf '自检反例 b 未变红：已提交新增 V16 仍被判合规\n'; exit 1
         fi
         git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 b 无法还原\n'; exit 1; }
 
@@ -449,7 +449,7 @@ hygiene_self_test() { # <base> -> 0 判据按预期红/绿 / 1 判据退化或 w
         fi
         git -C "$wt" reset --hard "$orig" >/dev/null 2>&1 || { printf '自检失败：变异 c 无法还原\n'; exit 1; }
 
-        printf '自检 → 正例绿；a 改 V13 红；b 新增 V15 红；c 改 req-service/pom.xml 红\n'
+        printf '自检 → 正例绿；a 改 V13 红；b 新增 V16 红；c 改 req-service/pom.xml 红\n'
         exit 0
     )
 }
@@ -1170,10 +1170,10 @@ HYGIENE_BRIEF="$(printf '%s' "$HYGIENE_OUT" | tr '\n' ';' | sed 's/;$//')"
 SELF_BRIEF="$(printf '%s' "$SELF_OUT" | tr '\n' ';' | sed 's/;$//')"
 [[ "$SELF_RC" == "0" ]] && printf '  %s\n' "$SELF_BRIEF"
 if [[ "$HYGIENE_RC" == "0" && "$SELF_RC" == "0" ]]; then
-    pass "提交区间 ${GIT_BASE:0:7}..${GIT_HEAD:0:7} 卫生：${POM_COUNT} 个 *pom.xml + web/package.json + web/pnpm-lock.yaml 无改动、迁移仅 0/1 条 A V14；判据自检 4/4（正例绿 / 改 V13 / 新增 V15 / 改模块 pom 均红）"
+    pass "提交区间 ${GIT_BASE:0:7}..${GIT_HEAD:0:7} 卫生：${POM_COUNT} 个 *pom.xml + web/package.json + web/pnpm-lock.yaml 无改动、迁移仅 0/1 条 A V15；判据自检 4/4（正例绿 / 改 V13 / 新增 V16 / 改模块 pom 均红）"
 else
     fail "提交卫生不符或判据自检失败（range=${GIT_BASE:0:7}..${GIT_HEAD:0:7}, hygiene=${HYGIENE_RC}, selfTest=${SELF_RC}）" \
-        "${HYGIENE_BRIEF:-无判据输出} | ${SELF_BRIEF:-无自检输出} —— AC-23：只认 BASE..HEAD；pom/lockfile 不得改；迁移只允许新增 V14；自检必须 1 正 3 反"
+        "${HYGIENE_BRIEF:-无判据输出} | ${SELF_BRIEF:-无自检输出} —— AC-23：只认 BASE..HEAD；pom/lockfile 不得改；迁移只允许新增 V15；自检必须 1 正 3 反"
 fi
 
 # --------------------------------------------------------------------------- S7
@@ -1517,7 +1517,7 @@ if s7_reset; then
     fi
 else
     for _ in 1 2 3 4 5 6 7 8; do
-        fail "S7 自愈 reset 失败，无法开始自造链" "先 make platform-demo-reset 全绿（76/76）再跑门禁"
+        fail "S7 自愈 reset 失败，无法开始自造链" "先 make platform-demo-reset 全绿（80/80）再跑门禁"
     done
 fi
 

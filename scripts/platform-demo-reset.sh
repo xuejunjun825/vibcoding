@@ -34,16 +34,21 @@
 #   （白名单前缀 + 已停用，先删 join 行再删用户），并新增第 76 条复核 DISABLED=0 且 t1 内 14 名种子
 #   仍 ACTIVE（断言数 75 → 76）。「停用谁」（下面的 TEMP_ACTIVE，与 DemoFixture 同源）与「删谁」
 #   （TEMP_ACCOUNT_REGEX）是两件事，刻意保留两份正则，不要合并。
+# 20261123-r39：重置末尾新增 Tx4——先把重置期间产生的历史事件标 DONE，再种两条自动化演示规则
+#   （R1 P0/P1 新建通知域负责人、R2 大需求自动打标）。本脚本新增 4 条复核：规则 enabled=2、
+#   R1 触发+作用域+条件、R2 条件+动作、三张自动化表复位 0 行（断言数 76 → 80）。
+#   顺序不可交换：规则先落库，worker 会给 Tx3 的 deliver 事件打上「大需求」标签，requirement_tag 就不是 0 行。
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/temp-accounts.sh"
 
 FAIL=0
 CASE=0
-# 本脚本固定 76 项断言（r26 起 66 → 69；r30 加账号基线 1 项 → 70；r32 演示链 4 项 → 74；
-# r34 加「非夹具需求 0 条」1 项 → 75；r37 加停用账号清理 1 项 → 76）。断言只增：
-# 新增/删除断言时同步改这里，末尾会校验实际执行数 == 声明数，漂移直接红——否则「76/76」会变成一句没人维护的祝福。
-TOTAL_CHECKS=76
+# 本脚本固定 80 项断言（r26 起 66 → 69；r30 加账号基线 1 项 → 70；r32 演示链 4 项 → 74；
+# r34 加「非夹具需求 0 条」1 项 → 75；r37 加停用账号清理 1 项 → 76；r39 加自动化规则 4 项 → 80）。
+# 断言只增：新增/删除断言时同步改这里，末尾会校验实际执行数 == 声明数，漂移直接红——否则
+# 「80/80」会变成一句没人维护的祝福。
+TOTAL_CHECKS=80
 FAIL_TRANSPORT=0
 FAIL_API=0
 FAIL_ASSERT=0
@@ -423,6 +428,44 @@ DB_ENV_ROWS="$(db_count test_env "tenant_id = ${TENANT_ID}")"
     || fail "种子行被误删：流程定义 ${DB_WF_ROWS:-0}（期望≥4）/ 模块 ${DB_MODULE_ROWS:-0}（期望≥3）/ 环境 ${DB_ENV_ROWS:-0}（期望≥1）" \
             "这三张表的种子由 SeedService 种下、重置不重放：删了页面就是空白（D-02 的故障形态）"
 
+# r39：两条自动化演示规则必须存在且启用（TECHNICAL §11.2）。只数行数 = 形同虚设，
+# 所以下面三条分别查「启用数 / R1 触发+作用域+条件 / R2 条件+动作」——规则种子的内容
+# 就是 AutomationSpecs 封闭 schema 的活样例，改坏了必须在重置门禁上红，而不是等 QA 跑真栈。
+AUTO_ENABLED="$(db_count automation_rule "tenant_id = ${TENANT_ID} AND enabled = 1")"
+[[ "${AUTO_ENABLED}" == "2" ]] \
+    && pass "库内 automation_rule 启用 ${AUTO_ENABLED} 条（R1 P0/P1 通知 + R2 大需求打标）" \
+    || fail "库内启用规则 ${AUTO_ENABLED:-<空>} 条，期望 2" \
+            "DemoFixture.automationRuleRows 是唯一来源：Tx4 必须在 Tx1 删表之后重插两条，且 enabled=1"
+
+AUTO_R1="$(db_count automation_rule "tenant_id = ${TENANT_ID} AND name = 'P0/P1 新建通知域负责人'
+        AND trigger_type = 'REQUIREMENT_CREATED' AND scope_type = 'DOMAIN'
+        AND scope_id = (SELECT id FROM biz_domain WHERE tenant_id = ${TENANT_ID} AND code = 'ORD')
+        AND condition_json LIKE '%\"P0\"%' AND condition_json LIKE '%\"P1\"%'")"
+[[ "${AUTO_R1}" == "1" ]] \
+    && pass "R1 = REQUIREMENT_CREATED + DOMAIN(ORD) + priorityIn 含 P0/P1" \
+    || fail "R1 命中 ${AUTO_R1:-<空>} 行（期望 1）：触发/作用域/条件至少一项漂移" \
+            "规则 1 的定义见 TECHNICAL §11.1；作用域 ID 必须是 ORD 域的 biz_domain.id（不是 vendor.id）"
+
+AUTO_R2="$(db_count automation_rule "tenant_id = ${TENANT_ID} AND name = '大需求自动打标'
+        AND trigger_type = 'FIELD_CHANGE'
+        AND CAST(condition_json->>'\$.estimateDays.value' AS DECIMAL(10,2)) = 10
+        AND condition_json LIKE '%\"estimate_days\"%'
+        AND actions_json LIKE '%ADD_TAG%' AND actions_json LIKE '%大需求%'")"
+[[ "${AUTO_R2}" == "1" ]] \
+    && pass "R2 = FIELD_CHANGE + estimateDays≥10（仅 estimate_days）+ ADD_TAG 大需求" \
+    || fail "R2 命中 ${AUTO_R2:-<空>} 行（期望 1）：条件/动作至少一项漂移" \
+            "estimateDays 的形状是 {\"op\":\"gte\",\"value\":10}；fields 只对 FIELD_CHANGE 生效"
+
+# 结尾复位断言：重置之后这三张表必须是 0 行。automation_run 尤其不能留——它带 requirement_id，
+# Tx1 删需求后留下的 run 就是孤儿（唯一键含 requirement_id，孤儿还会挡住下次抢占）。
+DB_AUTO_RUN="$(db_count automation_run "tenant_id = ${TENANT_ID}")"
+DB_AUTO_EVENT="$(db_count automation_event "tenant_id = ${TENANT_ID}")"
+DB_AUTO_TAG="$(db_count requirement_tag "tenant_id = ${TENANT_ID}")"
+[[ "${DB_AUTO_RUN}" == "0" && "${DB_AUTO_EVENT}" == "0" && "${DB_AUTO_TAG}" == "0" ]] \
+    && pass "库内 automation_run/event/requirement_tag 全 0 行（重置后干净基线）" \
+    || fail "残留：automation_run ${DB_AUTO_RUN:-?} / automation_event ${DB_AUTO_EVENT:-?} / requirement_tag ${DB_AUTO_TAG:-?} 行" \
+            "四表必须进 DELETE_ORDER 且排在 requirement 之前；Tx4 要先收口 PENDING 事件再种规则"
+
 # login_or_stop <user> <password> <label>：登录失败先分类——网关不可达(000/502/503)是传输层，
 # 必须当场停并给出重跑命令，而不是记一条「登录失败」再继续跑到下一个接口才停。
 login_or_stop() {
@@ -663,14 +706,14 @@ check_count_any() {
         || fail "${label}（期望 ${want}，实际 ${got:-<缺 ${k1}/${k2} 键>}）" \
             "重置计数由 DemoResetService 返回，缺键说明 r18 段还没接进 reset 响应"
 }
-check_count_any rolePermission role_permission 1848 "授权行 role_permission = 1848（11 角色 × 168）"
+check_count_any rolePermission role_permission 1881 "授权行 role_permission = 1881（11 角色 × 171）"
 check_count_any customRoles custom_roles 0 "自定义角色 = 0（重置只留内置 11 个）"
 
 RBAC_TENANT_ROWS="$(db_count sys_role_permission "tenant_id = ${TENANT_ID}")"
-[[ "${RBAC_TENANT_ROWS}" == "1848" ]] \
+[[ "${RBAC_TENANT_ROWS}" == "1881" ]] \
     && pass "库内授权行 ${RBAC_TENANT_ROWS} 行（服务端计数之外的独立复核）" \
-    || fail "库内授权行 ${RBAC_TENANT_ROWS:-<空>} 行，期望 1848" \
-            "计数表自报与服务端同源；这条独立查库，两处都说 1848 才算数"
+    || fail "库内授权行 ${RBAC_TENANT_ROWS:-<空>} 行，期望 1881" \
+            "计数表自报与服务端同源；这条独立查库，两处都说 1881 才算数"
 
 # r24：第 11 个内置角色在演示账号上必须有落脚点 —— 角色与厂商必须成对出现，
 # 少一个就是「列表看得见、写什么都 403」的空壳账号（PRD AC-12）。
@@ -686,20 +729,20 @@ VPM_ROLE_VENDOR="$(db_q "SELECT CONCAT(r.code, '/', COALESCE(v.code, 'NULL'))
             "SeedService 的 userDefs 必须给 vpm1 同时写角色码与厂商码"
 
 VPM_ROWS="$(db_count sys_role_permission "tenant_id = ${TENANT_ID} AND role_id = (SELECT id FROM sys_role WHERE tenant_id = ${TENANT_ID} AND code = 'VENDOR_PM')")"
-[[ "${VPM_ROWS}" == "168" ]] \
-    && pass "VENDOR_PM 授权 ${VPM_ROWS} 行（11 个角色各 168 格）" \
-    || fail "VENDOR_PM 授权 ${VPM_ROWS:-<空>} 行，期望 168" \
-            "RbacSeeder 必须给第 11 个内置角色落满 168 格，V13 只保证角色存在"
+[[ "${VPM_ROWS}" == "171" ]] \
+    && pass "VENDOR_PM 授权 ${VPM_ROWS} 行（11 个角色各 171 格）" \
+    || fail "VENDOR_PM 授权 ${VPM_ROWS:-<空>} 行，期望 171" \
+            "RbacSeeder 必须给第 11 个内置角色落满 171 格，V13 只保证角色存在"
 
 BAD_ROLE_ROWS="$(db_q "SELECT COUNT(*) FROM (
         SELECT r.id FROM sys_role r
          WHERE r.tenant_id = ${TENANT_ID} AND r.builtin = 1
            AND (SELECT COUNT(*) FROM sys_role_permission p
-                 WHERE p.tenant_id = r.tenant_id AND p.role_id = r.id) <> 168) x")"
+                 WHERE p.tenant_id = r.tenant_id AND p.role_id = r.id) <> 171) x")"
 [[ "${BAD_ROLE_ROWS}" == "0" ]] \
-    && pass "11 个内置角色每个恰好 168 行授权" \
-    || fail "有 ${BAD_ROLE_ROWS:-?} 个内置角色的授权行数不等于 168" \
-            "1848 = 11 × 168：缺格说明预设没覆盖到新角色，多格说明有重复 upsert"
+    && pass "11 个内置角色每个恰好 171 行授权" \
+    || fail "有 ${BAD_ROLE_ROWS:-?} 个内置角色的授权行数不等于 171" \
+            "1881 = 11 × 171：缺格说明预设没覆盖到新角色，多格说明有重复 upsert"
 
 roleperm_audit_view() {
     db_q "SELECT p.access
@@ -725,7 +768,7 @@ else
     [[ "${DIRTIED}" == "DENY" && "${RESTORED}" == "${PRESET_ACCESS}" ]] \
         && pass "被改过的授权格回到预设（audit:view ${DIRTIED} → ${RESTORED}）" \
         || fail "授权格未回预设：污染后 ${DIRTIED:-<空>}，重置后 ${RESTORED:-<空>}，预设 ${PRESET_ACCESS}" \
-                "重置必须用 RbacSeeder 的推导覆盖内置角色的 1848 行（upsert），不能只删自定义角色的行"
+                "重置必须用 RbacSeeder 的推导覆盖内置角色的 1881 行（upsert），不能只删自定义角色的行"
 fi
 
 CUSTOM_ROLES_DB="$(db_count sys_role "tenant_id = ${TENANT_ID} AND builtin = 0")"
@@ -748,14 +791,14 @@ P_R37="$(temp_protected_active_count)" || P_R37="ERR"
 # ---------------------------------------------------------------- 结果
 
 if (( CASE != TOTAL_CHECKS )); then
-    err "断言数漂移: 实际执行 ${CASE} 项，声明 ${TOTAL_CHECKS} 项——增删断言时必须同步 TOTAL_CHECKS，否则 76/76 口径失效"
+    err "断言数漂移: 实际执行 ${CASE} 项，声明 ${TOTAL_CHECKS} 项——增删断言时必须同步 TOTAL_CHECKS，否则 80/80 口径失效"
     exit 1
 fi
 if (( FAIL > 0 )); then
     err "platform-demo-reset: ${CASE} 项中 ${FAIL} 项失败（transport ${FAIL_TRANSPORT} / api ${FAIL_API} / assert ${FAIL_ASSERT}）"
     err "失败分类：transport = 栈或网络层（先 make platform-up 后重跑）；api = 接口语义；assert = 数据未回演示态"
     err "提示：assert 类若只有个别计数偏移（如需求 16 条、test_strategy 1 行），先确认没有第二个写者"
-    err "      在同一条演示栈上并发（另一次 reset/seed/门禁探针）——重置本身幂等，独占重跑即应回到 76/76"
+    err "      在同一条演示栈上并发（另一次 reset/seed/门禁探针）——重置本身幂等，独占重跑即应回到 80/80"
     err "重跑: bash scripts/platform-demo-reset.sh"
     exit 1
 fi

@@ -486,7 +486,7 @@ section "AC-5 权限矩阵：接口生成探测矩阵，逐格断言 2xx/403"
 api_call GET /api/req/admin/permissions
 expect "GET /admin/permissions 200" 200
 FN_COUNT="$(jlen "$HTTP_BODY" '.functions')"
-expect_num "权限矩阵暴露 60 个函数码" "${FN_COUNT:-0}" eq 60 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码 + 1 M7 integration:manage + 14 M8 协作/代码/测试码 + 4 M9 分析域码 portal:view/portal:config/report:view/report:share；PermissionMatrixGridTest 同为 11×60）"
+expect_num "权限矩阵暴露 61 个函数码" "${FN_COUNT:-0}" eq 61 "PermissionMatrix 必须与 TECHNICAL §5.3/§5.4 一致（26 r2 + 15 M6 质量码 + 1 M7 integration:manage + 14 M8 协作/代码/测试码 + 4 M9 分析域码 + 1 r39 automation:manage；PermissionMatrixGridTest 同为 11×61）"
 ROLE_COUNT="$(jlen "$HTTP_BODY" '.roles')"
 # 矩阵接口返回的是「租户内全部 ACTIVE 角色」——自定义角色本来就是允许的（r19 起管理员可建），
 # 所以这里断的是「内置 11 个必须都在」，不是「恰好 11 个」：写死 eq 11 会被一个自定义角色打红，
@@ -1128,11 +1128,11 @@ VPM_ROLE_ROW="$(db_q "SELECT CONCAT(code, '/', builtin) FROM sys_role WHERE tena
 if [[ "$VPM_ROLE_ROW" == "VENDOR_PM/1" ]]; then
     pass "VENDOR_PM 是内置角色（builtin=1，不可删除）"
 else
-    fail "VENDOR_PM 角色行异常：${VPM_ROLE_ROW:-<缺失>}" "V13 迁移必须幂等补角色行，RbacSeeder 必须预置 168 格授权"
+    fail "VENDOR_PM 角色行异常：${VPM_ROLE_ROW:-<缺失>}" "V13 迁移必须幂等补角色行，RbacSeeder 必须预置 171 格授权"
 fi
-expect_num "VENDOR_PM 的授权格 = 168（60 FUNCTION + 36 MENU + 72 ACTION）" \
+expect_num "VENDOR_PM 的授权格 = 171（61 FUNCTION + 37 MENU + 73 ACTION）" \
     "$(db_q "SELECT COUNT(*) FROM sys_role_permission p JOIN sys_role r ON r.id=p.role_id AND r.tenant_id=p.tenant_id WHERE p.tenant_id=$(tenant_id) AND r.code='VENDOR_PM'")" \
-    eq 168 "RbacSeeder 的 preset(roleCode) 必须对这个角色落满 168 行"
+    eq 171 "RbacSeeder 的 preset(roleCode) 必须对这个角色落满 171 行"
 VPM_ACCOUNT="$(db_q "SELECT CONCAT(r.code,'/',v.code) FROM sys_user u
                       JOIN sys_user_role ur ON ur.user_id=u.id AND ur.tenant_id=u.tenant_id
                       JOIN sys_role r ON r.id=ur.role_id AND r.tenant_id=u.tenant_id

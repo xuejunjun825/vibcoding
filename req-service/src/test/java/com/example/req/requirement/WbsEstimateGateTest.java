@@ -148,7 +148,7 @@ class WbsEstimateGateTest {
 
         TenantContext.set(DataScope.system(TENANT));
         ApiException error = catchThrowableOfType(
-                () -> service.transition(REQUIREMENT, "schedule", null, "UI", null),
+                () -> service.transition(REQUIREMENT, "schedule", null, "UI", (Long) null),
                 ApiException.class);
         assertThat(error.code()).isEqualTo(RequirementErrors.ILLEGAL_TRANSITION);
         // 门根本没有被问过：状态机先拒。
@@ -165,7 +165,7 @@ class WbsEstimateGateTest {
 
         TenantContext.set(DataScope.system(TENANT));
         ApiException error = catchThrowableOfType(
-                () -> service.transition(REQUIREMENT, "schedule", null, "UI", null),
+                () -> service.transition(REQUIREMENT, "schedule", null, "UI", (Long) null),
                 ApiException.class);
         assertThat(error.status()).isEqualTo(404);
         assertThat(error.code()).isEqualTo(RequirementErrors.NOT_FOUND);
@@ -189,7 +189,7 @@ class WbsEstimateGateTest {
 
         TenantContext.set(DataScope.system(TENANT));
         ApiException error = catchThrowableOfType(
-                () -> service.transition(REQUIREMENT, "schedule", null, "UI", null),
+                () -> service.transition(REQUIREMENT, "schedule", null, "UI", (Long) null),
                 ApiException.class);
         assertThat(error.status()).isEqualTo(409);
         assertThat(error.code()).isEqualTo(RequirementErrors.ESTIMATE_NOT_APPROVED);
@@ -215,10 +215,11 @@ class WbsEstimateGateTest {
                                        RequirementStateMachine machine, AuditService audit,
                                        NotificationWriter notifications) {
         ObjectProvider<WbsEstimateService> gateProvider = provider(estimates);
+        // 标签端口传 null：本测试只关心人天门，tagsOf(null 端口) 返回空表（见 RequirementService 注释）。
         return new RequirementService(repository,
                 mock(RequirementDomainRelRepository.class), machine, mock(CodeGenerator.class),
                 audit, notifications, provider(null), provider(null),
-                mock(JdbcTemplate.class), ALLOW_ALL, gateProvider);
+                mock(JdbcTemplate.class), ALLOW_ALL, gateProvider, null);
     }
 
     private void given(ApprovalInstance instance) {

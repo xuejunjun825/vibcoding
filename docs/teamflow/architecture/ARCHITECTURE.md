@@ -255,3 +255,23 @@ r1 的四步（`dev-up / verify / test-negative / dev-down`）与 `/api/demo/**`
 
 密钥可逆存储（`secret_hash` + `secret_enc`）、无计划走快速测试、发布驳回回 `DRAFT`、权限矩阵写代码、版本发布级联只前推不伪造。这些偏差由 QA 按原样验收，不是待修缺陷。
 
+### 11.5 自动化规则（20261123-r39）
+
+二期留的"自动化规则引擎"：规则 = 触发事件 + 条件 + 动作，可启停、有执行日志、能防循环，**不改需求状态、不进审批、不动人天、不建发布单**。它在现有平台上叠一层旁路，不新增进程、不新增中间件。
+
+| 决定 | 落地 | 为什么不可换 |
+|---|---|---|
+| 事件只从审计旁路出 | `platform-common/audit/AuditListener`（SPI）+ `AuditService.record(...)` 在**同事务同线程**回调；`AutomationEventOutbox` 把审计动作翻成 0..n 条 `automation_event` | 同事务 = 业务回滚则事件不存在；改成 `@Async`/MQ 就丢掉这个保证，且前端上报入口（`/automation/events`）不存在——没有"伪造事件"的 API 面 |
+| 求值是纯函数 | `AutomationConditionEvaluator.evaluate(ConditionSpec, Map snapshot) -> Verdict(matched, reason)`；schema 唯一入口 `AutomationSpecs`（未知键拒绝，不引 SpEL/JS） | 纯函数才能单测五比较符/AND-OR/字段缺失；也保证"事件之后状态又前进了"不影响本次判定 |
+| 幂等先于判定 | `AutomationRunWriter.tryStart(...)` 先 `INSERT automation_run` 抢 `(tenant, rule, requirement, event)` 唯一键（`RUNNING`），再依次 Scope 复核 → 条件 → 限流；抢不到即放弃 | 顺序写在方法内，调用方无法颠倒；语义严格是"至多一次"（首次即被跳过也占位，收尾 `SKIPPED`） |
+| 作用域只有一份 | `AutomationScopes.withScope(ruleScope, …)` 临时绑定 `TenantContext`，之后全走既有 `ScopedJdbc` + `/*scope:r*/`，谓词由 `ScopeSql` 生成；四张新表登记 `TableSpec.NONE`（无隔离列，未登记即 fail-closed 抛） | 规则的作用域必须是线程绑定的运行时身份，不能是查询参数；放宽条件在定义期就 400 `CONDITION_WIDENS_SCOPE` |
+| 动作四类白名单 | `NOTIFY` / `ASSIGN_OWNER` / `ADD_TAG` / `WEBHOOK`；DB 先行（打标、指派）、通知与外呼后置 | 不可回滚的副作用必须排在可回滚的后面，才谈得上 `SUCCESS`/`PARTIAL` 的确定语义；`ASSIGN_OWNER` 是 `RequirementService.assignOwner` 的唯一调用点 |
+| 防循环两道闸 | 规则动作产生的事件标 `origin=RULE` → 直接 `DROPPED/RULE_ORIGIN`；`chain_depth ≥ 4` 兜底丢弃；两者都写 0 条 run | 闸放在 `AutomationDispatcher` 最前面，任何分支都绕不过；写 run 之前就丢，"0 run"才是可断言的 |
+| 执行与 HTTP 分离 | `AutomationWorker.poll()`（`@Scheduled` + 固定并发）领取事件；HTTP 线程只写事件 | 建需求的响应时间与规则执行解耦，"业务 < 1s 返回"是结构结果，不是调优结果 |
+| 权限是注册表 +1 | `MenuRegistry` 37 页、`ActionRegistry` 73 动作、`PermissionMatrix` 61 功能码各 +1（`automation.rules` / `automation.action.manage` / `automation:manage`），四个前端路由共用一个页面码；厂商账号由 `AutomationInternalOnlyInterceptor`（`order(-100)`，早于 `PermissionInterceptor`）统一 403 `INTERNAL_ONLY` | 页面码只有一个，「规则/执行日志」只能是页内双 tab；注册表 +1 会触发 9 个脚本的格数迁移（37/61/73/171…），这是"单一注册表"的必要代价 |
+| 静态边界 | `scripts/tests/lint.sh` L21：`automation` 包禁 `.transition(`、`ApprovalEngine`、`ReleaseService`，禁 `domain_id` 字面量，禁私接 `DriverManager` | 口头约定拦不住下一次改动；改状态/绕隔离必须在 CI 就是红灯 |
+
+数据面：`V15__automation_rule.sql` 建四表（`automation_rule` / `automation_event` / `automation_run` / `requirement_tag`），V1–V14 字节不变。已知代价两条：① 日志页的规则名走 `LEFT JOIN automation_rule`，规则改名后旧日志显示新名字（不存 `rule_name` 副本）；② `SCHEDULE` 截断行 `requirement_id IS NULL`，唯一键对 NULL 不去重，只能用 `INSERT … WHERE NOT EXISTS` —— 这是唯一一条不用唯一键的实现，写在 `AutomationRunWriter` 注释里。
+
+演示与门禁：`platform-demo-reset` 种 R1/R2 两条规则、自检 76 → **80** 项；新增 `make automation-verify`（6 段 40 条：正例/负例/幂等/防循环/越权/停用与动作边界；S3 含「详情 view.tags 与列表同源」的回归断言）。
+

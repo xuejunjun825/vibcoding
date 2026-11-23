@@ -654,4 +654,45 @@ export function downloadAttachment(id: number, fileName?: string): Promise<void>
   return download(`${REQ}/attachments/${id}`, undefined, fileName)
 }
 
+/**
+ * 需求标签（r39 自动化规则 ADD_TAG 写入；`source` 只用于 chip 的 title 说明来源，
+ * 不用颜色区分——避免把「自动化打的」误读成一种状态，DESIGN §3.4）。
+ *
+ * 类型不放进 `api/types.ts`：该文件不归本任务所有，而标签是**可选**的新字段
+ * （服务端 RequirementViews.View 是否带 tags 由 T5 决定）。`tagsOf` 做结构判断，
+ * 老响应（无 tags）得到空数组，不会渲染出 `undefined` chip。
+ */
+export interface RequirementTag {
+  tag: string
+  source?: string | null
+}
+
+export function tagsOf(row: unknown): RequirementTag[] {
+  if (!row || typeof row !== 'object') return []
+  const raw = (row as { tags?: unknown }).tags
+  if (!Array.isArray(raw)) return []
+  const result: RequirementTag[] = []
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const tag = item.trim()
+      if (tag) result.push({ tag, source: null })
+      continue
+    }
+    if (!item || typeof item !== 'object') continue
+    const record = item as { tag?: unknown; source?: unknown }
+    if (typeof record.tag !== 'string' || !record.tag.trim()) continue
+    result.push({
+      tag: record.tag.trim(),
+      source: typeof record.source === 'string' ? record.source : null,
+    })
+  }
+  return result
+}
+
+export function tagSourceLabel(source?: string | null): string {
+  if (source === 'RULE') return '自动化规则添加'
+  if (source === 'MANUAL') return '手动添加'
+  return '来源未知'
+}
+
 export type { GateDecision, GateItem }

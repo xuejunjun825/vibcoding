@@ -55,6 +55,13 @@ public final class DemoFixture {
     public static final long PLAN_COUNT = 1;
     public static final long PLAN_CASE_COUNT = 10;
     public static final long DEFECT_COUNT = 3;
+    /**
+     * 种子通知 4 条——不是"重置后全表通知数"。
+     *
+     * <p>重置事务（Tx1）写完这 4 条后，同一命令还会跑一遍演示审批链（Tx2/Tx3），再写 22 条
+     * {@code APPROVAL}/{@code APPROVAL_RESULT} 通知；直接用 {@code SELECT COUNT(*)} 会看到 26
+     * （r39 Q-5 的口径误会，不是回归）。要复核种子数，看自检 counts 而不是全表行数。</p>
+     */
     public static final long NOTIFICATION_COUNT = 4;
     /** r15-fix：派生实例数据没有种子，重置后必须为 0（否则是 release 已删的孤儿）。 */
     public static final long TEST_STRATEGY_COUNT = 0;
@@ -230,6 +237,12 @@ public final class DemoFixture {
             TableReset.purge("task"),
             TableReset.purge("sprint"),
             TableReset.purge("attachment"),
+            // r39：四张自动化表都指向 demand/需求，必须排在 requirement 之前；automation_run
+            // 还带 requirement_id，漏删就会留下指向已删需求的孤儿（trim 后行数也不再是 0）。
+            TableReset.purge("automation_run"),
+            TableReset.purge("automation_event"),
+            TableReset.purge("automation_rule"),
+            TableReset.purge("requirement_tag"),
             TableReset.purge("requirement_domain_rel"),
             TableReset.purge("requirement"),
             TableReset.purge("test_strategy"),
@@ -537,6 +550,60 @@ public final class DemoFixture {
             rows.add(new Object[]{ref(refs, "user:" + spec[0]), spec[1], spec[2], spec[3], spec[4]});
         }
         return rows;
+    }
+
+    // ---------------------------------------------------------------- 自动化演示规则（r39）
+
+    /**
+     * 两条演示规则的名字（{@code uk_rule_name} 的一半）。演示脚本、DEMO-BY-ROLE 与库内断言
+     * 引用同一份，避免出现「文档写 A、库里是 B」的第二套真值。
+     */
+    public static final String AUTOMATION_RULE_P0_P1 = "P0/P1 新建通知域负责人";
+    public static final String AUTOMATION_RULE_BIG_TAG = "大需求自动打标";
+    public static final String AUTOMATION_TAG_BIG = "大需求";
+
+    /**
+     * 重置期间产生的历史事件不参与规则求值（TECHNICAL §11.1 第 2 步）。
+     *
+     * <p>顺序是语义的一部分：Tx2/Tx3 走审批引擎会发审计，于是留下 PENDING 事件。规则一旦先落库，
+     * worker 会把 Tx3 的 {@code deliver} 事件按 R2 重新求值并打上「大需求」标签——
+     * {@code requirement_tag} 就不再是 0 行，demo-reset 的干净基线断言当场红。先收口事件、再种规则，
+     * 两步都在 Tx4 内提交，worker 之后就只会看到「重置之后」的新事件。</p>
+     */
+    public static final String AUTOMATION_EVENT_DRAIN =
+            "UPDATE automation_event SET status = 'DONE', processed_at = NOW(3)"
+                    + " WHERE tenant_id = ? AND status = 'PENDING'";
+
+    /**
+     * 收口之后再整表清掉：DONE 只挡住「已经领取、正在处理」的那几条（worker 只认 PENDING），
+     * 而演示重置的承诺是「重置后 automation_event 0 行」——两步缺一不可。
+     * 顺序不能反：先删再收口 = 已领取的行会被处理（Tx3 的 deliver 事件会被 R2 打上「大需求」标签）；
+     * 只收口不删 = 表里留下 6 条 DONE 行，demo-reset 的 0 行断言立刻红。
+     */
+    public static final String AUTOMATION_EVENT_PURGE =
+            "DELETE FROM automation_event WHERE tenant_id = ?";
+
+    public static final String AUTOMATION_RULE_INSERT =
+            "INSERT INTO automation_rule (tenant_id, name, enabled, trigger_type, condition_json,"
+                    + " actions_json, scope_type, scope_id, priority, version, created_by, updated_by)"
+                    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)";
+
+    /**
+     * 两条演示规则的行（TECHNICAL §11.1）。规则 JSON 直接写成字符串：它们同时是
+     * {@code AutomationSpecs} 封闭 schema 的活样例，写错会在重置的第一个事件上以 400 暴露。
+     */
+    public static List<Object[]> automationRuleRows(long tenantId, long domainId, long adminUserId) {
+        return List.of(
+                new Object[]{tenantId, AUTOMATION_RULE_P0_P1, Boolean.TRUE, "REQUIREMENT_CREATED",
+                        "{\"priorityIn\":[\"P0\",\"P1\"]}",
+                        "[{\"type\":\"NOTIFY\",\"recipients\":[{\"kind\":\"DOMAIN_OWNER\"}]}]",
+                        "DOMAIN", domainId, Integer.valueOf(100), Integer.valueOf(1),
+                        adminUserId, adminUserId},
+                new Object[]{tenantId, AUTOMATION_RULE_BIG_TAG, Boolean.TRUE, "FIELD_CHANGE",
+                        "{\"estimateDays\":{\"op\":\"gte\",\"value\":10},\"fields\":[\"estimate_days\"]}",
+                        "[{\"type\":\"ADD_TAG\",\"tag\":\"" + AUTOMATION_TAG_BIG + "\"}]",
+                        "DOMAIN", domainId, Integer.valueOf(110), Integer.valueOf(1),
+                        adminUserId, adminUserId});
     }
 
     private static Long ref(Map<String, Long> refs, String key) {

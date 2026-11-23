@@ -7,7 +7,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * The 72 authorizable actions, in one place (r18).
+ * The 73 authorizable actions, in one place (r18; r39 appends the automation action).
  *
  * <p>Before r18 an action was not a grant subject at all: the frontend decided whether to show a
  * button by a function code, so "may write wiki pages" and "may administer wiki spaces" shared one
@@ -164,7 +164,11 @@ public final class ActionRegistry {
             action("integration.action.manage", "admin.integrations", "维护集成配置",
                     "integration:manage"),
             action("apiclient.action.manage", "admin.api-clients", "维护 API 客户端",
-                    "apiclient:manage"));
+                    "apiclient:manage"),
+            // r39：自动化规则页的写动作。highRisk=false —— HIGH_RISK 三条是 r18 冻结语义，
+            // 新增第四条会改变 s1 的高危断言口径（TECHNICAL §10.1）。
+            action("automation.action.manage", "automation.rules", "管理规则",
+                    "automation:manage"));
 
     private ActionRegistry() {
     }
