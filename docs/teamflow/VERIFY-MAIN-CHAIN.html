@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>主链业务流程验证报告（34 项断言）</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:980px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+td:first-child,th:first-child{white-space:nowrap}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+h1.title{display:none}
+</style></head><body><div class="page">
+
+<h1
+id="主链业务流程验证报告8-个子流程--34-项断言">主链业务流程验证报告（8
+个子流程 · 34 项断言）</h1>
+<blockquote>
+<p>验证方式：<strong>真接口实跑</strong>（不是看页面、不是读代码）。脚本
+<code>/tmp/v8/verify.mjs</code> 从空库重置后的演示数据开始， 依次走完 8
+个子流程，每一步同时验证「正向能走通」和「该拦的拦住」。全部 34
+项通过，其中 1 项是我发现的<strong>真实缺口</strong>（见 §3）。</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>结论</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>断言总数</td>
+<td><strong>34</strong></td>
+</tr>
+<tr>
+<td>通过</td>
+<td><strong>34</strong></td>
+</tr>
+<tr>
+<td>发现的缺口</td>
+<td>1（研发可自行「测试通过」，权限口子）</td>
+</tr>
+<tr>
+<td>验证时间</td>
+<td>2026-11-23</td>
+</tr>
+<tr>
+<td>基线</td>
+<td>main（r39 合回后）</td>
+</tr>
+</tbody>
+</table>
+<h2 id="子流程-1--需求受理">子流程 1 · 需求受理</h2>
+<table>
+<thead>
+<tr>
+<th>断言</th>
+<th>实测结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ 业务方创建 BUS</td>
+<td><code>201 BUS-1691 SUBMITTED</code></td>
+</tr>
+<tr>
+<td>✅ 缺业务域被拒</td>
+<td><code>400 VALIDATION_FAILED field=domainIds</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="子流程-2--需求审批">子流程 2 · 需求审批</h2>
+<table>
+<thead>
+<tr>
+<th>断言</th>
+<th>实测结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ 业务方提交→APPROVING</td>
+<td><code>200 APPROVING allowed=undefined</code></td>
+</tr>
+<tr>
+<td>✅ 业务方不能自己批（越权）</td>
+<td><code>403 FORBIDDEN</code></td>
+</tr>
+<tr>
+<td>✅ 产品经理审批→PENDING_REVIEW</td>
+<td><code>200 PENDING_REVIEW</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="子流程-3--评审入池">子流程 3 · 评审入池</h2>
+<table>
+<thead>
+<tr>
+<th>断言</th>
+<th>实测结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ 评审未通过就入池被拒</td>
+<td><code>409 REVIEW_APPROVAL_REQUIRED</code></td>
+</tr>
+<tr>
+<td>✅ 发起评审</td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td>✅ 评审通过（回调自动入池）→POOLED</td>
+<td><code>200 POOLED</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="子流程-4--需求拆解">子流程 4 · 需求拆解</h2>
+<table>
+<thead>
+<tr>
+<th>断言</th>
+<th>实测结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ 拆 PDR</td>
+<td><code>201 PDR-0822 PENDING_ANALYSIS</code></td>
+</tr>
+<tr>
+<td>✅ 父 PDR 未排期就拆 RD 被拒</td>
+<td><code>409 PARENT_NOT_SCHEDULED</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="子流程-5--工时评估初审">子流程 5 · 工时评估初审</h2>
+<table>
+<thead>
+<tr>
+<th>断言</th>
+<th>实测结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ 产品经理提评估被拒（只审不提）</td>
+<td><code>403 FORBIDDEN</code></td>
+</tr>
+<tr>
+<td>✅ PMO 提交工时评估</td>
+<td><code>201 </code></td>
+</tr>
+<tr>
+<td>✅ 评估单 APPROVED</td>
+<td><code>200 status=APPROVED</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="子流程-6--排期与版本计划">子流程 6 · 排期与版本计划</h2>
+<table>
+<thead>
+<tr>
+<th>断言</th>
+<th>实测结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ 排期→SCHEDULED</td>
+<td><code>200 SCHEDULED</code></td>
+</tr>
+<tr>
+<td>✅ 建版本</td>
+<td><code>201 REL-2869</code></td>
+</tr>
+<tr>
+<td>✅ 需求挂版本</td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td>✅ 版本已写回需求</td>
+<td><code>releaseId=5256</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="子流程-7--研发交付执行">子流程 7 · 研发交付执行</h2>
+<table>
+<thead>
+<tr>
+<th>断言</th>
+<th>实测结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ 拆 RD</td>
+<td><code>201 RD-2219 TODO</code></td>
+</tr>
+<tr>
+<td>✅ 指派厂商（原因入审计）</td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td>✅ RD 工时评估提交</td>
+<td><code>201</code></td>
+</tr>
+<tr>
+<td>✅ 开始开发→IN_DEV</td>
+<td><code>200 IN_DEV</code></td>
+</tr>
+<tr>
+<td>✅ 建任务</td>
+<td><code>201 task=19168</code></td>
+</tr>
+<tr>
+<td>✅ 任务 DOING→DONE</td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td>✅ 研发提测→PENDING_TEST</td>
+<td><code>200 PENDING_TEST</code></td>
+</tr>
+<tr>
+<td>✅ 测试执行 PASS（qa1）</td>
+<td><code>201 exec=13282</code></td>
+</tr>
+<tr>
+<td>✅ 测试结论→TEST_PASSED（⚠ 由研发执行成功：test:quick 给了
+DEV，缺口见报告）</td>
+<td><code>200 TEST_PASSED</code></td>
+</tr>
+<tr>
+<td>✅ 合入→MERGED</td>
+<td><code>200 MERGED</code></td>
+</tr>
+<tr>
+<td>✅ 交付登记（实际人天/MR，MERGED 阶段）</td>
+<td><code>200 2.5</code></td>
+</tr>
+<tr>
+<td>✅ 完成→DONE</td>
+<td><code>200 DONE</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="子流程-8--交付验收关闭">子流程 8 · 交付验收关闭</h2>
+<table>
+<thead>
+<tr>
+<th>断言</th>
+<th>实测结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ PDR 进入开发→IN_DEV</td>
+<td><code>200 IN_DEV</code></td>
+</tr>
+<tr>
+<td>✅ PDR 交付→DELIVERED</td>
+<td><code>200 DELIVERED</code></td>
+</tr>
+<tr>
+<td>✅ PDR 验收→ACCEPTED_CLOSED</td>
+<td><code>200 ACCEPTED_CLOSED</code></td>
+</tr>
+<tr>
+<td>✅ BUS 关闭→CLOSED</td>
+<td><code>200 CLOSED</code></td>
+</tr>
+<tr>
+<td>✅ 父需求汇总（人天/进度/子需求）</td>
+<td><code>rollup={"childCount":1,"doneCount":1,"estimateDays":3,"actualDays":2.5,"progressPercent":100}</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="验证中确认的-4-条顺序约束照着做才不会卡">验证中确认的 4
+条「顺序约束」（照着做才不会卡）</h2>
+<ol type="1">
+<li><strong>必须先审批再评审</strong>：<code>REQ_SUBMIT</code> 通过才进
+<code>PENDING_REVIEW</code>；<code>REQ_REVIEW</code>
+通过由<strong>回调自动</strong>置
+<code>POOLED</code>，不需要（也不允许）再手动
+<code>review_pass</code>——重复点会
+<code>409 ILLEGAL_TRANSITION</code>。</li>
+<li><strong>评估门是逐需求的</strong>：RD 自己也要交
+<code>WBS_ESTIMATE</code> 并审批通过，<code>start_dev</code>
+才放行；只给父 PDR 评估不够。</li>
+<li><strong>交付登记要在 <code>finish</code> 之前</strong>：RD 一旦
+<code>DONE</code> 就是终态，<code>POST /deliver</code> 会
+400「已关闭不可修改」。正确顺序是 <code>merge</code> →
+交付登记（实际人天/MR）→ <code>finish</code>。</li>
+<li><strong>PDR 要先 <code>start_dev</code> 才能
+<code>deliver</code></strong>：PDR 在 <code>SCHEDULED</code> 直接
+<code>deliver</code> 会 409；要 <code>IN_DEV</code> →
+<code>DELIVERED</code> → <code>accept</code>。</li>
+</ol>
+<h2 id="3-发现的真实缺口建议单独修一轮">3.
+发现的真实缺口（建议单独修一轮）</h2>
+<p><strong>研发可以自己点「测试通过」</strong>：<code>platform-contract/.../PermissionMatrix.java:297</code>
+给 <code>DEV</code> 角色
+<code>restrict(matrix, "DEV", ..., "test:quick", ...)</code>，而
+<code>test_pass</code>（测试结论）与
+<code>submit_test</code>（提测）共用
+<code>test:quick</code>。实跑：<code>dev1</code> 在
+<code>PENDING_TEST</code> 上调 <code>test_pass</code> → <strong>200 →
+TEST_PASSED</strong>，等于研发自证通过。</p>
+<p>建议：把「测试结论」单独拆成一个动作码（如
+<code>test:conclude</code>），只给 <code>QA</code> /
+测试负责人；<code>submit_test</code>（提测）仍留
+<code>DEV</code>。这样才是「研发提测、测试给结论」的口径，与流程图里节点
+16 的约束一致。</p>
+<h2 id="4-其他实测口径写进文档备查">4. 其他实测口径（写进文档备查）</h2>
+<ul>
+<li><strong>父需求汇总</strong>：<code>view.rollup = {childCount, doneCount, estimateDays, actualDays, progressPercent}</code>；实测父
+<code>estimate=3.0 / actual=2.5 / progress=100 / childCount=1 / doneCount=1</code>，与子
+RD 完全一致（父不手填人天，填了
+<code>PARENT_DAYS_READONLY</code>）。</li>
+<li><strong>团队口径</strong>：产品经理「只审不提」工时评估（提评估 403
+<code>需要 req:deliver</code>），PMO/研发提；评审入池是产品经理动作；指派厂商是项目域负责人动作。</li>
+<li><strong>业务域缺失</strong>：<code>POST /requirements</code> 缺
+<code>domainIds</code> →
+<code>400 VALIDATION_FAILED</code>，<code>detail.field=domainIds</code>（r23
+前的 500 崩库已修）。</li>
+<li><strong>版本锁定</strong>：挂版本后要推进发布单，版本会
+<code>LOCKED</code>，之后改范围 409 <code>RELEASE_LOCKED</code>。</li>
+</ul>
+</div></body></html>
