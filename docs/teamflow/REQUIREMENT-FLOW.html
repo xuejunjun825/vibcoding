@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>需求流程图 · 角色与操作节点</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:980px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+td:first-child,th:first-child{white-space:nowrap}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+h1.title{display:none}
+.page{max-width:1560px;margin:0 auto;padding:28px 32px}
+img{max-width:100%;height:auto}
+</style></head><body><div class="page">
+
+<h1 id="需求流程图--角色与操作节点">需求流程图 · 角色与操作节点</h1>
+<blockquote>
+<p>一条需求从「业务方提报」到「验收关闭」的完整旅程：<strong>18
+个操作节点、8 类角色、8 个硬门禁错误码</strong>。
+图与表都按当前代码（<code>main</code>）的实际状态机与权限矩阵绘制，不是设计稿。</p>
+</blockquote>
+<p><img src="diagrams/requirement-flow.svg" alt="需求全流程图" /></p>
+<p>（位图版：<code>docs/teamflow/diagrams/requirement-flow.png</code>）</p>
+<h2 id="1-十八个操作节点">1. 十八个操作节点</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>角色</th>
+<th>操作</th>
+<th>系统接口 / 动作</th>
+<th>状态变化</th>
+<th>硬门禁</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>业务方 / 二级企业</td>
+<td>提报业务需求</td>
+<td><code>POST /api/req/requirements</code>（<code>type=BUS</code>）</td>
+<td>→ <code>SUBMITTED</code></td>
+<td>必填：业务域、优先级、期望交付</td>
+</tr>
+<tr>
+<td>2</td>
+<td>业务方</td>
+<td>提交审批</td>
+<td><code>POST /{id}/actions {action:submit}</code></td>
+<td><code>SUBMITTED</code> → <code>APPROVING</code></td>
+<td>只能提交或撤回（业务方无审批权）</td>
+</tr>
+<tr>
+<td>3</td>
+<td>产品经理</td>
+<td>审批提报</td>
+<td><code>POST /approvals/tasks/{taskId}/actions {APPROVE/REJECT}</code></td>
+<td><code>APPROVING</code> → <code>PENDING_REVIEW</code> / 驳回回
+<code>SUBMITTED</code></td>
+<td>驳回必须填原因，进动态与审计</td>
+</tr>
+<tr>
+<td>4</td>
+<td>产品经理</td>
+<td>发起评审</td>
+<td><code>POST /{id}/actions {action:review_start}</code></td>
+<td>状态不变，生成 <code>REQ_REVIEW</code> 审批实例</td>
+<td>同一需求不允许并行多张评审单</td>
+</tr>
+<tr>
+<td>5</td>
+<td>产品经理</td>
+<td>评审通过入池</td>
+<td><code>POST /{id}/actions {action:review_pass}</code></td>
+<td><code>PENDING_REVIEW</code> → <code>POOLED</code></td>
+<td>评审实例必须 <code>APPROVED</code>，否则
+<code>409 REVIEW_APPROVAL_REQUIRED</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td>产品经理</td>
+<td>拆解产品需求</td>
+<td><code>POST /{id}/decompose {type:PDR}</code></td>
+<td>生成 PDR：<code>PENDING_ANALYSIS</code></td>
+<td><code>409 PARENT_NOT_POOLED</code>（父 BUS 必须已入池）</td>
+</tr>
+<tr>
+<td>7</td>
+<td>研发 / PMO</td>
+<td>提交工时评估</td>
+<td><code>POST /{id}/estimate {estimateDays,note}</code></td>
+<td>生成 <code>WBS_ESTIMATE</code> 审批单</td>
+<td>需要
+<code>req:deliver</code>；产品经理<strong>只审不提</strong></td>
+</tr>
+<tr>
+<td>8</td>
+<td>产品经理</td>
+<td>审核工时评估</td>
+<td><code>POST /approvals/tasks/{taskId}/actions {APPROVE}</code></td>
+<td>评估单 <code>APPROVED</code></td>
+<td>0.5 天精度；驳回需原因</td>
+</tr>
+<tr>
+<td>9</td>
+<td>产品经理</td>
+<td>排期</td>
+<td><code>POST /{id}/actions {action:schedule}</code></td>
+<td>PDR：<code>PENDING_ANALYSIS</code> → <code>SCHEDULED</code></td>
+<td><code>409 ESTIMATE_NOT_APPROVED</code>；人天改动 &gt;±20% 评估单转
+<code>STALE</code> 即失效</td>
+</tr>
+<tr>
+<td>10</td>
+<td>产品经理</td>
+<td>拆解研发需求</td>
+<td><code>POST /{id}/decompose {type:RD}</code></td>
+<td>生成 RD：<code>TODO</code></td>
+<td><code>409 PARENT_NOT_SCHEDULED</code>（父 PDR 须
+<code>SCHEDULED</code>/<code>IN_DEV</code>）</td>
+</tr>
+<tr>
+<td>11</td>
+<td>项目域负责人</td>
+<td>指派厂商</td>
+<td><code>POST /{id}/assign-vendor {vendorId,reason}</code></td>
+<td>不改状态，写 <code>assignee_vendor</code></td>
+<td>原因入审计；此后厂商用户才可见</td>
+</tr>
+<tr>
+<td>12</td>
+<td>研发</td>
+<td>开始开发</td>
+<td><code>POST /{id}/actions {action:start_dev}</code></td>
+<td>RD：<code>TODO</code> → <code>IN_DEV</code></td>
+<td>需评估单 <code>APPROVED</code></td>
+</tr>
+<tr>
+<td>13</td>
+<td>厂商研发</td>
+<td>任务执行</td>
+<td><code>POST /api/deliver/tasks</code> +
+<code>POST /tasks/{id}/move {status}</code></td>
+<td>RD 状态不变（任务 <code>TODO→DOING→DONE</code>）</td>
+<td>厂商只见本厂商承接的任务</td>
+</tr>
+<tr>
+<td>14</td>
+<td>研发</td>
+<td>提测</td>
+<td><code>POST /{id}/actions {action:submit_test}</code></td>
+<td><code>IN_DEV</code> → <code>PENDING_TEST</code></td>
+<td>需 <code>test:quick</code> 权限</td>
+</tr>
+<tr>
+<td>15</td>
+<td>测试</td>
+<td>测试执行</td>
+<td>测试计划 / 用例执行接口</td>
+<td>计划内用例逐条记结果</td>
+<td>执行记录绑<strong>用例版本</strong>，改版不回溯</td>
+</tr>
+<tr>
+<td>16</td>
+<td>测试</td>
+<td>测试结论</td>
+<td><code>POST /{id}/actions {action:test_pass}</code>；失败
+<code>POST /api/deliver/defects</code></td>
+<td><code>PENDING_TEST</code> → <code>TEST_PASSED</code></td>
+<td>失败只能转缺陷并回研发，研发不能自己点通过</td>
+</tr>
+<tr>
+<td>17</td>
+<td>研发</td>
+<td>合入并完成</td>
+<td><code>actions merge</code> → <code>finish</code>；交付登记
+<code>POST /{id}/deliver {actualDays,mrUrl}</code></td>
+<td><code>TEST_PASSED</code> → <code>MERGED</code> →
+<code>DONE</code></td>
+<td>前置：测试通过；实际人天与 MR 落库</td>
+</tr>
+<tr>
+<td>18</td>
+<td>产品经理</td>
+<td>交付与验收关闭</td>
+<td>PDR <code>actions deliver</code> → <code>accept</code>；BUS
+<code>actions close</code></td>
+<td>PDR：<code>IN_DEV</code>→<code>DELIVERED</code>→<code>ACCEPTED_CLOSED</code>；BUS：<code>POOLED</code>→<code>CLOSED</code></td>
+<td>父需求人天/进度由子需求实时汇总，不可手填</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-角色--节点矩阵">2. 角色 × 节点矩阵</h2>
+<p><code>●</code> = 该角色是主操作人；<code>○</code> =
+可参与（会签/或签、审批人来源）；<code>—</code> = 不参与。</p>
+<table>
+<thead>
+<tr>
+<th>节点</th>
+<th>业务方</th>
+<th>二级企业</th>
+<th>产品经理</th>
+<th>项目域负责人/PMO</th>
+<th>研发</th>
+<th>测试</th>
+<th>厂商</th>
+<th>管理层</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1–2 提报/提交</td>
+<td>●</td>
+<td>●</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>3 审批提报</td>
+<td>—</td>
+<td>—</td>
+<td>●</td>
+<td>○ 会签</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>4–5 评审入池</td>
+<td>—</td>
+<td>—</td>
+<td>●</td>
+<td>○ 会签</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>○</td>
+</tr>
+<tr>
+<td>6 拆解 PDR</td>
+<td>—</td>
+<td>—</td>
+<td>●</td>
+<td>○</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>7 提交工时评估</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>●</td>
+<td>●</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>8 审核工时评估</td>
+<td>—</td>
+<td>—</td>
+<td>●</td>
+<td>○</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>9 排期</td>
+<td>—</td>
+<td>—</td>
+<td>●</td>
+<td>○</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>10 拆解 RD</td>
+<td>—</td>
+<td>—</td>
+<td>●</td>
+<td>○</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>11 指派厂商</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>●</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>12–14 开发/提测</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>●</td>
+<td>—</td>
+<td>● 承接</td>
+<td>—</td>
+</tr>
+<tr>
+<td>15–16 测试执行/结论</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>●</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>17 合入/交付登记</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>○</td>
+<td>●</td>
+<td>—</td>
+<td>●</td>
+<td>—</td>
+</tr>
+<tr>
+<td>18 交付/验收关闭</td>
+<td>○ 验收</td>
+<td>○ 验收</td>
+<td>●</td>
+<td>○</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>○</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-三类需求的状态机与代码一致">3.
+三类需求的状态机（与代码一致）</h2>
+<p><strong>业务需求
+BUS</strong>（<code>platform-contract/.../StateTables.java:58-70</code>）</p>
+<pre><code>SUBMITTED --submit--&gt; APPROVING --approve--&gt; PENDING_REVIEW --review_pass--&gt; POOLED --close--&gt; CLOSED
+                         |  ^
+              reject / withdraw（回 SUBMITTED）</code></pre>
+<p><strong>产品需求
+PDR</strong>（<code>StateTables.java:73-77</code>）</p>
+<pre><code>PENDING_ANALYSIS --schedule--&gt; SCHEDULED --start_dev--&gt; IN_DEV --deliver--&gt; DELIVERED --accept--&gt; ACCEPTED_CLOSED</code></pre>
+<p><strong>研发需求
+RD</strong>（<code>StateTables.java:80-85</code>）</p>
+<pre><code>TODO --start_dev--&gt; IN_DEV --submit_test--&gt; PENDING_TEST --test_pass--&gt; TEST_PASSED --merge--&gt; MERGED --finish--&gt; DONE</code></pre>
+<p>三层父子关系：BUS（业务需求）→ PDR（产品需求）→
+RD（研发需求）；子必须挂父，父的人天/进度/完成率由子实时汇总，父自己不可填人天（<code>409 PARENT_DAYS_READONLY</code>）。</p>
+<h2 id="4-硬门禁清单服务端-409不是前端禁用">4. 硬门禁清单（服务端
+409，不是前端禁用）</h2>
+<table>
+<thead>
+<tr>
+<th>错误码</th>
+<th>触发场景</th>
+<th>实现位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PARENT_NOT_POOLED</code></td>
+<td>父 BUS 未入池就拆解</td>
+<td><code>RequirementRules</code> /
+<code>RequirementService.decompose</code></td>
+</tr>
+<tr>
+<td><code>PARENT_NOT_SCHEDULED</code></td>
+<td>父 PDR 未排期就拆 RD，或直建 RD 的父未排期</td>
+<td>同上（r23 起含直建 RD 与改父两条写入口）</td>
+</tr>
+<tr>
+<td><code>ESTIMATE_NOT_APPROVED</code></td>
+<td>未过工时评估就排期 / 开始开发</td>
+<td><code>WbsEstimateService</code> + <code>RequirementRules</code></td>
+</tr>
+<tr>
+<td><code>ESTIMATE_ALREADY_APPROVED</code></td>
+<td>已有生效评估单又重复提交</td>
+<td><code>WbsEstimateService.submit</code></td>
+</tr>
+<tr>
+<td><code>PARENT_DAYS_READONLY</code></td>
+<td>给父需求手填人天</td>
+<td><code>RequirementRules.checkDays</code></td>
+</tr>
+<tr>
+<td><code>REVIEW_APPROVAL_REQUIRED</code></td>
+<td>评审实例未通过就 <code>review_pass</code></td>
+<td><code>RequirementService.transition</code></td>
+</tr>
+<tr>
+<td><code>ILLEGAL_TRANSITION</code></td>
+<td>当前状态不允许该动作</td>
+<td><code>StateTables</code></td>
+</tr>
+<tr>
+<td><code>FORBIDDEN</code> / <code>OUT_OF_SCOPE</code></td>
+<td>无动作权限 / 需求在数据范围外</td>
+<td><code>RequirementActionMatrix</code> +
+<code>PermissionInterceptor</code></td>
+</tr>
+</tbody>
+</table>
+<p>发布侧另有一组门禁（<code>RELEASE_NOT_LOCKED</code>、<code>QUALITY_GATE_FAILED</code>、<code>PLAN_NOT_APPROVED</code>、<code>ADMISSION_FAILED</code>），属于「需求
+→ 版本 → 发布」的下半段，见
+<code>docs/teamflow/DEMO-RELEASE-FLOW.md</code>。</p>
+<h2 id="5-两条异常回退图上的红虚线">5. 两条异常回退（图上的红虚线）</h2>
+<ul>
+<li><strong>审批驳回</strong>：<code>APPROVING</code> →
+<code>SUBMITTED</code>，必须填原因；业务方改完可重新提交。</li>
+<li><strong>测试不通过</strong>：<code>PENDING_TEST</code> →
+失败转缺陷（<code>BUG-xxxx</code>，带用例/版本/需求上下文）→ 研发修复 →
+重新提测，缺陷与需求双向可追。</li>
+</ul>
+<h2 id="6-这张图的依据">6. 这张图的依据</h2>
+<table>
+<thead>
+<tr>
+<th>依据</th>
+<th>位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>状态机</td>
+<td><code>platform-contract/src/main/java/com/example/platform/contract/StateTables.java:58-85</code></td>
+</tr>
+<tr>
+<td>动作与所需权限</td>
+<td><code>platform-contract/.../ActionRegistry.java</code>、<code>RequirementActionMatrix.java</code></td>
+</tr>
+<tr>
+<td>门禁判定</td>
+<td><code>RequirementRules</code>、<code>WbsEstimateService</code>、<code>RequirementService.decompose/transition</code></td>
+</tr>
+<tr>
+<td>角色×页面/动作授权</td>
+<td><code>sys_role_permission</code>（1680 行种子）+
+<code>PermissionService</code></td>
+</tr>
+<tr>
+<td>实测</td>
+<td>视频演示同一套流程已跑通（<code>docs/teamflow/demo-video/demo-roles.mp4</code>），截图见
+<code>docs/teamflow/demo-shots/flow-*.png</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>图是按 18
+个<strong>主操作节点</strong>画的主干：会签/或签的具体审批人来源、加签减签、超时催办等分支没有画进来，它们在审批引擎内部，属于节点
+3/4/8 的细节。</p>
+</blockquote>
+</div></body></html>
