@@ -1517,7 +1517,7 @@ if s7_reset; then
     fi
 else
     for _ in 1 2 3 4 5 6 7 8; do
-        fail "S7 自愈 reset 失败，无法开始自造链" "先 make platform-demo-reset 全绿（75/75）再跑门禁"
+        fail "S7 自愈 reset 失败，无法开始自造链" "先 make platform-demo-reset 全绿（76/76）再跑门禁"
     done
 fi
 

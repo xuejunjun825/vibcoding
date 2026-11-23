@@ -7,7 +7,7 @@
 #
 # 本模块只做三件事，且只有一份实现：
 #   1. 生命周期：begin 注册唯一 EXIT/INT/TERM trap，end 复位并断言基线，失败一律置红（绝不把红变绿）；
-#   2. 干净基线：复位只调 scripts/platform-demo-reset.sh（它已用 75 条断言定义了「干净」），
+#   2. 干净基线：复位只调 scripts/platform-demo-reset.sh（它已用 76 条断言定义了「干净」），
 #      本模块只补 demo-reset 覆盖不到的两类事实——本轮 GATE_TAG 足迹、跨门禁读取的演示不变量；
 #   3. 夹具原语：login_as / login_admin / approve_biz / pool_bus，让四个门禁不再各写一份审批遍历。
 #
