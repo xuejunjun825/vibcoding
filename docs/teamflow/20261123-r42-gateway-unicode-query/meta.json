@@ -1,0 +1,7 @@
+{
+  "reqId": "req-42",
+  "runId": "tf-mwt98mh0-kh9wzm",
+  "title": "修复网关在「查询参数含非 ASCII（中文）」时直接断连的 P0 缺陷：`GET http://127.0.0.1:8080/api/req/requireme",
+  "mode": "tech",
+  "createdAt": 1795437683019
+}

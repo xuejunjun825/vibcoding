@@ -316,16 +316,64 @@ app_jar() {
     printf '%s' "$jar"
 }
 
+# file_fingerprint <path> -> <inode>:<size>:<mtime>（取不到时输出空串，绝不报错）
+#
+# 为什么需要它：`mvn package`/`install` 是**就地覆盖**同一个 target/*.jar。已在跑的
+# JVM 持有旧 inode，覆盖后进程继续跑旧代码，而 app_alive 只能证明“pid 活着且属于
+# 本项目”，看不出磁盘上的 jar 已经换过——r42 的中文查询缺陷就是这么来的（网关跑的是
+# 旧 jar）。inode 是“同一个文件被替换”的判别位，size/mtime 兜住无 inode 变化的原地写。
+#
+# Darwin 与 GNU stat 的 flag 互不兼容：Darwin `stat -f %i:%z:%m`，Linux `stat -c %i:%s:%Y`。
+# 用 uname 选分支而不是“先试 -f 再试 -c”，因为 GNU stat 的 -f 是文件系统语义，参数
+# 不匹配时行为不可靠。沙箱可能直接拒绝 stat：此时输出空串，调用方跳过判定（不能因为
+# 取不到指纹就每次重启，那会把 R1 变成放大器）。
+file_fingerprint() {
+    local path="$1" os out=""
+    [[ -n "$path" && -e "$path" ]] || { printf ''; return 0; }
+    os="$(uname -s 2>/dev/null || true)"
+    if [[ "$os" == "Darwin" ]]; then
+        out="$(stat -f '%i:%z:%m' "$path" 2>/dev/null || true)"
+    else
+        out="$(stat -c '%i:%s:%Y' "$path" 2>/dev/null || true)"
+        # BSD 家族的非 Darwin 系统（stat 只认 -f）兜底
+        [[ -n "$out" ]] || out="$(stat -f '%i:%z:%m' "$path" 2>/dev/null || true)"
+    fi
+    printf '%s' "$out"
+}
+
+# start_app <name> <port> <module>
+#
+# 生命周期契约（r42 R1）：存活 + jar 指纹一致 → 复用；存活但 .run/<name>.jar.fp 缺失 →
+# 重启一次并补写（接管旧版进程 / 手工 java -jar）；指纹不一致 → stop_app 后重启并打印
+# 旧/新指纹。指纹判定只有这一份；dev-up 与 platform-up 都只是“再调一次 start_app”让判定
+# 发生，不得在调用方另写 stat/cmp/kill。
 start_app() {
     local name="$1" port="$2" module="$3"
+    local jar fpfile fp_old fp_new
+    # app_jar 是唯一的 jar 解析入口：指纹必须与真正要启动的文件同源，不能在别处再 find。
+    jar="$(app_jar "$module")"
+    fpfile="$RUN_DIR/${name}.jar.fp"
     if app_alive "$name"; then
-        ok "$name 已在运行 (pid $(app_pid "$name"), port ${port})"
-        return 0
+        fp_new="$(file_fingerprint "$jar")"
+        if [[ -z "$fp_new" ]]; then
+            warn "取不到 ${jar} 的指纹（stat 不可用），跳过 jar 覆盖判定，复用 ${name} (pid $(app_pid "$name"))"
+            return 0
+        fi
+        fp_old=""
+        [[ -f "$fpfile" ]] && fp_old="$(tr -d '[:space:]' < "$fpfile" 2>/dev/null || true)"
+        if [[ -z "$fp_old" ]]; then
+            warn "${name} 在运行但缺少 jar 指纹 ${fpfile}（旧版进程），重启一次以记录当前 jar"
+        elif [[ "$fp_old" != "$fp_new" ]]; then
+            warn "${name} 在跑的 jar 已被构建覆盖（旧 ${fp_old} → 新 ${fp_new}），重启以加载新 jar"
+        else
+            ok "$name 已在运行 (pid $(app_pid "$name"), port ${port}, jar 指纹一致)"
+            return 0
+        fi
+        stop_app "$name"
     fi
     # app_alive() rejected the recorded pid (gone, or recycled by a foreign
     # process): drop it so the pid file cannot point at someone else's JVM.
     rm -f "$RUN_DIR/${name}.pid"
-    local jar; jar="$(app_jar "$module")"
     log "启动 ${name} (port ${port})"
     (
         cd "$ROOT"
@@ -339,12 +387,19 @@ start_app() {
         tail -n 20 "$LOG_DIR/${name}.log" >&2 || true
         return 1
     fi
-    ok "$name 已启动 (pid $(app_pid "$name"))"
+    # 先启动后记录：启动失败时不留一个“看起来一致”的指纹文件。取不到则留空，
+    # 下次调用按“缺失”处理最多再重启一次，不会误判为一致。
+    fp_new="$(file_fingerprint "$jar")"
+    [[ -n "$fp_new" ]] && printf '%s\n' "$fp_new" > "$fpfile"
+    ok "$name 已启动 (pid $(app_pid "$name"), jar 指纹 ${fp_new:-<unknown>})"
 }
 
 stop_app() {
     local name="$1" pid i
     pid="$(app_pid "$name")"
+    # 进程与指纹同生命周期：stop 之后旧指纹不再是任何在跑进程的凭证，跟 pid 一起删掉，
+    # 免得下一次 start_app 把它当成“磁盘 jar 的证据”来比对。
+    rm -f "$RUN_DIR/${name}.jar.fp"
     if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
         rm -f "$RUN_DIR/${name}.pid"
         ok "$name 未运行"

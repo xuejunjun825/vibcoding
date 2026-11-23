@@ -27,11 +27,31 @@ i_cleanup
 ENABLED="$(db_count integration_config "tenant_id=${TENANT_ID} AND enabled=1")"
 if [[ "$ENABLED" == "0" ]]; then pass "integration_config 无启用行"; else fail "${ENABLED} 个配置仍启用" "验收结束必须回到默认关闭"; fi
 
+# 10s 轮询周期必须整段流过才能断言「零外呼」，而 wait_until 在条件首次成立时就返回，
+# 两种语义不同：这里逐秒采样，窗口内一旦出现外呼立即早退失败，窗口到期仍为 0 才判通过。
+stub_idle_window() { # stub_idle_window <秒> → 0=窗口内零请求；非 0 时 stdout 为观测到的请求数
+    local limit="$1" i=0 req
+    while (( i < limit )); do
+        sleep 1
+        i=$((i + 1))
+        i_stub GET /__stub/requests
+        req="$(jq -r '(.requests // []) | length' <<<"$HTTP_BODY" 2>/dev/null || printf 0)"
+        if [[ "${req:-0}" != "0" ]]; then
+            printf '%s' "$req"
+            return 1
+        fi
+    done
+    printf 0
+    return 0
+}
+
 section "s7 · 默认关闭时后台任务零外呼（覆盖一个 10s 轮询周期）"
 i_stub_reset
-sleep 12
-REQ="$(i_stub GET /__stub/requests; jq -r '(.requests // []) | length' <<<"$HTTP_BODY")"
-if [[ "$REQ" == "0" ]]; then pass "12s 内桩 0 请求（轮询/刷新任务全部短路）"; else fail "桩收到 ${REQ} 个请求" "AdapterRegistry.requireEnabled 未配置时应直接返回，不发任何连接"; fi
+if REQ="$(stub_idle_window 12)"; then
+    pass "12s 内桩 0 请求（轮询/刷新任务全部短路）"
+else
+    fail "桩收到 ${REQ} 个请求" "AdapterRegistry.requireEnabled 未配置时应直接返回，不发任何连接"
+fi
 
 section "s7 · 桩不进产品路径（Java/前端源码 0 引用；yml 仅保留可覆盖的白名单默认值）"
 STUB_HIT="$(grep -rlE '19090|__stub|stub-webhook-secret|stub-jenkins' \
