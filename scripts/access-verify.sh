@@ -59,7 +59,7 @@ segment_file() {
 }
 
 # 分段下限（TECHNICAL §8.3）：总数守卫看得见「少了」，分段下限直接指出「哪段少了」。
-# 这里用 case 而不是 declare -A：macOS 自带 bash 3.2 没有关联数组，聚合器必须在
+# 这里用 case 而不是关联数组：macOS 自带 bash 3.2 没有关联数组，聚合器必须在
 # 默认 shell 下就能跑（a0–a4 的既有断言数一条不减少，a5 下限 23）。
 segment_min() {
     case "$1" in

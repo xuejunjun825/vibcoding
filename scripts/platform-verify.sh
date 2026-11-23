@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# platform-verify.sh — AC-1..AC-20 分组断言（HTTP + DB 计数，两处都要对）。
+# platform-verify.sh — AC-1..AC-21 分组断言（HTTP + DB 计数，两处都要对）。
 # 设计原则：
 #   * 每条断言既有 HTTP 状态码，也有 payload/DB 计数；只看 200 的"假绿"不算通过；
 #   * 权限矩阵不复制：AC-5 从 GET /admin/permissions 生成探测矩阵；
@@ -1187,6 +1187,97 @@ else
 fi
 
 # =====================================================================
+section "AC-21 网关非 ASCII 查询（r42）：中文 keyword 经 8080 可用 + 在跑进程不是旧 jar"
+
+# han_prefix <text> <n> → 前 n 个汉字（CJK 基本区 U+4E00..U+9FFF）。
+# 用 jq explode 按码点筛，不用 sed/grep 的字符区间：区域设置不同会让 [一-龥] 在 C locale 下
+# 退化成字节区间，摘出来的是半个 UTF-8 序列，keyword 永远 total=0（假红）。
+han_prefix() {
+    local text="$1" n="${2:-2}"
+    printf '%s' "$text" | jq -Rsr --argjson n "$n" \
+        'explode | map(select(. >= 19968 and . <= 40959)) | .[:$n] | implode' 2>/dev/null || true
+}
+
+# urlenc <text> → percent-encoded（与 8080 实际发出的查询参数同源，避免手写 %E4.. 出错；
+# 与 negative 第 18 段各自的 curl 参数无关，本文件只此一份）。
+urlenc() {
+    printf '%s' "$1" | jq -sRr @uri 2>/dev/null || true
+}
+
+# keyword 必须从池中标题派生：写死种子词（如“演示”）在换种子后 total=0，是假红。
+# 取默认池（第一页）里第一个含 ≥2 汉字的标题，摘前 2 个汉字作为 keyword。
+api_call GET "/api/req/requirements?page=1&size=50"
+POOL_TITLE="" POOL_KEYWORD=""
+while IFS= read -r POOL_T; do
+    [[ -n "$POOL_T" ]] || continue
+    POOL_H="$(han_prefix "$POOL_T" 2)"
+    [[ "$(printf '%s' "$POOL_H" | jq -Rr 'length' 2>/dev/null || true)" == "2" ]] || continue
+    POOL_TITLE="$POOL_T"; POOL_KEYWORD="$POOL_H"; break
+done < <(printf '%s' "$HTTP_BODY" | jq -r '.items[]?.title // empty' 2>/dev/null || true)
+
+if [[ -z "$POOL_KEYWORD" ]]; then
+    # 池里连一个含 2 汉字的标题都没有 ⇒ 种子/夹具异常；五条各自计入失败，计数不漂移。
+    fail "池中没有含 ≥2 汉字的标题，无法派生 AC-21 keyword" "make platform-seed（种子标题需含中文）后重跑"
+    fail "中英混排 keyword 未执行（无中文 keyword 可派生）" "同上"
+    fail "单字/多字/含空格三连未执行（无中文 keyword 可派生）" "同上"
+else
+    # ① 中文 keyword 经网关 8080 → 200 且 total ≥ 1（摘词来自池中标题本身，命中是构造保证）
+    api_call GET "/api/req/requirements?page=1&size=50&keyword=$(urlenc "$POOL_KEYWORD")"
+    HIT_TOTAL="$(jget "$HTTP_BODY" '.total')"
+    if [[ "$HTTP_CODE" == "200" && "${HIT_TOTAL:-0}" =~ ^[0-9]+$ ]] && (( HIT_TOTAL >= 1 )); then
+        pass "中文 keyword「${POOL_KEYWORD}」（取自标题「${POOL_TITLE}」）经 8080 → 200，total=${HIT_TOTAL}"
+    else
+        fail "中文 keyword「${POOL_KEYWORD}」经 8080 → HTTP ${HTTP_CODE}, total=${HIT_TOTAL:-<空>}（期望 200 且 ≥1）" \
+             "HTTP 000 = 网关仍在跑被构建覆盖的旧 jar（r42 根因）：make platform-up 让 start_app 自愈重启"
+    fi
+
+    # ② 中英混排 keyword + page/size/status=ALL → 200（ASCII 后缀取标题里的字母数字，没有则补 A）
+    MIX_ASCII="$(printf '%s' "$POOL_TITLE" | jq -Rr \
+        'explode | map(select((. >= 48 and . <= 57) or (. >= 65 and . <= 90) or (. >= 97 and . <= 122))) | .[:2] | implode' \
+        2>/dev/null || true)"
+    MIX_KEYWORD="${POOL_KEYWORD}${MIX_ASCII:-A}"
+    api_call GET "/api/req/requirements?keyword=$(urlenc "$MIX_KEYWORD")&page=1&size=5&status=ALL"
+    expect "中英混排 keyword「${MIX_KEYWORD}」+ page/size/status 经 8080 → 200" 200
+
+    # ③ 逐字边界三连：单字 / 多字 / 含空格(%20)，三条都 200 才算这 1 条通过
+    HAN1="$(han_prefix "$POOL_TITLE" 1)"
+    HAN3="$(han_prefix "$POOL_TITLE" 3)"
+    BOUND_CODES="" BOUND_OK=0
+    for BOUND_KEY in "$HAN1" "$HAN3" "中 文"; do
+        api_call GET "/api/req/requirements?keyword=$(urlenc "$BOUND_KEY")"
+        BOUND_CODES+=" ${HTTP_CODE}"
+        [[ "$HTTP_CODE" == "200" ]] && BOUND_OK=$((BOUND_OK + 1))
+    done
+    if (( BOUND_OK == 3 )); then
+        pass "单字「${HAN1}」/多字「${HAN3}」/含空格「中 文」(%20) 三连 → 全 200（${BOUND_CODES# }）"
+    else
+        fail "逐字边界三连未全 200：${BOUND_CODES# }（期望 200 200 200）" \
+             "含空格与单字走同一条 URLEncoding 链；000 指向网关旧 jar，400/500 查 req-service 的 keyword 解码"
+    fi
+fi
+
+# ④ 陈旧进程自证：.run/api-gateway.jar.fp 必须等于磁盘 jar 当前指纹。
+# 这是唯一能直接自证“构建覆盖了在跑 jar”的位置——红即根因复现，不是环境抖动。
+GW_JAR="$(app_jar api-gateway)"
+FP_DISK="$(file_fingerprint "$GW_JAR")"
+FP_RUN="$(tr -d '[:space:]' < "$RUN_DIR/api-gateway.jar.fp" 2>/dev/null || true)"
+if [[ -n "$FP_DISK" && "$FP_RUN" == "$FP_DISK" ]]; then
+    pass "在跑网关确由当前磁盘 jar 启动（.run/api-gateway.jar.fp == ${FP_DISK}）"
+else
+    fail "在跑网关的 jar 指纹 ${FP_RUN:-<缺失>} != 磁盘 ${FP_DISK:-<取不到>}" \
+         "构建覆盖了在跑 jar（r42 根因）：make platform-up 后重跑本脚本；启动前起的栈/手工 java -jar 必红，属设计意图"
+fi
+
+# ⑤ 中文 path 段不再断连：400/404 是业务侧正常拒绝，000 才是网关挂断
+api_call GET "/api/req/requirements/$(urlenc "${POOL_KEYWORD:-需求}")"
+if [[ "$HTTP_CODE" == "400" || "$HTTP_CODE" == "404" ]]; then
+    pass "中文 path 段 /api/req/requirements/<汉字> → ${HTTP_CODE}（非 000，网关未断连）"
+else
+    fail "中文 path 段 → HTTP ${HTTP_CODE}（期望 400/404；000 = 网关断连）" \
+         "网关对含非 ASCII path 的请求必须完成路由并透传业务错误（r42 边界，TECH-CHANGE §7-2）"
+fi
+
+# =====================================================================
 printf '\n'
 if (( TOTAL == 0 )); then
     err "一条断言都没执行：AC 分组实现有 bug"
@@ -1198,6 +1289,6 @@ if (( PASS != TOTAL )); then
     err "修复: 从第一条 FAIL 开始；每条消息都带期望/实际与修复方向"
     exit 1
 fi
-ok "platform-verify: ${PASS}/${TOTAL} 项通过（AC-1..AC-20）"
+ok "platform-verify: ${PASS}/${TOTAL} 项通过（AC-1..AC-21）"
 
 

@@ -69,6 +69,16 @@ log "mvn -q -DskipTests package（含平台模块）"
 ( cd "$ROOT" && mvn -q ${MAVEN_REPO_ARG:-} -DskipTests package )
 ok "构建完成"
 
+# r42 R1：STAGE 1 的 dev-up 已起过网关/demo，STAGE 3 的 package 又把同一个 target/*.jar
+# 就地覆盖——已在跑的 JVM 仍持有旧 inode，继续跑旧代码（r42 中文查询缺陷的根因）。
+# 这里只“重跑 start_app”，让 lib.sh 的 jar 指纹判定做自愈重启：重启/比对逻辑只有那一份，
+# 不得在此另写 stat/cmp/kill（否则 dev-up 与手工 java -jar 仍会绕过判定）。
+log "构建后重跑 start_app：让网关/demo 加载新 jar（指纹不一致则自愈重启）"
+start_app api-gateway "$GATEWAY_PORT" api-gateway
+wait_app_health api-gateway "$GATEWAY_PORT"
+start_app demo-service "$DEMO_PORT" demo-service
+wait_app_health demo-service "$DEMO_PORT"
+
 STAGE="4 启动 req-service (${REQ_PORT})"
 export PLATFORM_SEED_ENABLED=true
 # r29 存量回填（/internal/wbs-estimate-backfill）：与 seed 开关并列但独立——生产 seed 长期关、
@@ -154,4 +164,4 @@ ok "platform 已就绪"
 printf '\n  gateway  %s\n  req      %s\n  deliver  %s\n  web      %s\n\n' \
     "$GATEWAY_URL" "$REQ_URL" "$DELIVER_URL" "$WEB_URL"
 printf '  下一步: make platform-seed   # 幂等种子（AC-19）\n'
-printf '          make platform-verify # AC-1..AC-20\n\n'
+printf '          make platform-verify # AC-1..AC-21\n\n'

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# platform-test-negative.sh — TECHNICAL §8.3 的 17 段负向用例（r17 起含动作级授权）。
+# platform-test-negative.sh — TECHNICAL §8.3 的 18 段负向用例（r17 起含动作级授权）。
+# r42 增 18) 段：8080 与直连 8082 同一中文 keyword 的响应体逐字节 cmp 一致、.total 同源（网关只透传）。
 # r23 增 4b) 段：流转前置门（拆解/直建/改父共用一道门）+ 提报 domainIds 必填，含正向回归。
 # r26 增 4c) 段：工时评估门（六态拦人、驳回后仍拦、改人天超 20% 派生 STALE、越权提交 403）。
 # r27 增 4d) 段：列表/搜索/详情四处 allowedActions 原始数组逐字符相等（R27_PARITY_MUTATE=order 变异自检）。
@@ -1006,6 +1007,47 @@ else
     warn "第 17 段夹具不完整（VEN-A=${VPM_VEN_A:-空} reqA=${VPM_REQ_A:-空} reqB=${VPM_REQ_B:-空}），跳过 VENDOR_PM 边界"
 fi
 API_TOKEN="$ADMIN_TOKEN"
+
+# ---------------------------------------------------------------- 18
+section "18) 网关只透传（r42）：同一中文 keyword 经 8080 与直连 8082 响应体逐字节一致"
+# 口径：只验 8080 返回 200 不够 —— 网关丢参数、改词、或另做一次编码，都可能仍然 200。
+# 逐字节 cmp 把「网关只透传、不改写查询语义」变成可执行断言；两条 body 的 .total 还须同源。
+# keyword 从池中真实标题派生（禁止写死文案，r42 教训：「演示」实测 total=0 会假红）；
+# 直连必须去掉 /api/req 前缀（网关 StripPrefix(1) → /requirements），且与 api_call 用同一组头。
+HAN_KW="$(db_q "SELECT title FROM requirement WHERE tenant_id=${TID} ORDER BY id LIMIT 50" \
+    2>/dev/null | jq -sRr 'split("\n") | map(explode | map(select(. >= 19968 and . <= 40959)) | implode)
+        | map(select(length >= 2)) | ((.[0] // "")[0:2])' 2>/dev/null || true)"
+QK="$(printf '%s' "$HAN_KW" | jq -sRr @uri 2>/dev/null || true)"
+QS="page=1&size=5&keyword=${QK}"
+if [[ -z "$HAN_KW" ]]; then
+    fail "第 18 段取不到中文 keyword" "池中必须有中文标题的需求（先 make platform-seed / platform-demo-reset）"
+    fail "第 18 段 8080/8082 响应体逐字节一致" "上一条失败时无法比较，先补齐中文标题夹具"
+else
+    HDR18=(-H 'Accept: application/json' -H "Authorization: Bearer ${API_TOKEN}" -H "X-Tenant-Id: ${API_TENANT}")
+    api_call GET "/api/req/requirements?${QS}"
+    GW18_CODE="$HTTP_CODE"; GW18_BODY="$HTTP_BODY"
+    api_direct GET "$REQ_URL" "/requirements?${QS}" "" "${HDR18[@]}"
+    DI18_CODE="$HTTP_CODE"; DI18_BODY="$HTTP_BODY"
+    GW18_BYTES="$(printf '%s' "$GW18_BODY" | wc -c | tr -d '[:space:]')"
+    DI18_BYTES="$(printf '%s' "$DI18_BODY" | wc -c | tr -d '[:space:]')"
+
+    if [[ "$GW18_CODE" == "200" && "$DI18_CODE" == "200" ]] \
+        && cmp -s <(printf '%s' "$GW18_BODY") <(printf '%s' "$DI18_BODY"); then
+        pass "8080 与直连 8082 相同中文 keyword 响应体逐字节一致（${HAN_KW} · ${GW18_BYTES}B == ${DI18_BYTES}B）"
+    else
+        fail "8080 与直连 8082 响应体不一致（keyword='${HAN_KW}' 8080=${GW18_CODE}/${GW18_BYTES}B 8082=${DI18_CODE}/${DI18_BYTES}B）" \
+            "网关只能 StripPrefix 后原样透传：别在网关侧改写/二次编码 query（AC-21 的反证）"
+    fi
+
+    GW18_TOTAL="$(printf '%s' "$GW18_BODY" | jq -r '.total // empty' 2>/dev/null || true)"
+    DI18_TOTAL="$(printf '%s' "$DI18_BODY" | jq -r '.total // empty' 2>/dev/null || true)"
+    if [[ "$GW18_TOTAL" =~ ^[0-9]+$ && "$GW18_TOTAL" == "$DI18_TOTAL" ]] && (( GW18_TOTAL >= 1 )); then
+        pass "两份 body 的 total 同源（${GW18_TOTAL} == ${DI18_TOTAL}，keyword 命中池中标题）"
+    else
+        fail "两份 body 的 total 不同源（8080='${GW18_TOTAL}' 8082='${DI18_TOTAL}'，keyword='${HAN_KW}'）" \
+            "total 必须由同一查询计划算出；0=0 不算通过（keyword 必须真命中池中标题）"
+    fi
+fi
 
 printf '\n'
 if (( PASS != TOTAL || TOTAL == 0 )); then
