@@ -1,38 +1,38 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>已交付功能模块清单</title>
 <style>
 :root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
-*{box-sizing:border-box}body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
-.page{max-width:960px;margin:0 auto;padding:28px 32px}
+*{box-sizing:border-box}
+body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:980px;margin:0 auto;padding:28px 32px}
 h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
 h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
 h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
-h3{font-size:15px;margin:24px 0 8px}h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
-p{margin:8px 0}a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
 hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
-ul,ol{margin:8px 0 8px 22px;padding:0}li{margin:4px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
 table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
 th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
 td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
 tr:hover td{background:#F7F9FC}
+td:first-child,th:first-child{white-space:nowrap}
 code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;font-family:"SF Mono",Menlo,Consolas,monospace}
 pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
 pre code{background:none;padding:0;color:var(--text)}
 blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
 blockquote p{margin:4px 0}
 .toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
-.toc ul{margin:0 0 0 18px}.toc>ul{margin-left:0}.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
-td:first-child,th:first-child{white-space:nowrap}
-@media print{body{padding:0}.toc{break-inside:avoid}}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
 h1.title{display:none}
-</style>
-</head>
-<body>
-<div class="page">
+</style></head><body><div class="page">
 <div class="toc"><div class="toc-title">目录</div>
 <ul>
 <li><a href="#已交付功能模块清单"
@@ -75,15 +75,17 @@ id="toc-14-流程管控强化r23r26r27">14.
 流程管控强化（r23、r26、r27）</a></li>
 <li><a href="#15-门禁与基线纪律" id="toc-15-门禁与基线纪律">15.
 门禁与基线纪律</a></li>
+<li><a href="#16-门禁自身的可信度r28r31r33r38"
+id="toc-16-门禁自身的可信度r28r31r33r38">16.
+门禁自身的可信度（r28、r31、r33–r38）</a></li>
 </ul></li>
-</ul>
-</div>
+</ul></div>
 <h1 id="已交付功能模块清单">已交付功能模块清单</h1>
 <blockquote>
-<p>生成时间：2026-11-09，<strong>最后更新 2026-11-18</strong>（r28
+<p>生成时间：2026-11-09，<strong>最后更新 2026-11-23</strong>（r38
 合回后）· 口径：<strong>已验收并合入 <code>main</code></strong>
 的能力；任务夹路径见各轮目录 <code>docs/teamflow/20261*-r*</code>。 分支
-<code>main</code> 当前 = <code>0127ca4</code>；每轮证据见对应任务夹的
+<code>main</code> 当前 = <code>d99530d</code>；每轮证据见对应任务夹的
 <code>ACCEPTANCE.md</code>，门禁基线见 <code>memory.md:36</code>。</p>
 </blockquote>
 <h2 id="0-版本台账">0. 版本台账</h2>
@@ -233,6 +235,89 @@ FilterBar/交叉表/图表</td>
 <td>干净重置 130/130</td>
 <td><code>0127ca4</code></td>
 </tr>
+<tr>
+<td>r29</td>
+<td>存量工时回填</td>
+<td><code>backfill-wbs-estimate.sh</code>（dry-run/<code>--apply</code>、走真实引擎、幂等）+
+<code>wbs-backfill-verify</code> 18 条</td>
+<td>回填 2 条 · 二次 0 变更</td>
+<td><code>79e1f1c</code></td>
+</tr>
+<tr>
+<td>r30</td>
+<td>发版分级审批</td>
+<td>RELEASE 三级 / REQ_DEPLOY 两级 / 紧急两级 /
+回滚两级、<code>flowChain</code>
+四段同源、提交快照不可变、<code>release-flow-verify</code></td>
+<td>13 阶段 · <code>rfv</code> 32 条</td>
+<td><code>177389a</code></td>
+</tr>
+<tr>
+<td>r31</td>
+<td>门禁区间判据</td>
+<td><code>release-flow-verify</code> 提交卫生改用
+<code>merge-base..HEAD</code> 区间 + 变异自检 4/4（不再依赖脏树）</td>
+<td>32/32 · 自检 4/4</td>
+<td><code>177389a</code></td>
+</tr>
+<tr>
+<td>r32</td>
+<td>演示链到 PUBLISHED</td>
+<td><code>DemoApprovalFixture</code>（真实动作链补审批/MR/实际人天）、<code>reset</code>
+70→74、<code>rfv</code> 32→40</td>
+<td>四段全绿 + 已发布 <code>REL-1444</code></td>
+<td><code>b48d179</code></td>
+</tr>
+<tr>
+<td>r33</td>
+<td>质量门跳过口径</td>
+<td><code>GateRuleBuckets</code>
+四态分桶单一实现（通过/跳过/未通过/关闭），三消费点同源</td>
+<td>卡片「跳过 1 · 未通过 0」</td>
+<td><code>4d9f5b6</code></td>
+</tr>
+<tr>
+<td>r34</td>
+<td>门禁顺序与残留</td>
+<td><code>scripts/lib/gate-fixture.sh</code>（GATE_TAG + teardown
+断言）、<code>gate-order-verify</code> 15 条、<code>reset</code> 75</td>
+<td>A/B 双序列全绿</td>
+<td><code>d715944</code></td>
+</tr>
+<tr>
+<td>r35</td>
+<td>S7 自造夹具</td>
+<td>演示链不再依赖演示种子（自造 BUS→PDR→RD），<code>rfv</code> 44
+条、静态 <code>[12]</code> 禁种子引用</td>
+<td>44/44 · <code>S7-</code> 痕迹 0</td>
+<td><code>fdaeac8</code></td>
+</tr>
+<tr>
+<td>r36</td>
+<td>临时主体幂等</td>
+<td><code>tests/rbac/_lib.sh</code> 造名/清理原语 + trap，s3/s5/s6/s7/s8
+接入，<code>gate-order</code> 18 条</td>
+<td><code>rbac</code> 113×2</td>
+<td><code>81967c4</code></td>
+</tr>
+<tr>
+<td>r37</td>
+<td>遗留探针清理</td>
+<td><code>lib/temp-accounts.sh</code>（4 前缀白名单 + 14 名保护 + 只删
+DISABLED）、<code>legacy-probe-purge.sh</code>、<code>gate-order</code>
+19、<code>reset</code> 76</td>
+<td>purge 首跑 4 · 二跑 0</td>
+<td><code>8c39a3a</code></td>
+</tr>
+<tr>
+<td>r38</td>
+<td>孤儿 join 行判定</td>
+<td>谓词单点
+<code>temp_orphan_join_where()</code>、<code>orphan-join-purge.sh</code>、<code>gate-order</code>
+20（含负向自检）、清 413 条历史域孤儿</td>
+<td>20/20 · 孤儿 role/domain 0</td>
+<td><code>d99530d</code></td>
+</tr>
 </tbody>
 </table>
 <blockquote>
@@ -240,17 +325,22 @@ FilterBar/交叉表/图表</td>
 href="20261109-r6-ccode-cteam-ctest-p0/">docs/teamflow/20261109-r6-ccode-cteam-ctest-p0/</a>（PRD
 20 条 AC · DESIGN · TECHNICAL · QA-REPORT · ACCEPTANCE）。</p>
 </blockquote>
-<p><strong>规模（2026-11-18 实测）</strong>：Java <strong>537</strong>
-个类、Vue <strong>136</strong> 个页面/组件、TS <strong>50</strong>
-个、REST 映射 <strong>360</strong> 处、Flyway 迁移 <strong>13</strong>
-个（V1–V13）、运维与自测脚本 <strong>26</strong>
-个。门禁：<code>platform-verify</code>
-<strong>193</strong>、<code>platform-test-negative</code>
+<p><strong>规模（2026-11-23 实测，排除
+<code>src/test</code>）</strong>：Java <strong>495</strong> 个类（另测试
+69）、Vue <strong>140</strong> 个页面/组件、TS <strong>51</strong>
+个、REST 映射 <strong>371</strong> 处、Flyway 迁移 <strong>14</strong>
+个（V1–V14）、顶层运维/自测脚本 <strong>31</strong>
+个（<code>scripts/tests/</code> 下另有 45 个）。门禁（r38
+实测）：<code>platform-verify</code>
+<strong>194</strong>、<code>platform-test-negative</code>
 <strong>130</strong>、<code>access-verify</code>
 <strong>206</strong>、<code>rbac-verify</code>
 <strong>113</strong>、<code>platform-demo-reset</code>
-<strong>69</strong>、<code>unit</code>
-<strong>371</strong>、<code>lint</code> 22、<code>verify</code> 14。</p>
+<strong>76</strong>、<code>release-flow-verify</code>
+<strong>44</strong>、<code>gate-order-verify</code>
+<strong>20</strong>、<code>wbs-backfill-verify</code>
+<strong>18</strong>、<code>unit</code>
+<strong>392</strong>、<code>lint</code> 22、<code>verify</code> 14。</p>
 <h2 id="1-平台基座r1">1. 平台基座（r1）</h2>
 <ul>
 <li><strong>注册与配置</strong>：Nacos 3.3
@@ -556,6 +646,37 @@ AC 文本</strong>。</li>
 起需要前置数据的段必须自带夹具，夹具造不出来 <strong>fail 不
 warn</strong>（避免门禁静默缩水）。</li>
 </ul>
-</div>
-</body>
-</html>
+<h2 id="16-门禁自身的可信度r28r31r33r38">16.
+门禁自身的可信度（r28、r31、r33–r38）</h2>
+<p>这一节记的不是产品功能，是「门禁说绿算不算绿」的几条硬约定——每一次都是被假绿咬出来的。</p>
+<ul>
+<li><strong>不许依赖脏工作树</strong>（r31）：<code>release-flow-verify</code>
+的提交卫生判据从 <code>git status --porcelain</code> 改成
+<code>merge-base(main,HEAD)..HEAD</code>
+区间，并内置变异自检（改旧迁移必红、新增未登记迁移必红）。门禁必须对「已提交」与「未提交」两种状态给同一个结论。</li>
+<li><strong>不许条件跳过</strong>（r28、r36）：需要前置数据的负向段必须段内自造夹具，造不出来就
+<code>fail</code>，禁止 <code>warn</code> 放过，也禁止
+<code>&gt;/dev/null</code> 吞掉建号 409 再靠登录 403 兜底。</li>
+<li><strong>不许顺序敏感</strong>（r34）：写演示租户的门禁统一
+<code>source scripts/lib/gate-fixture.sh</code>，用
+<code>GATE_TAG</code> 打标、<code>trap</code> 自愈、teardown 断言残留
+0；<code>gate-order-verify</code> 用 A/B
+两种顺序各跑一遍证明互不污染。</li>
+<li><strong>不许依赖演示种子</strong>（r35）：门禁自己造 BUS→PDR→RD
+全链，静态检查 <code>[12]</code> 禁
+<code>DEMO-R-|DEMO-C-|DEMO-REL-</code> 出现在 S7 区段。</li>
+<li><strong>不许有隐形残留</strong>（r37、r38）：临时账号清理收敛到
+<code>lib/temp-accounts.sh</code> 单一真源（4 前缀白名单 + 14 名保护 +
+只删 DISABLED）；孤儿 join 行判定用
+<code>temp_orphan_join_where()</code> 单一谓词覆盖
+<code>sys_user_role</code> 与
+<code>sys_user_domain</code>，「同租户无主」即红。</li>
+<li><strong>每条零断言都要有负向自检</strong>：插入一条应当被数到的脏数据，证明计数
+0→1→0，避免「断言退化成永不命中」的空跑（<code>gate-order</code> 第
+19、20 条即此形态）。</li>
+<li><strong>口径只有一个数</strong>：<code>Makefile</code>
+帮助行、<code>memory.md</code>、任务夹文档里的门禁条数必须同批更新；已发生过三次漂移（<code>negative</code>
+128/130、权限码 56、<code>gate-order</code> 15/19），现在由 PRD 的
+AC-9/AC-10 强制核对。</li>
+</ul>
+</div></body></html>

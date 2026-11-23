@@ -1,7 +1,7 @@
 # 已交付功能模块清单
 
-> 生成时间：2026-11-09，**最后更新 2026-11-18**（r28 合回后）· 口径：**已验收并合入 `main`** 的能力；任务夹路径见各轮目录 `docs/teamflow/20261*-r*`。
-> 分支 `main` 当前 = `0127ca4`；每轮证据见对应任务夹的 `ACCEPTANCE.md`，门禁基线见 `memory.md:36`。
+> 生成时间：2026-11-09，**最后更新 2026-11-23**（r38 合回后）· 口径：**已验收并合入 `main`** 的能力；任务夹路径见各轮目录 `docs/teamflow/20261*-r*`。
+> 分支 `main` 当前 = `d99530d`；每轮证据见对应任务夹的 `ACCEPTANCE.md`，门禁基线见 `memory.md:36`。
 
 ## 0. 版本台账
 
@@ -24,10 +24,20 @@
 | r26 | 工时评估门 | 第五类单据 `WBS_ESTIMATE`、`schedule`/`start_dev` 前置门、±20% 派生 `STALE` | `verify` 192 · neg 111 · `access` 206 | `7144d30` |
 | r27 | 列表/详情同源 | 池查询不再直出状态机、`allowedActions` 单一条判定链、4d 段 19 条一致性断言 | `verify` 193 · neg 130 | `7144d30` |
 | r28 | 门禁自带夹具 | 负向 7/8 段自造待审批任务，恒定 130；夹具失败 `fail` 不 `warn` | 干净重置 130/130 | `0127ca4` |
+| r29 | 存量工时回填 | `backfill-wbs-estimate.sh`（dry-run/`--apply`、走真实引擎、幂等）+ `wbs-backfill-verify` 18 条 | 回填 2 条 · 二次 0 变更 | `79e1f1c` |
+| r30 | 发版分级审批 | RELEASE 三级 / REQ_DEPLOY 两级 / 紧急两级 / 回滚两级、`flowChain` 四段同源、提交快照不可变、`release-flow-verify` | 13 阶段 · `rfv` 32 条 | `177389a` |
+| r31 | 门禁区间判据 | `release-flow-verify` 提交卫生改用 `merge-base..HEAD` 区间 + 变异自检 4/4（不再依赖脏树） | 32/32 · 自检 4/4 | `177389a` |
+| r32 | 演示链到 PUBLISHED | `DemoApprovalFixture`（真实动作链补审批/MR/实际人天）、`reset` 70→74、`rfv` 32→40 | 四段全绿 + 已发布 `REL-1444` | `b48d179` |
+| r33 | 质量门跳过口径 | `GateRuleBuckets` 四态分桶单一实现（通过/跳过/未通过/关闭），三消费点同源 | 卡片「跳过 1 · 未通过 0」 | `4d9f5b6` |
+| r34 | 门禁顺序与残留 | `scripts/lib/gate-fixture.sh`（GATE_TAG + teardown 断言）、`gate-order-verify` 15 条、`reset` 75 | A/B 双序列全绿 | `d715944` |
+| r35 | S7 自造夹具 | 演示链不再依赖演示种子（自造 BUS→PDR→RD），`rfv` 44 条、静态 `[12]` 禁种子引用 | 44/44 · `S7-` 痕迹 0 | `fdaeac8` |
+| r36 | 临时主体幂等 | `tests/rbac/_lib.sh` 造名/清理原语 + trap，s3/s5/s6/s7/s8 接入，`gate-order` 18 条 | `rbac` 113×2 | `81967c4` |
+| r37 | 遗留探针清理 | `lib/temp-accounts.sh`（4 前缀白名单 + 14 名保护 + 只删 DISABLED）、`legacy-probe-purge.sh`、`gate-order` 19、`reset` 76 | purge 首跑 4 · 二跑 0 | `8c39a3a` |
+| r38 | 孤儿 join 行判定 | 谓词单点 `temp_orphan_join_where()`、`orphan-join-purge.sh`、`gate-order` 20（含负向自检）、清 413 条历史域孤儿 | 20/20 · 孤儿 role/domain 0 | `d99530d` |
 
 > r6 任务夹：[docs/teamflow/20261109-r6-ccode-cteam-ctest-p0/](20261109-r6-ccode-cteam-ctest-p0/)（PRD 20 条 AC · DESIGN · TECHNICAL · QA-REPORT · ACCEPTANCE）。
 
-**规模（2026-11-18 实测）**：Java **537** 个类、Vue **136** 个页面/组件、TS **50** 个、REST 映射 **360** 处、Flyway 迁移 **13** 个（V1–V13）、运维与自测脚本 **26** 个。门禁：`platform-verify` **193**、`platform-test-negative` **130**、`access-verify` **206**、`rbac-verify` **113**、`platform-demo-reset` **69**、`unit` **371**、`lint` 22、`verify` 14。
+**规模（2026-11-23 实测，排除 `src/test`）**：Java **495** 个类（另测试 69）、Vue **140** 个页面/组件、TS **51** 个、REST 映射 **371** 处、Flyway 迁移 **14** 个（V1–V14）、顶层运维/自测脚本 **31** 个（`scripts/tests/` 下另有 45 个）。门禁（r38 实测）：`platform-verify` **194**、`platform-test-negative` **130**、`access-verify` **206**、`rbac-verify` **113**、`platform-demo-reset` **76**、`release-flow-verify` **44**、`gate-order-verify` **20**、`wbs-backfill-verify` **18**、`unit` **392**、`lint` 22、`verify` 14。
 
 ## 1. 平台基座（r1）
 
@@ -150,3 +160,15 @@
 - 门禁脚本：`platform-verify` / `platform-test-negative` / `access-verify` / `rbac-verify` / `collab-verify` / `quality-verify` / `platform-demo-reset` / `analytics-i18n-verify`，全部 `make` 目标化。
 - **下限只增不减**，实测值写入 `docs/teamflow/memory.md:36`；基线漂移时在任务夹顶部加「基线订正」行，**不改 AC 文本**。
 - 负向脚本禁止条件跳过：r28 起需要前置数据的段必须自带夹具，夹具造不出来 **fail 不 warn**（避免门禁静默缩水）。
+
+## 16. 门禁自身的可信度（r28、r31、r33–r38）
+
+这一节记的不是产品功能，是「门禁说绿算不算绿」的几条硬约定——每一次都是被假绿咬出来的。
+
+- **不许依赖脏工作树**（r31）：`release-flow-verify` 的提交卫生判据从 `git status --porcelain` 改成 `merge-base(main,HEAD)..HEAD` 区间，并内置变异自检（改旧迁移必红、新增未登记迁移必红）。门禁必须对「已提交」与「未提交」两种状态给同一个结论。
+- **不许条件跳过**（r28、r36）：需要前置数据的负向段必须段内自造夹具，造不出来就 `fail`，禁止 `warn` 放过，也禁止 `>/dev/null` 吞掉建号 409 再靠登录 403 兜底。
+- **不许顺序敏感**（r34）：写演示租户的门禁统一 `source scripts/lib/gate-fixture.sh`，用 `GATE_TAG` 打标、`trap` 自愈、teardown 断言残留 0；`gate-order-verify` 用 A/B 两种顺序各跑一遍证明互不污染。
+- **不许依赖演示种子**（r35）：门禁自己造 BUS→PDR→RD 全链，静态检查 `[12]` 禁 `DEMO-R-|DEMO-C-|DEMO-REL-` 出现在 S7 区段。
+- **不许有隐形残留**（r37、r38）：临时账号清理收敛到 `lib/temp-accounts.sh` 单一真源（4 前缀白名单 + 14 名保护 + 只删 DISABLED）；孤儿 join 行判定用 `temp_orphan_join_where()` 单一谓词覆盖 `sys_user_role` 与 `sys_user_domain`，「同租户无主」即红。
+- **每条零断言都要有负向自检**：插入一条应当被数到的脏数据，证明计数 0→1→0，避免「断言退化成永不命中」的空跑（`gate-order` 第 19、20 条即此形态）。
+- **口径只有一个数**：`Makefile` 帮助行、`memory.md`、任务夹文档里的门禁条数必须同批更新；已发生过三次漂移（`negative` 128/130、权限码 56、`gate-order` 15/19），现在由 PRD 的 AC-9/AC-10 强制核对。
