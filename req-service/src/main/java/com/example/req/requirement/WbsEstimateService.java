@@ -281,9 +281,11 @@ public class WbsEstimateService {
         }
         String status = effective.getStatus();
         if (ApprovalInstance.STATUS_APPROVED.equals(status)) {
-            BigDecimal deviation = deviation(estimateDays, approvedDays);
-            return deviation == null || deviation.compareTo(STALE_THRESHOLD) > 0
-                    ? STATUS_STALE : STATUS_APPROVED;
+            // 与 impact 的预测共用 wouldBeStale（AC-9：预测=实际），避免两套 20% 阈值。
+            if (approvedDays == null || approvedDays.signum() <= 0 || estimateDays == null) {
+                return STATUS_STALE;
+            }
+            return wouldBeStale(approvedDays, estimateDays) ? STATUS_STALE : STATUS_APPROVED;
         }
         if (ApprovalInstance.STATUS_REJECTED.equals(status)) {
             return STATUS_REJECTED;
@@ -326,6 +328,33 @@ public class WbsEstimateService {
             return null;
         }
         return EstimateSnapshot.days(EstimateSnapshot.document(store, json, instance.getId()));
+    }
+
+    /**
+     * 需求最近一次通过审批的评估人天；没有 APPROVED 评估时为 null。
+     * 变更单 impact 的 {@code days.approvedDays} 与 20% 判定都以它为分母。
+     */
+    public BigDecimal approvedDaysOf(long requirementId) {
+        long tenantId = TenantContext.require().tenantId();
+        for (ApprovalInstance instance : instances.findAllByTenantIdAndBizTypeAndBizIdOrderByIdDesc(
+                tenantId, BIZ_TYPE, requirementId)) {
+            if (isApproved(instance)) {
+                return approvedDaysOf(instance);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 变更后的人天是否会让「已批评估」转 STALE：未取绝对值、未舍入的严格 &gt;20%。
+     * 与 {@link #decide} 共用本方法，AC-9 的「预测=实际」才成立。
+     */
+    public static boolean wouldBeStale(BigDecimal approvedDays, BigDecimal afterDays) {
+        if (approvedDays == null || approvedDays.signum() <= 0 || afterDays == null) {
+            return false;
+        }
+        return afterDays.subtract(approvedDays).abs()
+                .compareTo(approvedDays.multiply(STALE_THRESHOLD)) > 0;
     }
 
     // -------------------------------------------------------------------- 门

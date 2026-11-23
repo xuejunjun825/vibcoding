@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import {
   addSign,
   getApprovalInstance,
+  getRequirementChange,
   handleApprovalTask,
   listApprovalDone,
   listApprovalMine,
@@ -59,6 +60,8 @@ const BIZ_LABELS: Record<string, string> = {
   // r26 第五类单据：工时评估初审（biz_type = WBS_ESTIMATE）
   ESTIMATE: '工时评估',
   WBS_ESTIMATE: '工时评估',
+  // r40 第六类单据：需求变更单（biz_type = REQ_CHANGE）
+  REQ_CHANGE: '需求变更',
 }
 
 const route = useRoute()
@@ -118,6 +121,9 @@ function bizKeyOf(rawType?: string): string {
   // 必须显式分支且排在 includes('REQ') 之前：WBS_ESTIMATE 不含 'REQ'，
   // 不写这一行就既没有标签、筛选项也永远筛不到（AC-6）
   if (raw === 'WBS_ESTIMATE' || raw === 'ESTIMATE') return 'ESTIMATE'
+  // REQ_CHANGE 必须同样排在 includes('REQ') 之前：否则会被吞成 REQUIREMENT，
+  // 标签变成「需求」、跳转也会指向需求详情而不是变更单
+  if (raw.includes('CHANGE')) return 'REQ_CHANGE'
   if (raw.includes('DEPLOY')) return 'DEPLOY'
   if (raw.includes('RELEASE')) return 'RELEASE'
   if (raw.includes('DEFECT')) return 'DEFECT'
@@ -138,6 +144,31 @@ function bizLabelOf(rawType?: string): string {
 
 function bizLabel(row: ApprovalTodoRow): string {
   return bizLabelOf(row.bizType)
+}
+
+/**
+ * 第六类单据（r40）：需求变更单在本页只给「查看变更单」入口——
+ * 审批动作仍走既有同意/驳回，应用变更只在变更详情页做（通过 ≠ 生效）。
+ */
+const isChangeDocument = computed(() => bizKeyOf(detail.value?.document?.bizType) === 'REQ_CHANGE')
+const changeDocBusy = ref(false)
+
+async function openChangeDocument(): Promise<void> {
+  const bizId = detail.value?.document?.bizId
+  if (!bizId || changeDocBusy.value) return
+  changeDocBusy.value = true
+  try {
+    // 先取一次单据：既确认它还在，也拿到 requirementId 组深链（审批摘要里只有 bizId）
+    const change = await getRequirementChange(bizId)
+    void router.push({
+      name: 'requirement-change-detail',
+      params: { id: change.requirement.id, changeId: change.id },
+    })
+  } catch {
+    ElMessage.error('变更单不存在或已删除')
+  } finally {
+    changeDocBusy.value = false
+  }
 }
 
 function rowTitle(row: ApprovalTodoRow): string {
@@ -644,7 +675,18 @@ function goRequirements(): void {
               <StatusPill kind="approval" :value="instance.status" />
               <span class="detail-node">当前节点：{{ instance.currentNode ?? '—' }}</span>
             </div>
-            <span class="detail-version">流程版本 v{{ instance.definitionVersion }}</span>
+            <div class="detail-head__right">
+              <el-button
+                v-if="isChangeDocument"
+                size="small"
+                data-test="open-change-doc"
+                :loading="changeDocBusy"
+                @click="openChangeDocument"
+              >
+                查看变更单
+              </el-button>
+              <span class="detail-version">流程版本 v{{ instance.definitionVersion }}</span>
+            </div>
           </header>
 
           <div v-if="actionError" class="action-banner" role="alert">
@@ -1057,6 +1099,11 @@ function goRequirements(): void {
 .detail-version {
   font-size: 11px;
   color: var(--text-muted-aa);
+}
+.detail-head__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .action-banner {
   display: flex;

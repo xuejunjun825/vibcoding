@@ -166,6 +166,27 @@
      （级别序号列在 ApprovalLevelList 内按 24px 内联、快照四小格用 minmax(0,1fr)），
      按「不落无用令牌」不在此声明；若后续真要用，从 DESIGN §5 取值补在这里。 */
 
+  /* ---- r40 需求变更单：留痕单据（只增不改，0 新色板） ---- */
+  /* TECHNICAL §11.2 的布局集：抽屉宽、间距、角标、断点、值列上限 */
+  --change-drawer-w: 720px;
+  --change-drawer-edit-w: 560px;
+  --change-gutter: 24px;
+  --change-row-gap: 12px;
+  --change-label-w: 96px;
+  --change-badge-size: 16px;
+  --change-banner-pad: 12px 16px;
+  --change-bp: 1280px;
+  --change-value-max: 42ch;
+  /* DESIGN §5.1 的列宽集：两套命名同源于同一版设计，实现按各自引用点保留（见交付说明） */
+  --w-change-status: 112px;
+  --w-change-type: 88px;
+  --w-change-impact: 248px;
+  --w-change-applicant: 96px;
+  --w-change-time: 140px;
+  --w-change-field: 112px;
+  --w-change-current: 216px;
+  --w-change-arrow: 20px;
+
   /* ---- 字体 ---- */
   --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

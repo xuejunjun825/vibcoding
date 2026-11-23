@@ -38,8 +38,16 @@ public final class AutomationSpecs {
     /** 审批结果，与审批单终态一致。 */
     public static final List<String> APPROVAL_RESULTS = List.of("APPROVED", "REJECTED", "WITHDRAWN");
 
-    /** 可被字段变更触发的字段白名单（列名，与 {@code requirement} 表一致）。 */
-    public static final List<String> FIELDS = List.of("priority", "owner_user_id", "estimate_days", "release_id");
+    /**
+     * 可被字段变更触发的字段白名单（列名，与 {@code requirement} 表一致）。
+     *
+     * <p>r40 从 4 个扩到 8 个：变更单可写的内容/日期/父需求字段也必须能被规则命中，
+     * 否则「title 变了就通知」这种规则存不进去。{@code owner_user_id} 不属变更单字段，
+     * 但它是既有可触发字段，保留。顺序即 {@code /automation/meta} 的候选顺序。</p>
+     */
+    public static final List<String> FIELDS = List.of(
+            "title", "description", "priority", "owner_user_id",
+            "estimate_days", "release_id", "parent_id", "expected_delivery_date");
 
     /** 优先级枚举，与 {@code RequirementService} 的校验保持一致。 */
     public static final List<String> PRIORITIES = List.of("P0", "P1", "P2", "P3");

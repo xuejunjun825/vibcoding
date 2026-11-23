@@ -26,13 +26,15 @@ public class WorkflowVersion {
     /** 已停用：在途实例继续走，新单据不再解析到。 */
     public static final String STATUS_DISABLED = "DISABLED";
 
-    /** 五类单据（r26 起第五类为工时评估单）。 */
+    /** 六类单据（r26 起第五类为工时评估单，r40 起第六类为需求变更单）。 */
     public static final String BIZ_REQ_SUBMIT = "REQ_SUBMIT";
     public static final String BIZ_REQ_REVIEW = "REQ_REVIEW";
     public static final String BIZ_RELEASE = "RELEASE";
     public static final String BIZ_REQ_DEPLOY = "REQ_DEPLOY";
     /** 工时评估初审（r26）：biz_id=需求 id，单据人天/说明存 SUBMIT 快照，零新增表。 */
     public static final String BIZ_WBS_ESTIMATE = "WBS_ESTIMATE";
+    /** 需求变更单（r40）：biz_id=变更单 id（不是需求 id），默认 PRODUCT → DOMAIN_OWNER 串行两级。 */
+    public static final String BIZ_REQ_CHANGE = "REQ_CHANGE";
 
     /** 不限类型/域的哨兵值（唯一键要用非 NULL 值，故不用 NULL）。 */
     public static final String ANY_REQ_TYPE = "ANY";

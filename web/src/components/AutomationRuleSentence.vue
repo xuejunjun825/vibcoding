@@ -109,11 +109,16 @@ const conditionTokens = computed<Token[]>(() => {
   }
   const fields = condition.fields ?? []
   if (fields.length) {
+    // 词表与后端 `AutomationSpecs.FIELDS` 同口径（r40 扩到 8 个：7 个可变更字段 + 负责人）
     const map: Record<string, string> = {
+      title: '标题',
+      description: '描述',
       priority: '优先级',
-      owner_user_id: '负责人',
+      expected_delivery_date: '期望交付日',
       estimate_days: '预估人天',
       release_id: '所属版本',
+      parent_id: '父需求',
+      owner_user_id: '负责人',
     }
     tokens.push({
       text: `字段 ${joinLabel(fields, (code) => map[code] ?? code)}`,

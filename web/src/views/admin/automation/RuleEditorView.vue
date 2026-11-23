@@ -76,10 +76,14 @@ const APPROVAL_RESULTS = [
 ]
 
 const FIELD_LABELS: Record<string, string> = {
+  title: '标题',
+  description: '描述',
   priority: '优先级',
-  owner_user_id: '负责人',
+  expected_delivery_date: '期望交付日',
   estimate_days: '预估人天',
   release_id: '所属版本',
+  parent_id: '父需求',
+  owner_user_id: '负责人',
 }
 
 const OP_LABELS: Record<string, string> = {
@@ -93,7 +97,7 @@ const OP_LABELS: Record<string, string> = {
 const TRIGGER_HINTS: Record<string, string> = {
   REQUIREMENT_CREATED: '新建需求提交后立即判定',
   STATUS_CHANGE: '需求状态流转后判定（可看审批结果）',
-  FIELD_CHANGE: '优先级 / 负责人 / 人天 / 版本变更后判定',
+  FIELD_CHANGE: '优先级 / 标题 / 描述 / 期望交付日 / 人天 / 版本 / 父需求 / 负责人变更后判定',
   SCHEDULE: '每天 08:30（Asia/Shanghai）扫描作用域',
 }
 

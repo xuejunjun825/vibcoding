@@ -5,7 +5,8 @@ SHELL := /bin/bash
         platform-up platform-down platform-web platform-verify platform-test-negative \
         platform-seed platform-unit platform-perf quality-verify quality-e2e integration-verify \
         collab-verify collab-perf access-verify rbac-verify analytics-i18n-verify platform-demo-reset \
-        wbs-backfill-verify release-flow-verify release-flow-upgrade gate-order-verify automation-verify
+        wbs-backfill-verify release-flow-verify release-flow-upgrade gate-order-verify automation-verify \
+        change-verify
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
@@ -109,6 +110,10 @@ gate-order-verify: ## A/B 双序列证明门禁顺序无关（20 条，独占演
 # ---- r39 自动化规则引擎 (20261123-r39) ----
 automation-verify: ## 自动化规则引擎门禁 S1–S6 共 39 条（正例/负例/幂等/防循环/越权/停用与动作边界；先 make platform-up && platform-seed && platform-demo-reset；--static-only 免栈）
 	@./scripts/automation-verify.sh
+
+# ---- r40 需求变更单 (20261123-r40) ----
+change-verify: ## 需求变更单闭环门禁 S1–S6 共 40 条（迁移/申请/影响/审批/应用/人天/锁/PUT 收口/审计；先 make platform-up && platform-seed && platform-demo-reset；--static-only 免栈，--twice 连跑两次）
+	@./scripts/change-verify.sh
 
 release-flow-upgrade: ## 存量库幂等升级：连跑两次 /internal/seed，定义/绑定/version 不增（先 make platform-up）
 	@./scripts/release-flow-upgrade.sh

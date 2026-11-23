@@ -223,6 +223,16 @@ export interface EstimateCreated {
 }
 
 /**
+ * 详情里服务端下发的「写权限袋」。
+ *
+ * 后端 `RequirementViews.Detail.permissions` 是 `Map<String, Object>`（r40 起键含
+ * `changeRequest` / `changeApply` / `editableFields`；更早的响应只有 `fields`）。
+ * 键位随迭代增长，所以这里保持开放字典而不是逐个补键——读取方必须自行窄化，
+ * 例如 `views/req/change.ts:changePermissionsOf()`。
+ */
+export type RequirementPermissions = Record<string, unknown>
+
+/**
  * GET/详情类端点里 `RequirementViews.View` 的扁平形状（已归一）。
  * 注意：线上 `GET /requirements/{id}` 外面还包了一层，见 {@link RequirementDetailResponse}；
  * 页面统一通过 `normalizeRequirementDetail` 转成本类型，不要在页面里直接摊平。
@@ -236,7 +246,7 @@ export interface RequirementDetail extends RequirementRow {
   release?: { id: number; name: string; status?: string } | null
   /** 服务端唯一事实源：只渲染这里给出的动作（DESIGN §10 / AC-3） */
   allowedActions: string[]
-  permissions?: { fields?: string[] }
+  permissions?: RequirementPermissions
   attachments?: AttachmentRow[]
   /** 拆解前置门（r23）；仅详情返回，列表行为 null/缺失 */
   decomposeGate?: RequirementDecomposeGate
@@ -253,7 +263,7 @@ export interface RequirementDetailResponse {
   view: RequirementDetail
   children: RequirementRow[]
   allowedActions: string[]
-  permissions?: { fields?: string[] }
+  permissions?: RequirementPermissions
   /** r26：评估块在**顶层**（不在 view 里），`normalizeRequirementDetail` 不搬运它 */
   estimate?: EstimateBlock | null
 }

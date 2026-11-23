@@ -145,8 +145,20 @@ public final class DemoFixture {
      *
      * <p>表名与谓词都只来自本文件的字面量，没有任何请求参数参与拼接，因此
      * {@code DELETE FROM <table> WHERE tenant_id = ? AND NOT (<keepFilter>)} 不存在注入面。</p>
+     *
+     * <p>{@code tenantPredicate} 是「本租户行」的谓词，默认 {@code tenant_id = ?}（一个参数）。
+     * 少数子表没有 {@code tenant_id}（例如 {@code req_change_item} 只有
+     * {@code (change_id, field)}），它们的本租户范围只能经父表子查询表达；这类表由
+     * {@link #purgeByParent} 生成，谓词仍是本文件字面量，参数个数不变。</p>
      */
-    public record TableReset(String table, String keepFilter) {
+    public record TableReset(String table, String keepFilter, String tenantPredicate) {
+
+        private static final String TENANT_SCOPE = "tenant_id = ?";
+
+        /** 兼容两参形态：绝大多数表直接按 {@code tenant_id} 收口。 */
+        public TableReset(String table, String keepFilter) {
+            this(table, keepFilter, TENANT_SCOPE);
+        }
 
         /** 整表清空：本租户该表没有需要跨重置存活的行。 */
         public static TableReset purge(String table) {
@@ -156,6 +168,19 @@ public final class DemoFixture {
         /** 清空但保留谓词命中的行（迁移种子等「删了没人重放」的数据）。 */
         public static TableReset purgeExcept(String table, String keepFilter) {
             return new TableReset(table, keepFilter);
+        }
+
+        /**
+         * 无 {@code tenant_id} 的子表：经父表子查询限定到本租户。
+         *
+         * <p>{@code req_change_item} 是唯一这样的表（V16：{@code PRIMARY KEY (change_id, field)}）；
+         * 父表 {@code req_change} 有 {@code tenant_id}，删除顺序又保证子表先于父表，所以子查询
+         * 能看到待删的父行。硬拼 {@code WHERE tenant_id = ?} 会报
+         * {@code Unknown column 'tenant_id'} 并让整个 demo-reset 500。</p>
+         */
+        public static TableReset purgeByParent(String table, String foreignKey, String parentTable) {
+            return new TableReset(table, null,
+                    foreignKey + " IN (SELECT id FROM " + parentTable + " WHERE tenant_id = ?)");
         }
 
         /**
@@ -226,6 +251,8 @@ public final class DemoFixture {
             TableReset.purge("test_case"),
             TableReset.purge("defect_history"),
             TableReset.purge("defect"),
+            TableReset.purgeByParent("req_change_item", "change_id", "req_change"),
+            TableReset.purge("req_change"),
             TableReset.purge("wf_cc"),
             TableReset.purge("wf_history"),
             TableReset.purge("wf_task"),

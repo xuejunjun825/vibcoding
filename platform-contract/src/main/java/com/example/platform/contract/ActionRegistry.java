@@ -85,6 +85,12 @@ public final class ActionRegistry {
             // 的语义归属是 test:quick，与下面的 test_pass 同一档位。
             action("req.action.submit_test", "req.pool", "提测", "test:quick"),
             action("req.action.test_pass", "req.pool", "测试通过", "test:quick"),
+            // r40 需求变更单：两个动作码都在 req.pool 页，但不进 16 条状态迁移矩阵
+            // （RequirementActionMatrix.ACTIONS 是「状态迁移」，变更单是内容写入，两码正交）。
+            // functionCodes 是 any-of：「发起」只给能拆需求的人（研发受限、产品/域负责人可申请），
+            // 「应用」给能交付或能拆需求的人（研发/产品经理都可应用，域负责人不应用）。
+            action("req.action.change_request", "req.pool", "发起变更", "req:split"),
+            action("req.action.change_apply", "req.pool", "应用变更", "req:deliver", "req:split"),
 
             // ---- 迭代 req.iteration ----
             action("task.action.create", "req.iteration", "新建任务", "task:manage"),

@@ -86,6 +86,7 @@ TODO --start_dev--> IN_DEV --submit_test--> PENDING_TEST --test_pass--> TEST_PAS
 | `REVIEW_APPROVAL_REQUIRED` | 评审实例未通过就 `review_pass` | `RequirementService.transition` |
 | `ILLEGAL_TRANSITION` | 当前状态不允许该动作 | `StateTables` |
 | `FORBIDDEN` / `OUT_OF_SCOPE` | 无动作权限 / 需求在数据范围外 | `RequirementActionMatrix` + `PermissionInterceptor` |
+| `CHANGE_REQUIRED` | 晚期态直接 `PUT` 四类字段（标题/内容/优先级/交付日、人天、父、版本） | `RequirementChangeGuard`（r40；早期态放行，详见 [CHANGE-REQUEST-FLOW.md](CHANGE-REQUEST-FLOW.md)） |
 
 发布侧另有一组门禁（`RELEASE_NOT_LOCKED`、`QUALITY_GATE_FAILED`、`PLAN_NOT_APPROVED`、`ADMISSION_FAILED`），属于「需求 → 版本 → 发布」的下半段，见 `docs/teamflow/DEMO-RELEASE-FLOW.md`。
 
@@ -94,6 +95,32 @@ TODO --start_dev--> IN_DEV --submit_test--> PENDING_TEST --test_pass--> TEST_PAS
 - **审批驳回**：`APPROVING` → `SUBMITTED`，必须填原因；业务方改完可重新提交。
 - **测试不通过**：`PENDING_TEST` → 失败转缺陷（`BUG-xxxx`，带用例/版本/需求上下文）→ 研发修复 → 重新提测，缺陷与需求双向可追。
 
+## 5.5 变更入口（r40：晚期态改需求不再走 PUT）
+
+主干上任何一步之后，如果需求已过早期态却又必须改内容，就走**变更单**这条子流程（独立文档：[CHANGE-REQUEST-FLOW.md](CHANGE-REQUEST-FLOW.md)）：
+
+```
+晚期态 PUT 四类字段 ──► 409 CHANGE_REQUIRED（detail.changeEndpoint + detail.fields）
+                            │
+                            ▼
+                    发起变更（720 四步抽屉：类型 → 原因 → 字段 → 影响预览）
+                            │  preview 与创建共用同一校验+评估函数（预览不落库）
+                            ▼
+                    REQ_CHANGE 审批（默认 PRODUCT → DOMAIN_OWNER 两级；审批通过 = APPROVED，字段未变）
+                            │
+                            ▼
+                    显式 apply（需求行锁 + 逐字段比对 before + 单事务写字段/items/1 条审计）
+                            │
+                            ▼
+                    基线留痕（before_json 永不覆盖；items 逐字段；锁后额外 CHANGE_AFTER_RELEASE_LOCK）
+```
+
+三个要点（读图时最容易搞反的）：
+
+- **审批通过 ≠ 已生效**：`APPROVED` 只表示可应用；文案固定「审批已通过，尚未应用」，`APPLIED` 才有 `applied_at/applied_by`。
+- **早期态不受限**：BUS 在 `SUBMITTED/APPROVING/PENDING_REVIEW`、PDR 在 `PENDING_ANALYSIS`、RD 在 `TODO` 时直接 `PUT` 仍然成功（草稿编辑不该被逼进审批）。
+- **锁定的版本仍可应用**：版本 `LOCKED/PUBLISHED` 时变更单照样能 apply，但会多一条 `CHANGE_AFTER_RELEASE_LOCK` 审计——这正是变更单要解决的「锁定后只能线下协调」。
+
 ## 6. 这张图的依据
 
 | 依据 | 位置 |
@@ -101,7 +128,8 @@ TODO --start_dev--> IN_DEV --submit_test--> PENDING_TEST --test_pass--> TEST_PAS
 | 状态机 | `platform-contract/src/main/java/com/example/platform/contract/StateTables.java:58-85` |
 | 动作与所需权限 | `platform-contract/.../ActionRegistry.java`、`RequirementActionMatrix.java` |
 | 门禁判定 | `RequirementRules`、`WbsEstimateService`、`RequirementService.decompose/transition` |
-| 角色×页面/动作授权 | `sys_role_permission`（1680 行种子）+ `PermissionService` |
+| 角色×页面/动作授权 | `sys_role_permission`（1903 行种子）+ `PermissionService` |
+| 变更子流程（r40） | `RequirementChangeService` / `RequirementChangeApplyService` / `RequirementChangeGuard`，见 [CHANGE-REQUEST-FLOW.md](CHANGE-REQUEST-FLOW.md) |
 | 实测 | 视频演示同一套流程已跑通（`docs/teamflow/demo-video/demo-roles.mp4`），截图见 `docs/teamflow/demo-shots/flow-*.png` |
 
 > 图是按 18 个**主操作节点**画的主干：会签/或签的具体审批人来源、加签减签、超时催办等分支没有画进来，它们在审批引擎内部，属于节点 3/4/8 的细节。

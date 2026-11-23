@@ -696,3 +696,161 @@ export function tagSourceLabel(source?: string | null): string {
 }
 
 export type { GateDecision, GateItem }
+
+/* ---------------- 需求变更单（r40, TECHNICAL §8/§11.2） ---------------- */
+/**
+ * 变更单是**留痕单据**：创建只冻结 before/after 与影响快照并起审批，
+ * 审批通过（APPROVED）不等于生效，必须再调 `applyRequirementChange`（APPLIED）才写需求字段。
+ * 因此这里没有「申请成功即刷新需求详情」的语义——页面拿到 Created 后只刷新变更列表。
+ */
+export type ChangeType = 'CONTENT' | 'DAYS' | 'RELEASE' | 'PARENT'
+export type ChangeStatus = 'PENDING' | 'APPROVED' | 'APPLIED' | 'REJECTED' | 'WITHDRAWN'
+
+export interface ChangeImpactDays {
+  before?: number | null
+  after?: number | null
+  delta?: number | null
+  /** NONE / PENDING / APPROVED / REJECTED / SUPERSEDED / STALE */
+  estimateStatus?: string | null
+  approvedDays?: number | null
+  /** 未舍入比值（|after-approved| / approved）；仅用于对账，阈值判定看 becomesStale */
+  deltaRatio?: number | null
+  becomesStale?: boolean | null
+}
+
+export interface ChangeImpactRelease {
+  id?: number | null
+  code?: string | null
+  name?: string | null
+  status?: string | null
+  locked?: boolean | null
+}
+
+export interface ChangeImpact {
+  fields?: Array<{ field: string; before?: unknown; after?: unknown }> | null
+  children?: { count?: number | null } | null
+  release?: ChangeImpactRelease | null
+  /** 仅 changeType=RELEASE 时有值，其它类型为 null（键仍在） */
+  targetRelease?: ChangeImpactRelease | null
+  days?: ChangeImpactDays | null
+  admission?: { passedOrderCodes?: string[] | null } | null
+  postLock?: { value?: boolean | null; statuses?: Record<string, string> | null; lockedReleaseIds?: number[] | null } | null
+  frozenAt?: string | null
+}
+
+/** 列表行的扁平摘要，由服务端从 impact 派生（前端不再拼一层） */
+export interface ChangeImpactSummary {
+  children?: number | null
+  daysDelta?: number | null
+  becomesStale?: boolean | null
+  releaseLocked?: boolean | null
+  affectedOrderCount?: number | null
+}
+
+export interface ChangeRow {
+  id: number
+  changeType: ChangeType | string
+  status: ChangeStatus | string
+  reason: string
+  createdBy?: number | null
+  createdAt?: string | null
+  appliedAt?: string | null
+  impactSummary?: ChangeImpactSummary | null
+}
+
+export interface ChangeRequirementRef {
+  id: number
+  code: string
+  title: string
+  type?: string | null
+  status?: string | null
+}
+
+export interface ChangeItem {
+  changeId?: number
+  field: string
+  before?: unknown
+  after?: unknown
+}
+
+export interface ChangeDetail {
+  id: number
+  requirement: ChangeRequirementRef
+  changeType: ChangeType | string
+  status: ChangeStatus | string
+  reason: string
+  before: Record<string, unknown>
+  after: Record<string, unknown>
+  items: ChangeItem[]
+  impact: ChangeImpact | null
+  instanceId?: number | null
+  appliedAt?: string | null
+  appliedBy?: number | null
+  createdBy?: number | null
+  createdAt?: string | null
+  /** 服务端算好的可用性：status=APPROVED 且决策非 DENY。前端不得复刻这个判定 */
+  canApply: boolean
+}
+
+export interface ChangeCreated {
+  id: number
+  status: ChangeStatus | string
+  instanceId?: number | null
+  impact: ChangeImpact | null
+}
+
+export interface ChangePreview {
+  changeType: ChangeType | string
+  before: Record<string, unknown>
+  after: Record<string, unknown>
+  fields: string[]
+  impact: ChangeImpact | null
+}
+
+export interface ChangeCreateBody {
+  changeType: ChangeType
+  reason: string
+  /** 只放该类型白名单字段；未变化的字段不提交（服务端按白名单与「无变化」双校验） */
+  patch: Record<string, unknown>
+}
+
+export interface ChangeListParams {
+  status?: string
+  page?: number
+  size?: number
+  [key: string]: unknown
+}
+
+export function listRequirementChanges(
+  requirementId: number | string,
+  params: ChangeListParams = {},
+): Promise<PageResponse<ChangeRow>> {
+  return http.get<PageResponse<ChangeRow>>(`${REQ}/requirements/${requirementId}/changes`, params, {
+    silentForbidden: true,
+  })
+}
+
+export function getRequirementChange(changeId: number | string): Promise<ChangeDetail> {
+  return http.get<ChangeDetail>(`${REQ}/changes/${changeId}`, undefined, { silentForbidden: true })
+}
+
+export function createRequirementChange(
+  requirementId: number | string,
+  body: ChangeCreateBody,
+): Promise<ChangeCreated> {
+  // 400/409 是业务门（白名单、无变化、树变更），由抽屉字段级就地渲染，不弹 toast
+  return http.post<ChangeCreated>(`${REQ}/requirements/${requirementId}/changes`, body)
+}
+
+export function previewRequirementChange(
+  requirementId: number | string,
+  body: ChangeCreateBody,
+): Promise<ChangePreview> {
+  return http.post<ChangePreview>(`${REQ}/requirements/${requirementId}/changes/preview`, body, {
+    silentForbidden: true,
+  })
+}
+
+export function applyRequirementChange(changeId: number | string): Promise<ChangeDetail> {
+  return http.post<ChangeDetail>(`${REQ}/changes/${changeId}/apply`)
+}

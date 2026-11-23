@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { assignVendor, deliverRequirement, getApprovalInstance, getRequirement, actOnRequirement, listApprovalMine } from '@/api/req'
+import { assignVendor, deliverRequirement, getApprovalInstance, getRequirement, actOnRequirement, listApprovalMine, listRequirementChanges } from '@/api/req'
 import { listDictionaryUsers, listDictionaryVendors } from '@/api/dictionaries'
 import type { DictionaryUser, DictionaryVendor } from '@/api/dictionaries'
 import type {
@@ -13,6 +13,7 @@ import type {
   RequirementDetail,
   RequirementDetailResponse,
 } from '@/api/types'
+import type { ChangeType } from '@/api/req'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PriorityDot from '@/components/PriorityDot.vue'
@@ -34,6 +35,10 @@ import OverviewTab from '@/views/req/tabs/OverviewTab.vue'
 import TasksTab from '@/views/req/tabs/TasksTab.vue'
 import TestingTab from '@/views/req/tabs/TestingTab.vue'
 import TraceTab from '@/views/req/tabs/TraceTab.vue'
+import ChangeTab from '@/views/req/tabs/ChangeTab.vue'
+import ChangeCreateDrawer from '@/components/req/ChangeCreateDrawer.vue'
+import RequirementEditDrawer from '@/components/req/RequirementEditDrawer.vue'
+import { changePermissionsOf, changeTypeOfField } from '@/views/req/change'
 import DecomposeDialog from '@/views/req/DecomposeDialog.vue'
 import {
   ACTION_IMPACT,
@@ -68,13 +73,52 @@ const approval = ref<ApprovalInstanceDetail | null>(null)
 const approvalLoading = ref(false)
 const approvalError = ref('')
 
-const TAB_KEYS = ['overview', 'children', 'tasks', 'testing', 'defects', 'approval', 'trace', 'integration', 'documents'] as const
+const TAB_KEYS = ['overview', 'children', 'tasks', 'testing', 'defects', 'approval', 'change', 'trace', 'integration', 'documents'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 const activeTab = ref<TabKey>(TAB_KEYS.includes(String(route.query.tab) as TabKey) ? (String(route.query.tab) as TabKey) : 'overview')
-const tabCounts = reactive({ children: 0, tasks: 0 })
+const tabCounts = reactive({ children: 0, tasks: 0, changePending: 0 })
 
-const actionBanner = ref<{ text: string; code?: string } | null>(null)
+const actionBanner = ref<{ text: string; code?: string; changeFields?: string[] } | null>(null)
 const busy = ref(false)
+
+// —— 变更单入口（r40）：一个 720 抽屉，四个触发点共用 ——
+const changeDrawerOpen = ref(false)
+const changePresetType = ref<ChangeType | null>(null)
+const changePresetFields = ref<string[]>([])
+const changeApprovedCount = ref(0)
+const editOpen = ref(false)
+const changeTabs = ref<InstanceType<typeof ChangeTab> | null>(null)
+
+const changePermissions = computed(() => changePermissionsOf(detail.value))
+/** 发起变更：渲染但无权限时禁用 + 原因（DESIGN §4.5），应用权限不在这里复刻 */
+const changeRequestDenied = computed(() => !changePermissions.value.changeRequest)
+
+function openChangeDrawer(type?: ChangeType | null, fields?: string[]): void {
+  changePresetType.value = type ?? null
+  changePresetFields.value = fields ?? []
+  changeDrawerOpen.value = true
+}
+
+function openChangeFromConflict(): void {
+  const fields = actionBanner.value?.changeFields ?? []
+  const type = fields.length ? changeTypeOfField(fields[0]) : null
+  openChangeDrawer(type, fields)
+}
+
+function onChangeCounts(counts: { pending: number; approved: number }): void {
+  tabCounts.changePending = counts.pending
+  changeApprovedCount.value = counts.approved
+}
+
+async function onEditRequestChange(payload: { type: ChangeType | null; fields: string[] }): Promise<void> {
+  editOpen.value = false
+  openChangeDrawer(payload.type, payload.fields)
+}
+
+async function onChangeCreated(): Promise<void> {
+  await refreshAll()
+  void changeTabs.value?.refresh()
+}
 
 const tabs = computed(() => [
   { key: 'overview', label: '概览' },
@@ -83,6 +127,7 @@ const tabs = computed(() => [
   { key: 'testing', label: '测试' },
   { key: 'defects', label: '缺陷' },
   { key: 'approval', label: '审批' },
+  { key: 'change', label: '变更', badge: tabCounts.changePending },
   { key: 'trace', label: '追溯' },
   { key: 'integration', label: '集成' },
   { key: 'documents', label: '文档' },
@@ -217,7 +262,26 @@ async function loadApproval(): Promise<void> {
 
 async function refreshAll(): Promise<void> {
   await load()
-  await Promise.all([loadApproval(), loadEstimateApproval()])
+  await Promise.all([loadApproval(), loadEstimateApproval(), loadChangeCounts()])
+}
+
+/**
+ * 变更角标与 APPROVED 横幅的数据源：与当前 Tab 无关，页头就要正确，
+ * 因此父级自己拉两次 count（Tab 内的列表另有自己的请求，口径一致）。
+ */
+async function loadChangeCounts(): Promise<void> {
+  try {
+    const [pending, approved] = await Promise.all([
+      listRequirementChanges(id.value, { status: 'PENDING', page: 1, size: 1 }),
+      listRequirementChanges(id.value, { status: 'APPROVED', page: 1, size: 1 }),
+    ])
+    tabCounts.changePending = pending.total ?? 0
+    changeApprovedCount.value = approved.total ?? 0
+  } catch {
+    // 角标是辅助信息：拉不到不显示，也不打断页面
+    tabCounts.changePending = 0
+    changeApprovedCount.value = 0
+  }
 }
 
 // —— 工时评估单实例（AC-6）：按 detail.estimate.instanceId 直取 ——
@@ -270,7 +334,12 @@ function handleActionError(error: unknown): void {
     // 评估门的 409 与其它 409 共用既有分支（常驻 banner + 就地刷新），
     // 但把「哪张评估单挡住了」补进文案，避免只看到一句泛化报错
     const gateSuffix = code === 'ESTIMATE_NOT_APPROVED' ? `（${estimateGateTip(estimateStatus.value)}）` : ''
-    actionBanner.value = { text: `${messageOf(error)}${gateSuffix}`, code }
+    const detailBag = (error as { detail?: { fields?: unknown } }).detail
+    const changeFields =
+      code === 'CHANGE_REQUIRED' && Array.isArray(detailBag?.fields)
+        ? detailBag.fields.filter((item): item is string => typeof item === 'string')
+        : undefined
+    actionBanner.value = { text: `${messageOf(error)}${gateSuffix}`, code, changeFields }
     void refreshAll()
     return
   }
@@ -513,6 +582,18 @@ onMounted(async () => {
             >
               {{ actionLabel(action) }}
             </el-button>
+            <!-- 变更入口（r40）：发起=渲染但无权限时禁用+原因；编辑抽屉里被锁分组另有一个入口 -->
+            <el-button
+              class="btn--disabled-reason"
+              size="small"
+              data-test="change-request"
+              :disabled="changeRequestDenied"
+              :title="changeRequestDenied ? '无发起变更权限（需要需求管理权限）' : '改动内容/人天/版本/父需求都走变更单'"
+              @click="openChangeDrawer()"
+            >
+              发起变更
+            </el-button>
+            <el-button size="small" data-test="requirement-edit" @click="editOpen = true">编辑</el-button>
             <!-- 受工时评估门约束的动作：无条件渲染、门未过时 disabled（r25 三色），
                  点击不发请求不改 URL；原因由 estimateGateTip / 权限前缀各自生成 -->
             <el-button
@@ -536,12 +617,31 @@ onMounted(async () => {
         </div>
       </header>
 
-      <div v-if="actionBanner" class="action-banner" role="alert">
+      <div v-if="actionBanner" class="action-banner" role="alert" data-test="action-banner">
         <div>
-          <strong>提交被拒绝：</strong>{{ actionBanner.text }}
+          <strong>{{ actionBanner.code === 'CHANGE_REQUIRED' ? '需要走变更单：' : '提交被拒绝：' }}</strong>{{ actionBanner.text }}
           <span v-if="actionBanner.code" class="action-banner__code">{{ actionBanner.code }}</span>
         </div>
-        <el-button text size="small" @click="actionBanner = null">关闭</el-button>
+        <div class="action-banner__actions">
+          <el-button
+            v-if="actionBanner.code === 'CHANGE_REQUIRED'"
+            type="primary"
+            size="small"
+            data-test="change-banner-cta"
+            @click="openChangeFromConflict"
+          >
+            发起变更（已预填）
+          </el-button>
+          <el-button text size="small" @click="actionBanner = null">关闭</el-button>
+        </div>
+      </div>
+
+      <div v-if="changeApprovedCount > 0" class="change-approved-banner" data-test="change-approved-banner">
+        <span>
+          <strong>{{ changeApprovedCount }} 张变更单已通过审批，尚未应用</strong>
+          —— 需求字段仍是申请前的值，进「变更」页显式应用后才写入。
+        </span>
+        <button type="button" class="change-approved-banner__link" @click="setTab('change')">去查看</button>
       </div>
 
       <nav class="detail__tabs" role="tablist">
@@ -556,6 +656,7 @@ onMounted(async () => {
           @click="setTab(tab.key as TabKey)"
         >
           {{ tab.label }}
+          <span v-if="tab.badge" class="detail__tab-badge" data-test="change-tab-badge">{{ tab.badge }}</span>
         </button>
       </nav>
 
@@ -591,6 +692,14 @@ onMounted(async () => {
           @changed="refreshAll"
           @submit="runSimpleAction('submit')"
           @retry-estimate="loadEstimateApproval"
+        />
+        <ChangeTab
+          v-else-if="activeTab === 'change'"
+          ref="changeTabs"
+          :requirement-id="detail.id"
+          @create="openChangeDrawer()"
+          @changed="refreshAll"
+          @counts="onChangeCounts"
         />
         <TraceTab
           v-else-if="activeTab === 'trace'"
@@ -636,6 +745,22 @@ onMounted(async () => {
     />
 
     <DecomposeDialog v-model="decomposeOpen" :parent="detail" @created="onDecomposed" />
+
+    <ChangeCreateDrawer
+      v-model="changeDrawerOpen"
+      :requirement-id="id"
+      :detail="detail"
+      :preset-type="changePresetType"
+      :preset-fields="changePresetFields"
+      @created="onChangeCreated"
+    />
+
+    <RequirementEditDrawer
+      v-model="editOpen"
+      :detail="detail"
+      @changed="refreshAll"
+      @request-change="onEditRequestChange"
+    />
 
     <el-dialog v-model="deliverOpen" title="提交交付" width="520px" append-to-body>
       <el-form label-position="top" size="small" @submit.prevent>
@@ -833,6 +958,53 @@ onMounted(async () => {
   margin-left: 8px;
   font-family: var(--font-mono);
   color: var(--text-muted-aa);
+}
+.action-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+/* 变更 Tab 角标：只表示「待审批」张数，16 高、11/600、warning 底色 */
+.detail__tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--change-badge-size);
+  height: var(--change-badge-size);
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+/* 「审批已通过，尚未应用」常驻提示：primary 语义，不是成功色——通过 ≠ 生效 */
+.change-approved-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: var(--change-banner-pad);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--r-cell);
+  background: var(--bg-selected);
+  color: var(--color-primary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.change-approved-banner__link {
+  flex-shrink: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
 }
 .form-row {
   display: flex;

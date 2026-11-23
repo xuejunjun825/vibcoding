@@ -1128,11 +1128,11 @@ VPM_ROLE_ROW="$(db_q "SELECT CONCAT(code, '/', builtin) FROM sys_role WHERE tena
 if [[ "$VPM_ROLE_ROW" == "VENDOR_PM/1" ]]; then
     pass "VENDOR_PM 是内置角色（builtin=1，不可删除）"
 else
-    fail "VENDOR_PM 角色行异常：${VPM_ROLE_ROW:-<缺失>}" "V13 迁移必须幂等补角色行，RbacSeeder 必须预置 171 格授权"
+    fail "VENDOR_PM 角色行异常：${VPM_ROLE_ROW:-<缺失>}" "V13 迁移必须幂等补角色行，RbacSeeder 必须预置 173 格授权"
 fi
-expect_num "VENDOR_PM 的授权格 = 171（61 FUNCTION + 37 MENU + 73 ACTION）" \
+expect_num "VENDOR_PM 的授权格 = 173（61 FUNCTION + 37 MENU + 75 ACTION）" \
     "$(db_q "SELECT COUNT(*) FROM sys_role_permission p JOIN sys_role r ON r.id=p.role_id AND r.tenant_id=p.tenant_id WHERE p.tenant_id=$(tenant_id) AND r.code='VENDOR_PM'")" \
-    eq 171 "RbacSeeder 的 preset(roleCode) 必须对这个角色落满 171 行"
+    eq 173 "RbacSeeder 的 preset(roleCode) 必须对这个角色落满 173 行"
 VPM_ACCOUNT="$(db_q "SELECT CONCAT(r.code,'/',v.code) FROM sys_user u
                       JOIN sys_user_role ur ON ur.user_id=u.id AND ur.tenant_id=u.tenant_id
                       JOIN sys_role r ON r.id=ur.role_id AND r.tenant_id=u.tenant_id

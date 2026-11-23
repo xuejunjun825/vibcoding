@@ -469,7 +469,7 @@ public class DemoResetService {
     private long deleteBusinessData(long tenantId) {
         long deleted = 0;
         for (DemoFixture.TableReset reset : DemoFixture.DELETE_ORDER) {
-            String sql = "DELETE FROM " + reset.table() + " WHERE tenant_id = ?";
+            String sql = "DELETE FROM " + reset.table() + " WHERE " + reset.tenantPredicate();
             if (reset.keepFilter() != null && !reset.keepFilter().isBlank()) {
                 sql += " AND NOT (" + reset.keepFilter() + ")";
             }

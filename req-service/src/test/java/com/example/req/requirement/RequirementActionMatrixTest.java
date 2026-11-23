@@ -141,8 +141,8 @@ class RequirementActionMatrixTest {
         // 页面码只有一个字面量的“真相”，四处引用必须一致：矩阵常量、页面表、注册表、路由表。
         assertThat(ActionRegistry.menus()).contains(RequirementActionMatrix.PAGE);
         assertThat(ActionRegistry.of(RequirementActionMatrix.PAGE))
-                .as("16 个流转动作 + decompose/assign-vendor 都挂在需求池页面上")
-                .hasSize(18);
+                .as("16 个流转动作 + decompose/assign-vendor + r40 的两个变更动作（变更不是状态迁移）")
+                .hasSize(20);
         PermissionRouteTable.Requirement rule =
                 PermissionRouteTable.requirementFor("POST", "/requirements/7/actions");
         assertThat(rule).as("动作端点必须仍由路由表守住").isNotNull();

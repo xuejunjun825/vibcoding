@@ -65,6 +65,11 @@ public class RbacSeeder {
      * {@code task:manage} / {@code case:manage} / {@code plan:manage}）才能看见版本、迭代、用例与
      * 测试计划页，而 max 派生会顺带把这些页上的 4+6+1 个写动作一起点亮。厂商项目经理要跟踪交付，
      * 不审批版本、不新建/指派/关闭任务与迭代、不改用例——所以逐条显式 DENY。</p>
+     *
+     * <p>r40 再补 2 条（11→13）：两个变更动作的 functionCodes 是 any-of，
+     * {@code req.action.change_apply} 的 {@code req:deliver} 厂商项目经理本来就有（它是交付跟踪
+     * 角色），只在功能码层派生会把它放行；而「谁能应用变更」是需求内容的写权限，厂商不能自己
+     * 批准自己的变更。这里必须在预置层显式 DENY，路由表的动作规则才有意义。</p>
      */
     private static final Map<String, Set<String>> ACTION_DENY_OVERRIDES = Map.of(
             "VENDOR_PM", Set.of(
@@ -73,7 +78,8 @@ public class RbacSeeder {
                     "task.action.create", "task.action.assign",
                     "task.action.update", "task.action.close",
                     "sprint.action.create", "sprint.action.close",
-                    "test.action.case_edit"));
+                    "test.action.case_edit",
+                    "req.action.change_request", "req.action.change_apply"));
 
     private final SysDb db;
 

@@ -216,10 +216,11 @@ class WbsEstimateGateTest {
                                        NotificationWriter notifications) {
         ObjectProvider<WbsEstimateService> gateProvider = provider(estimates);
         // 标签端口传 null：本测试只关心人天门，tagsOf(null 端口) 返回空表（见 RequirementService 注释）。
+        // r40：变更单的版本关联端口在 PUT 收口里才用到，本测试不覆盖，传 null provider。
         return new RequirementService(repository,
                 mock(RequirementDomainRelRepository.class), machine, mock(CodeGenerator.class),
                 audit, notifications, provider(null), provider(null),
-                mock(JdbcTemplate.class), ALLOW_ALL, gateProvider, null);
+                mock(JdbcTemplate.class), ALLOW_ALL, gateProvider, null, null);
     }
 
     private void given(ApprovalInstance instance) {

@@ -46,6 +46,8 @@ export type StatusKind =
   | 'caseReviewConclusion'
   | 'wikiVisibility'
   | 'mrReviewState'
+  // r40 需求变更单（第 6 类审批单）：APPROVED 只表示「审批通过」，文案见 CHANGE_STATUS
+  | 'reqChange'
   // M9 分析域回显（TECHNICAL §5）：与服务端标签注册表 AnalyticsLabels 逐字符串一致
   | 'reqType'
   | 'severity'
@@ -345,6 +347,26 @@ const PRIORITY_DICT: Record<string, StatusMeta> = Object.fromEntries(
   Object.entries(PRIORITY).map(([code, item]) => [code, { label: item.label, tone: item.tone }]),
 )
 
+/**
+ * r40 变更单状态（TECHNICAL §11.2 / DESIGN §4.1）。
+ * `APPROVED` 的标签必须是「已通过 · 待应用」：审批通过 ≠ 已生效，全站不得出现「已生效」。
+ */
+export const CHANGE_STATUS: Record<string, StatusMeta> = {
+  PENDING: { label: '待审批', tone: 'warning' },
+  APPROVED: { label: '已通过 · 待应用', tone: 'primary' },
+  APPLIED: { label: '已应用', tone: 'success' },
+  REJECTED: { label: '已驳回', tone: 'danger' },
+  WITHDRAWN: { label: '已撤回', tone: 'neutral' },
+}
+
+/** r40 变更单类型：一次变更只改一类字段（白名单见 views/req/change.ts） */
+export const CHANGE_TYPE: Record<string, string> = {
+  CONTENT: '内容',
+  DAYS: '人天',
+  RELEASE: '版本',
+  PARENT: '父需求',
+}
+
 const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   requirement: REQUIREMENT,
   defect: DEFECT,
@@ -375,6 +397,8 @@ const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   caseReviewConclusion: CASE_REVIEW_CONCLUSION,
   wikiVisibility: WIKI_VISIBILITY,
   mrReviewState: MR_REVIEW_STATE,
+  // r40 变更单状态（PENDING/APPROVED/APPLIED/REJECTED/WITHDRAWN）
+  reqChange: CHANGE_STATUS,
   // 分析域取值回显（TECHNICAL §5）：三族都必须与服务端注册表逐字符串相等
   reqType: REQ_TYPE,
   severity: SEVERITY,
