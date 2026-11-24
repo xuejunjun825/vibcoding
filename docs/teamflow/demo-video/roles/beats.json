@@ -1,0 +1,242 @@
+[
+  {
+    "who": "biz1",
+    "title": "进入需求池：只看本业务单元与自己相关的需求",
+    "sub": "域 × 厂商行级隔离：看不到别家厂商承接、也看不到别的业务单元",
+    "file": "biz1/biz1-01-a.png",
+    "after": "biz1/biz1-01-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "biz1",
+    "title": "点「提报需求」进入表单",
+    "sub": "业务方只写\"要什么、什么时候要\"，人天由研发后续评估",
+    "file": "biz1/biz1-02-a.png",
+    "after": "biz1/biz1-02-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "biz1",
+    "title": "选类型卡片 / 填标题 / 选业务域 / 选优先级",
+    "sub": "需求类型：业务需求（业务方提报，产品评审后拆解）",
+    "file": "biz1/biz1-03-a.png",
+    "after": "biz1/biz1-03-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "biz1",
+    "title": "提交 → 状态 SUBMITTED（已提报）",
+    "sub": "提交后进入状态机；下一步「提交审批」才真正进审批流",
+    "file": "biz1/biz1-04-a.png",
+    "after": "biz1/biz1-04-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "biz1",
+    "title": "提交审批（业务方能做的最后一步）",
+    "sub": "业务方只能 submit / withdraw，不能自己批——审批权在产品经理",
+    "file": "biz1/biz1-05-a.png",
+    "after": "biz1/biz1-05-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "pm",
+    "title": "审批中心「我的待办」：按单据类型聚合，一条待办=一个节点",
+    "sub": "待办里能直接同意/驳回；驳回必须填原因并进审计",
+    "file": "pm/pm-01-a.png",
+    "after": "pm/pm-01-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "pm",
+    "title": "同意提报 → APPROVING 结束，需求转「待评审」",
+    "sub": "审批结果通过回调驱动状态机；不是前端改状态",
+    "file": "pm/pm-02-a.png",
+    "after": "pm/pm-02-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "pm",
+    "title": "发起评审：生成 REQ_REVIEW 评审单",
+    "sub": "评审单是独立实例，评审通过后才允许入池（POOLED）",
+    "file": "pm/pm-03-a.png",
+    "after": "pm/pm-03-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "pm",
+    "title": "评审单待办 → 同意 → 自动入池 POOLED",
+    "sub": "评审通过后回调自动 review_pass；入池前不允许拆解",
+    "file": "pm/pm-04-a.png",
+    "after": "pm/pm-04-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "pm",
+    "title": "拆解产品需求：BUS → PDR（人天由研发后续评估）",
+    "sub": "父需求人天只读，由子需求汇总",
+    "file": "pm/pm-05-a.png",
+    "after": "pm/pm-05-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "pm",
+    "title": "排期：PDR → SCHEDULED（前置：工时评估已通过）",
+    "sub": "没过评估门点排期会被 409 ESTIMATE_NOT_APPROVED 拦住",
+    "file": "pm/pm-06-a.png",
+    "after": "pm/pm-06-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "pm",
+    "title": "拆研发需求：PDR → RD（父 PDR 必须已排期）",
+    "sub": "跨类型兄弟不同层：BUS→PDR→RD 三层父子",
+    "file": "pm/pm-07-a.png",
+    "after": "pm/pm-07-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "dev1",
+    "title": "开始开发 → IN_DEV（前置：RD 工时评估已通过）",
+    "sub": "评估单失效（人天改动 >±20%）会被重新拦回",
+    "file": "dev1/dev1-01-a.png",
+    "after": "dev1/dev1-01-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "dev1",
+    "title": "任务 TAB：需求拆成任务，DOING → DONE 回写完成率",
+    "sub": "实际人天 = 工时 ÷ 8；任务完成率进父需求进度",
+    "file": "dev1/dev1-02-a.png",
+    "after": "dev1/dev1-02-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "dev1",
+    "title": "提交测试 → PENDING_TEST",
+    "sub": "提测后测试同学执行用例并给结论；研发不能自证通过",
+    "file": "dev1/dev1-03-a.png",
+    "after": "dev1/dev1-03-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "qa1",
+    "title": "测试计划：挂版本、选用例集合、执行、出报告",
+    "sub": "计划未挂用例按「不满足门禁」处理，不能靠\"没测\"混过去",
+    "file": "qa1/qa1-01-a.png",
+    "after": "qa1/qa1-01-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "qa1",
+    "title": "测试结论「测试通过」→ TEST_PASSED",
+    "sub": "失败则一键转缺陷回研发修复，修完重测",
+    "file": "qa1/qa1-02-a.png",
+    "after": "qa1/qa1-02-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "dev1",
+    "title": "合入（merge）→ MERGED",
+    "sub": "合入前必须有测试通过结论，PRD 里 MR 链接用于追溯",
+    "file": "dev1/dev1-04-a.png",
+    "after": "dev1/dev1-04-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "dev1",
+    "title": "完成（finish）→ DONE，研发侧闭环",
+    "sub": "RD 完成后，父 PDR / BUS 的进度与人天自动汇总",
+    "file": "dev1/dev1-05-a.png",
+    "after": "dev1/dev1-05-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "pm",
+    "title": "验收通过 → ACCEPTED_CLOSED",
+    "sub": "验收后 PDR 关闭；BUS 仍需显式关闭（父需求不会自动关）",
+    "file": "pm/pm-08-a.png",
+    "after": "pm/pm-08-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "biz1",
+    "title": "业务方看到汇总人天后关闭业务需求",
+    "sub": "父需求人天/进度只读汇总；关闭是不可逆终态",
+    "file": "biz1/biz1-06-a.png",
+    "after": "biz1/biz1-06-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "qa1",
+    "title": "用例库：用例版本化，执行记录绑定当次版本",
+    "sub": "改用例会产生新版本，历史执行的结论不会\"跟着变\"",
+    "file": "qa1/qa1-03-a.png",
+    "after": "qa1/qa1-03-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "qa1",
+    "title": "缺陷列表：测试失败直接转缺陷回研发，修复后重测",
+    "sub": "缺陷与被测需求、用例、执行记录关联，可追溯",
+    "file": "qa1/qa1-04-a.png",
+    "after": "qa1/qa1-04-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "tl1",
+    "title": "提交工时评估：PMO/研发提人天，产品经理只审不提",
+    "sub": "没有通过评估单，排期与开始开发都会被 409 ESTIMATE_NOT_APPROVED 拦住",
+    "file": "tl1/tl1-03-a.png",
+    "after": "tl1/tl1-03-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "tl1",
+    "title": "转派承接厂商 VEN-A（原因进审计）",
+    "sub": "厂商账号此后只能看到本厂商承接的需求",
+    "file": "tl1/tl1-01-a.png",
+    "after": "tl1/tl1-01-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "tl1",
+    "title": "交付登记 → DELIVERED（记录交付物与时间）",
+    "sub": "交付是\"研发说做完了\"，验收是\"产品说符合预期\"，两步分开",
+    "file": "tl1/tl1-02-a.png",
+    "after": "tl1/tl1-02-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "tl1",
+    "title": "版本计划与发版审批：版本锁定后才能提交发布单",
+    "sub": "发版链四段（测试计划 → 报告三签 → 质量门 → 准入）由服务端判定",
+    "file": "tl1/tl1-04-a.png",
+    "after": "tl1/tl1-04-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "admin",
+    "title": "角色与权限：页面 / 动作 / 功能码 三层授权",
+    "sub": "改一个档位，下一次请求立即生效（权限快照 45s + 版本号）",
+    "file": "admin/admin-01-a.png",
+    "after": "admin/admin-01-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "admin",
+    "title": "自动化规则执行日志：命中 / 跳过原因 / 耗时",
+    "sub": "规则只能通知/指派/打标/发 Webhook，不能改状态、不能绕过审批",
+    "file": "admin/admin-02-a.png",
+    "after": "admin/admin-02-b.png",
+    "status": "ok"
+  },
+  {
+    "who": "admin",
+    "title": "质量门总览：报告三签 + 门禁快照",
+    "sub": "发版前 9 项准入，任何一项 FAIL 都提交不了发布单",
+    "file": "admin/admin-03-a.png",
+    "after": "admin/admin-03-b.png",
+    "status": "ok"
+  }
+]
