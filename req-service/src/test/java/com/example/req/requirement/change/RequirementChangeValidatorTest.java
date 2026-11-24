@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -30,6 +31,10 @@ import static org.mockito.Mockito.when;
  * 父需求连 CONTENT/RELEASE 都建不出单（r43 QA 发现的 P1：矩阵说 CHANGE_REQUIRED，
  * 前端画出入口，点下去 400 PARENT_DAYS_READONLY）。本测试锁住修复后的两侧语义：
  * 无关人天的变更必须放行，真正改人天仍必须拒。</p>
+ *
+ * <p>r44 追加三例：缺 {@code changeType}（null）/ 空串与空格 / 未知类型都必须 400
+ * {@code CHANGE_FIELD_NOT_ALLOWED} 而不是 500（不可变集合 {@code contains(null)} 抛 NPE），
+ * 且 detail 必须带 {@code allowedTypes} 四值，前端据此给出可选类型。</p>
  */
 class RequirementChangeValidatorTest {
 
@@ -115,6 +120,77 @@ class RequirementChangeValidatorTest {
 
         assertThat(after.get("title")).isEqualTo("库存预警定时任务 v2");
         assertThat(after.get("estimateDays")).isEqualTo(new BigDecimal("2.0"));
+    }
+
+    // ------------------------------------------------------- r44：缺类型 / 空白 / 未知类型
+
+    /**
+     * 漏传 changeType 是 400 契约错误，不是 NPE。
+     *
+     * <p>修复前 {@code TYPES.contains(null)} 抛 NPE 穿出控制器，GlobalExceptionHandler 刻意
+     * 不 catch → 默认 500 且无 code。这里同时锁「状态 400 + 稳定 code」，并断言 detail 恰好
+     * 两键：{@code changeType} 与 {@code field} 都是 null，被 {@code ApiException} 丢弃。</p>
+     */
+    @Test
+    void missingChangeTypeIs400NotNpe() {
+        RequirementEntity entity = parent("RD", "IN_DEV", null, null);
+
+        ApiException error = catchThrowableOfType(
+                () -> validator.validateCreate(entity, null, "标题写错了", Map.of("title", "新标题")),
+                ApiException.class);
+
+        assertThat(error).isNotNull();
+        assertThat(error.status()).isEqualTo(400);
+        assertThat(error.code()).isEqualTo("CHANGE_FIELD_NOT_ALLOWED");
+        assertThat(error.detail()).containsOnlyKeys("allowedFields", "allowedTypes");
+        assertThat(error.detail().get("allowedFields")).isEqualTo(List.of());
+        // 四参重载的两个相邻 List 实参换位不会编译报错：allowedFields 空 + allowedTypes 四值
+        // 同时断言，任一换位必红
+        assertThat(error.detail().get("allowedTypes"))
+                .isEqualTo(List.of("CONTENT", "DAYS", "PARENT", "RELEASE"));
+    }
+
+    /** 空串/空格一直是 400（走 equals 路径），但仍必须带 allowedTypes——与缺键同一形状契约。 */
+    @Test
+    void blankChangeTypeIs400() {
+        RequirementEntity entity = parent("RD", "IN_DEV", null, null);
+
+        for (String blank : List.of("", " ", "   ")) {
+            ApiException error = catchThrowableOfType(
+                    () -> validator.validateCreate(entity, blank, "标题写错了", Map.of("title", "新标题")),
+                    ApiException.class);
+
+            assertThat(error).as("changeType=<%s> 必须是契约 400", blank).isNotNull();
+            assertThat(error.status()).as("changeType=<%s>", blank).isEqualTo(400);
+            assertThat(error.code()).as("changeType=<%s>", blank).isEqualTo("CHANGE_FIELD_NOT_ALLOWED");
+            // 空白串非 null，因此 changeType 键保留原值（与缺键的两键形状可区分）
+            assertThat(error.detail()).as("changeType=<%s>", blank)
+                    .containsOnlyKeys("changeType", "allowedFields", "allowedTypes");
+            assertThat(error.detail().get("changeType")).as("changeType=<%s>", blank).isEqualTo(blank);
+            assertThat(error.detail().get("allowedFields")).as("changeType=<%s>", blank)
+                    .isEqualTo(List.of());
+            assertThat(error.detail().get("allowedTypes")).as("changeType=<%s>", blank)
+                    .isEqualTo(List.of("CONTENT", "DAYS", "PARENT", "RELEASE"));
+        }
+    }
+
+    /** 未知类型（非 null）同样带 allowedTypes，且 detail 保留原 changeType 供排查拼写。 */
+    @Test
+    void unknownChangeTypeDetailCarriesAllowedTypes() {
+        RequirementEntity entity = parent("RD", "IN_DEV", null, null);
+
+        ApiException error = catchThrowableOfType(
+                () -> validator.validateCreate(entity, "NOPE", "标题写错了", Map.of("title", "新标题")),
+                ApiException.class);
+
+        assertThat(error).isNotNull();
+        assertThat(error.status()).isEqualTo(400);
+        assertThat(error.code()).isEqualTo("CHANGE_FIELD_NOT_ALLOWED");
+        assertThat(error.detail()).hasSize(3).containsEntry("changeType", "NOPE")
+                .doesNotContainKey("field");
+        assertThat(error.detail().get("allowedFields")).isEqualTo(List.of());
+        assertThat(error.detail().get("allowedTypes"))
+                .isEqualTo(List.of("CONTENT", "DAYS", "PARENT", "RELEASE"));
     }
 
     /** RD 必须有父需求，且只允许 BUS → PDR → RD：给一条真实父链，父状态门/祖先环都走一遍。 */

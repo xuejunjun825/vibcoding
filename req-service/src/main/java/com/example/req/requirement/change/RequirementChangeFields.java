@@ -83,8 +83,15 @@ public final class RequirementChangeFields {
         return List.of();
     }
 
+    /**
+     * 变更类型是否为四种合法值之一。
+     *
+     * <p>全函数：{@code TYPES} 是 JDK 不可变集合，{@code contains(null)} 会抛 NPE 而不是返回
+     * false，因此必须先 null/blank 短路再判成员。刻意不做 trim/大小写归一——类型串来自前端
+     * 常量，归一化会掩盖调用方拼错。</p>
+     */
     public static boolean knownType(String changeType) {
-        return TYPES.contains(changeType);
+        return changeType != null && !changeType.isBlank() && TYPES.contains(changeType);
     }
 
     /** 需求当前 7 字段快照（LinkedHashMap → 落库 JSON 的键序稳定，对照表不用再排序）。 */

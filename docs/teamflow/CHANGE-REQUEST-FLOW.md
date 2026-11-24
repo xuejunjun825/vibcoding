@@ -2,7 +2,7 @@
 
 > 本文件是 [REQUIREMENT-FLOW.md](REQUIREMENT-FLOW.md) 的**子流程**：前者画「需求从提报到交付」的主干，本文件只画「需求已经不该被直接改，但业务确实要改」之后的那条路。
 > 依据：`docs/teamflow/20261123-r40-req-change-order/PRD.md`（AC-1…AC-21）、`TECHNICAL.md`（§4 接口契约、§5 事务、§9 计数、§12 门禁）、迁移 `req-service/src/main/resources/db/migration/V16__requirement_change.sql`。
-> 状态：r40 交付物。门禁 `make change-verify`（6 段 40 条）是本文档的唯一机器判据。
+> 状态：r40 交付物，r44 对齐（错误码表补 `allowedTypes` 与类型缺失行）。门禁 `make change-verify`（6 段 46 条）是本文档的唯一机器判据。
 
 ## 0. 一句话
 
@@ -55,7 +55,7 @@
 | `PARENT` | `parentId` | 换父；复验父链状态、防环、父子类型合法 |
 | `RELEASE` | `releaseId` | 目标版本；先删旧 `release_requirement` 成员再插新成员，再写 `release_id` |
 
-- 白名单由 `RequirementChangeFields.allowedFields(changeType)` **单点**判定；越界 400 `CHANGE_FIELD_NOT_ALLOWED`，detail 回传 `allowedFields`（前端可据此禁用字段，不需要在页面里再写一份白名单）。
+- 白名单由 `RequirementChangeFields.allowedFields(changeType)` **单点**判定；越界 400 `CHANGE_FIELD_NOT_ALLOWED`，detail 回传 `allowedFields`（前端可据此禁用字段，不需要在页面里再写一份白名单）。上游先过 `RequirementChangeFields.knownType(changeType)`：这是外部字符串与白名单之间**唯一**的边界判定，谓词对 `null`/空白恒 `false`（不抛），故漏传类型落「类型缺失」而不是 500；未知类型时 `allowedFields` 为空、`allowedTypes` 给合法值全集。
 - `before/after` **固定 7 个键**：`title`、`description`、`priority`、`expectedDeliveryDate`、`estimateDays`、`releaseId`、`parentId`。`before` 是创建时冻结的需求快照，**永不被后续操作覆盖**。
 - 与 `AuditService.auditSnapshot` **刻意分离**：后者不含 `description/parentId`，复用它当变更基线会丢字段，两边形状也会互相拖累。禁止合并成一个快照器。
 
@@ -113,7 +113,8 @@
 
 | HTTP | code | detail | 触发 |
 |---|---|---|---|
-| 400 | `CHANGE_FIELD_NOT_ALLOWED` | `{changeType, field, allowedFields[]}` | 字段不在该类型的白名单 |
+| 400 | `CHANGE_FIELD_NOT_ALLOWED` | `{changeType, field, allowedFields[]}` | 字段不在该类型的白名单（含 `patch` 为空）；`field=null` 时该键被丢弃，故空 patch 分支实际形状是 `{changeType, allowedFields}` |
+| 400 | `CHANGE_FIELD_NOT_ALLOWED` | `{changeType, allowedFields[], allowedTypes[]}` | 变更类型缺失、空白或未知（r44）：`allowedFields` 恒为空数组、`allowedTypes` 为四种合法值；**缺键与显式 `null` 等价**，此时 `changeType` 被丢弃，实际形状是 `{allowedFields, allowedTypes}` |
 | 400 | `REASON_REQUIRED` | `{maxLength}` | 原因空/超 500 字 |
 | 400 | `VALIDATION_FAILED` | `{field, reason}` | 无变化、目标版本已取消、父链非法、防环、日期非法 |
 | 409 | `CHANGE_REQUIRED` | `{changeEndpoint, fields[]}` | 晚期态 PUT 命中四类字段 |
@@ -121,6 +122,10 @@
 | 409 | `CHANGE_ALREADY_APPLIED` | `{appliedAt}` | 同单第二次 apply |
 | 409 | `CHANGE_CONFLICT` | `{field, expected, actual, retryable?}` | apply 时需求字段已不是本单 `before` 的值（别人先改了）；**整事务回滚，零写** |
 | 403 | `FORBIDDEN` | `{action, allowedActions[]}` | 厂商越权（`VENDOR_PM` 显式 DENY）或页面不允许 |
+
+- **detail 里值为 `null` 的键会被丢弃**（`ApiException.copyWithoutNulls`），所以「键在不在」不是契约：断言 `code` 与存在的键即可，不要断言 `changeType`/`field` 恒有。
+- **本表所有错误一律 4xx 且 body 带 `code`**：校验失败不得用 500 表达（r44 起 `change-verify` S2 有通用断言，5xx 或空 `code` 即红）。
+- 类型判定**单点**在 `RequirementChangeFields.knownType(changeType)`：它是全函数，对 `null`/空白恒 `false`（不抛），对 `CONTENT`/`DAYS`/`PARENT`/`RELEASE` 恒 `true`；**刻意不做 trim/大小写归一**（`" content "` 仍按未知类型 400，避免掩盖调用方拼错）。
 
 ## 9. apply 的 12 步（单事务）
 
@@ -165,5 +170,5 @@
 | 白名单/早期态/快照/精度单点 | `req-service/src/main/java/com/example/req/requirement/change/RequirementChangeFields.java` |
 | 动作码 | `platform-contract/.../ActionRegistry.java`（`req.action.change_request` / `req.action.change_apply`）、`PermissionRouteTable`（5 条路由规则） |
 | 错误码 | `req-service/.../requirement/RequirementErrors.java` |
-| 机器判据 | `make change-verify`（`scripts/change-verify.sh`，S1–S6 共 40 条；`--static-only` 免栈，`--twice` 连跑两次） |
+| 机器判据 | `make change-verify`（`scripts/change-verify.sh`，S1–S6 共 46 条；`--static-only` 免栈，`--twice` 连跑两次） |
 | 演示 | 需求详情 Tab「变更」→ 发起 → 审批中心通过 → 详情页应用 → 审计回查 |
