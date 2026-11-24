@@ -1,0 +1,209 @@
+[
+  {
+    "i": 1,
+    "role": "业务方 biz1",
+    "title": "① 业务方在需求池点「提报需求」",
+    "sub": "业务方只能提报与撤回，不能自己审批",
+    "file": "01-a.png",
+    "after": "01-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 2,
+    "role": "业务方 biz1",
+    "title": "② 选类型、填标题、选业务域与优先级",
+    "sub": "需求类型是卡片；业务域来自字典（ORD · 订单管理）",
+    "file": "02-a.png",
+    "after": "02-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 3,
+    "role": "业务方 biz1",
+    "title": "③ 提交后状态「已提报」，内容仍可改",
+    "sub": "提交审批后业务方只能撤回",
+    "file": "03-a.png",
+    "after": "03-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 4,
+    "role": "业务方 biz1",
+    "title": "④ 点「提交审批」→ 审批中",
+    "sub": "右侧审批进度显示当前卡在「产品评审」",
+    "file": "04-a.png",
+    "after": "04-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 5,
+    "role": "产品经理 pm",
+    "title": "⑤ 切到产品经理：审批中心出现待办",
+    "sub": "谁能批由审批流决定",
+    "file": "05-a.png",
+    "after": "05-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 6,
+    "role": "产品经理 pm",
+    "title": "⑥ 点「同意」，确认后单据流转",
+    "sub": "驳回必须填原因，写进流转记录与审计",
+    "file": "06-a.png",
+    "after": "06-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 7,
+    "role": "产品经理 pm",
+    "title": "⑦ 待评审：产品经理发起评审",
+    "sub": "评审是独立单据（REQ_REVIEW），通过后自动入池",
+    "file": "07-a.png",
+    "after": "07-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 8,
+    "role": "产品经理 pm",
+    "title": "⑧ 同意评审单 → 自动入池",
+    "sub": "评审通过由回调推进 POOLED，无需再手动点",
+    "file": "08-a.png",
+    "after": "08-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 9,
+    "role": "产品经理 pm",
+    "title": "⑨ 已入池（POOLED）",
+    "sub": "未入池时「拆解子需求」是禁用的",
+    "file": "09-a.png",
+    "after": "09-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 10,
+    "role": "产品经理 pm",
+    "title": "⑩ 业务需求拆成产品需求（PDR）",
+    "sub": "父需求必须 POOLED 才能拆（409 PARENT_NOT_POOLED）",
+    "file": "10-a.png",
+    "after": "10-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 11,
+    "role": "项目域负责人 tl1",
+    "title": "⑪ PMO/研发提交工时评估（6.5 天）",
+    "sub": "提交评估要 req:deliver：产品经理只审、不提",
+    "file": "11-a.png",
+    "after": "11-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 12,
+    "role": "产品经理 pm",
+    "title": "⑫ 产品经理同意工时评估",
+    "sub": "评估未通过时，排期与开始开发都会被 409 拦住",
+    "file": "12-a.png",
+    "after": "12-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 13,
+    "role": "产品经理 pm",
+    "title": "⑬ 排期 → 产品需求进入 SCHEDULED",
+    "sub": "排期后版本计划才能挂这条需求",
+    "file": "13-a.png",
+    "after": "13-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 14,
+    "role": "产品经理 pm",
+    "title": "⑭ 再拆成研发需求（RD），预估 6.5 人天",
+    "sub": "RD 是研发任务、工时与提测的载体",
+    "file": "14-a.png",
+    "after": "14-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 15,
+    "role": "项目域负责人 tl1",
+    "title": "⑮ 转派承接厂商 VEN-A（原因写审计）",
+    "sub": "厂商账号只能看到本厂商承接的需求",
+    "file": "15-a.png",
+    "after": "15-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 16,
+    "role": "研发工程师 dev1",
+    "title": "⑯ 研发点「开始开发」→ IN_DEV",
+    "sub": "评估已通过，start_dev 才被放行",
+    "file": "16-a.png",
+    "after": "16-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 17,
+    "role": "研发工程师 dev1",
+    "title": "⑰ 任务拆到看板：DOING → DONE",
+    "sub": "任务完成回写需求完成率；实际人天 = 工时 ÷ 8",
+    "file": "17-a.png",
+    "after": "17-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 18,
+    "role": "研发工程师 dev1",
+    "title": "⑱ 提测 → PENDING_TEST",
+    "sub": "提测后测试同学才能执行用例并给结论",
+    "file": "18-a.png",
+    "after": "18-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 19,
+    "role": "测试工程师 qa1",
+    "title": "⑲ 测试执行通过（TEST_PASSED）",
+    "sub": "失败会一键转缺陷回研发修复",
+    "file": "19-a.png",
+    "after": "19-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 20,
+    "role": "研发工程师 dev1",
+    "title": "⑳ 合入 → 完成（RD DONE）",
+    "sub": "TEST_PASSED → MERGED → DONE",
+    "file": "20-a.png",
+    "after": "20-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 21,
+    "role": "项目域负责人 tl1",
+    "title": "㉑ 交付登记 → 产品需求 DELIVERED",
+    "sub": "交付记录写审计，与后续验收关联",
+    "file": "21-a.png",
+    "after": "21-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 22,
+    "role": "产品经理 pm",
+    "title": "㉒ 产品经理验收 → ACCEPTED_CLOSED",
+    "sub": "验收后需求闭环，父需求人天/进度汇总落定",
+    "file": "22-a.png",
+    "after": "22-b.png",
+    "status": "ok"
+  },
+  {
+    "i": 23,
+    "role": "业务方 biz1",
+    "title": "㉓ 业务方看汇总人天，关闭业务需求",
+    "sub": "父需求人天/进度由子需求实时汇总",
+    "file": "23-a.png",
+    "after": "23-b.png",
+    "status": "ok"
+  }
+]

@@ -1,0 +1,430 @@
+[
+ {
+  "kind": "title",
+  "h1": "一条需求的完整旅程",
+  "p": "从业务方提报到验收关闭 · 6 个角色真实操作",
+  "tag": "24 步 · 全流程在线",
+  "dur": 4.5
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/01-a.png",
+  "role": "业务方 biz1",
+  "chap": "第 1 步",
+  "text": "业务方在需求池点「提报需求」",
+  "sub": "业务方只能提报与撤回，不能自己审批",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/01-b.png",
+  "role": "业务方 biz1",
+  "chap": "第 1 步 · 结果",
+  "text": "业务方在需求池点「提报需求」",
+  "sub": "业务方只能提报与撤回，不能自己审批",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/02-a.png",
+  "role": "业务方 biz1",
+  "chap": "第 2 步",
+  "text": "选类型、填标题、选业务域与优先级",
+  "sub": "需求类型是卡片；业务域来自字典（ORD · 订单管理）",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/02-b.png",
+  "role": "业务方 biz1",
+  "chap": "第 2 步 · 结果",
+  "text": "选类型、填标题、选业务域与优先级",
+  "sub": "需求类型是卡片；业务域来自字典（ORD · 订单管理）",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/03-a.png",
+  "role": "业务方 biz1",
+  "chap": "第 3 步",
+  "text": "提交后状态「已提报」，内容仍可改",
+  "sub": "提交审批后业务方只能撤回",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/03-b.png",
+  "role": "业务方 biz1",
+  "chap": "第 3 步 · 结果",
+  "text": "提交后状态「已提报」，内容仍可改",
+  "sub": "提交审批后业务方只能撤回",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/04-a.png",
+  "role": "业务方 biz1",
+  "chap": "第 4 步",
+  "text": "点「提交审批」→ 审批中",
+  "sub": "右侧审批进度显示当前卡在「产品评审」",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/04-b.png",
+  "role": "业务方 biz1",
+  "chap": "第 4 步 · 结果",
+  "text": "点「提交审批」→ 审批中",
+  "sub": "右侧审批进度显示当前卡在「产品评审」",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/05-a.png",
+  "role": "产品经理 pm",
+  "chap": "第 5 步",
+  "text": "切到产品经理：审批中心出现待办",
+  "sub": "谁能批由审批流决定",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/05-b.png",
+  "role": "产品经理 pm",
+  "chap": "第 5 步 · 结果",
+  "text": "切到产品经理：审批中心出现待办",
+  "sub": "谁能批由审批流决定",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/06-a.png",
+  "role": "产品经理 pm",
+  "chap": "第 6 步",
+  "text": "点「同意」，确认后单据流转",
+  "sub": "驳回必须填原因，写进流转记录与审计",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/06-b.png",
+  "role": "产品经理 pm",
+  "chap": "第 6 步 · 结果",
+  "text": "点「同意」，确认后单据流转",
+  "sub": "驳回必须填原因，写进流转记录与审计",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/07-a.png",
+  "role": "产品经理 pm",
+  "chap": "第 7 步",
+  "text": "待评审：产品经理发起评审",
+  "sub": "评审是独立单据（REQ_REVIEW），通过后自动入池",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/07-b.png",
+  "role": "产品经理 pm",
+  "chap": "第 7 步 · 结果",
+  "text": "待评审：产品经理发起评审",
+  "sub": "评审是独立单据（REQ_REVIEW），通过后自动入池",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/08-a.png",
+  "role": "产品经理 pm",
+  "chap": "第 8 步",
+  "text": "同意评审单 → 自动入池",
+  "sub": "评审通过由回调推进 POOLED，无需再手动点",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/08-b.png",
+  "role": "产品经理 pm",
+  "chap": "第 8 步 · 结果",
+  "text": "同意评审单 → 自动入池",
+  "sub": "评审通过由回调推进 POOLED，无需再手动点",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/09-a.png",
+  "role": "产品经理 pm",
+  "chap": "第 9 步",
+  "text": "已入池（POOLED）",
+  "sub": "未入池时「拆解子需求」是禁用的",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/09-b.png",
+  "role": "产品经理 pm",
+  "chap": "第 9 步 · 结果",
+  "text": "已入池（POOLED）",
+  "sub": "未入池时「拆解子需求」是禁用的",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/10-a.png",
+  "role": "产品经理 pm",
+  "chap": "第 10 步",
+  "text": "业务需求拆成产品需求（PDR）",
+  "sub": "父需求必须 POOLED 才能拆（409 PARENT_NOT_POOLED）",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/10-b.png",
+  "role": "产品经理 pm",
+  "chap": "第 10 步 · 结果",
+  "text": "业务需求拆成产品需求（PDR）",
+  "sub": "父需求必须 POOLED 才能拆（409 PARENT_NOT_POOLED）",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/11-a.png",
+  "role": "项目域负责人 tl1",
+  "chap": "第 11 步",
+  "text": "PMO/研发提交工时评估（6.5 天）",
+  "sub": "提交评估要 req:deliver：产品经理只审、不提",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/11-b.png",
+  "role": "项目域负责人 tl1",
+  "chap": "第 11 步 · 结果",
+  "text": "PMO/研发提交工时评估（6.5 天）",
+  "sub": "提交评估要 req:deliver：产品经理只审、不提",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/12-a.png",
+  "role": "产品经理 pm",
+  "chap": "第 12 步",
+  "text": "产品经理同意工时评估",
+  "sub": "评估未通过时，排期与开始开发都会被 409 拦住",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/12-b.png",
+  "role": "产品经理 pm",
+  "chap": "第 12 步 · 结果",
+  "text": "产品经理同意工时评估",
+  "sub": "评估未通过时，排期与开始开发都会被 409 拦住",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/13-a.png",
+  "role": "产品经理 pm",
+  "chap": "第 13 步",
+  "text": "排期 → 产品需求进入 SCHEDULED",
+  "sub": "排期后版本计划才能挂这条需求",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/13-b.png",
+  "role": "产品经理 pm",
+  "chap": "第 13 步 · 结果",
+  "text": "排期 → 产品需求进入 SCHEDULED",
+  "sub": "排期后版本计划才能挂这条需求",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/14-a.png",
+  "role": "产品经理 pm",
+  "chap": "第 14 步",
+  "text": "再拆成研发需求（RD），预估 6.5 人天",
+  "sub": "RD 是研发任务、工时与提测的载体",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/14-b.png",
+  "role": "产品经理 pm",
+  "chap": "第 14 步 · 结果",
+  "text": "再拆成研发需求（RD），预估 6.5 人天",
+  "sub": "RD 是研发任务、工时与提测的载体",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/15-a.png",
+  "role": "项目域负责人 tl1",
+  "chap": "第 15 步",
+  "text": "转派承接厂商 VEN-A（原因写审计）",
+  "sub": "厂商账号只能看到本厂商承接的需求",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/15-b.png",
+  "role": "项目域负责人 tl1",
+  "chap": "第 15 步 · 结果",
+  "text": "转派承接厂商 VEN-A（原因写审计）",
+  "sub": "厂商账号只能看到本厂商承接的需求",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/16-a.png",
+  "role": "研发工程师 dev1",
+  "chap": "第 16 步",
+  "text": "研发点「开始开发」→ IN_DEV",
+  "sub": "评估已通过，start_dev 才被放行",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/16-b.png",
+  "role": "研发工程师 dev1",
+  "chap": "第 16 步 · 结果",
+  "text": "研发点「开始开发」→ IN_DEV",
+  "sub": "评估已通过，start_dev 才被放行",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/17-a.png",
+  "role": "研发工程师 dev1",
+  "chap": "第 17 步",
+  "text": "任务拆到看板：DOING → DONE",
+  "sub": "任务完成回写需求完成率；实际人天 = 工时 ÷ 8",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/17-b.png",
+  "role": "研发工程师 dev1",
+  "chap": "第 17 步 · 结果",
+  "text": "任务拆到看板：DOING → DONE",
+  "sub": "任务完成回写需求完成率；实际人天 = 工时 ÷ 8",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/18-a.png",
+  "role": "研发工程师 dev1",
+  "chap": "第 18 步",
+  "text": "提测 → PENDING_TEST",
+  "sub": "提测后测试同学才能执行用例并给结论",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/18-b.png",
+  "role": "研发工程师 dev1",
+  "chap": "第 18 步 · 结果",
+  "text": "提测 → PENDING_TEST",
+  "sub": "提测后测试同学才能执行用例并给结论",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/19-a.png",
+  "role": "测试工程师 qa1",
+  "chap": "第 19 步",
+  "text": "测试执行通过（TEST_PASSED）",
+  "sub": "失败会一键转缺陷回研发修复",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/19-b.png",
+  "role": "测试工程师 qa1",
+  "chap": "第 19 步 · 结果",
+  "text": "测试执行通过（TEST_PASSED）",
+  "sub": "失败会一键转缺陷回研发修复",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/20-a.png",
+  "role": "研发工程师 dev1",
+  "chap": "第 20 步",
+  "text": "合入 → 完成（RD DONE）",
+  "sub": "TEST_PASSED → MERGED → DONE",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/20-b.png",
+  "role": "研发工程师 dev1",
+  "chap": "第 20 步 · 结果",
+  "text": "合入 → 完成（RD DONE）",
+  "sub": "TEST_PASSED → MERGED → DONE",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/21-a.png",
+  "role": "项目域负责人 tl1",
+  "chap": "第 21 步",
+  "text": "交付登记 → 产品需求 DELIVERED",
+  "sub": "交付记录写审计，与后续验收关联",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/21-b.png",
+  "role": "项目域负责人 tl1",
+  "chap": "第 21 步 · 结果",
+  "text": "交付登记 → 产品需求 DELIVERED",
+  "sub": "交付记录写审计，与后续验收关联",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/22-a.png",
+  "role": "产品经理 pm",
+  "chap": "第 22 步",
+  "text": "产品经理验收 → ACCEPTED_CLOSED",
+  "sub": "验收后需求闭环，父需求人天/进度汇总落定",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/22-b.png",
+  "role": "产品经理 pm",
+  "chap": "第 22 步 · 结果",
+  "text": "产品经理验收 → ACCEPTED_CLOSED",
+  "sub": "验收后需求闭环，父需求人天/进度汇总落定",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/23-a.png",
+  "role": "业务方 biz1",
+  "chap": "第 23 步",
+  "text": "业务方看汇总人天，关闭业务需求",
+  "sub": "父需求人天/进度由子需求实时汇总",
+  "dur": 2.2
+ },
+ {
+  "kind": "stage",
+  "img": "/tmp/rec/long/frames/23-b.png",
+  "role": "业务方 biz1",
+  "chap": "第 23 步 · 结果",
+  "text": "业务方看汇总人天，关闭业务需求",
+  "sub": "父需求人天/进度由子需求实时汇总",
+  "dur": 2.2
+ },
+ {
+  "kind": "title",
+  "h1": "需求闭环：CLOSED",
+  "p": "父需求人天与进度由子需求实时汇总",
+  "tag": "业务方 · 产品经理 · PMO · 研发 · 测试",
+  "dur": 4.5
+ }
+]
