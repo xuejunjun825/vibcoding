@@ -16,6 +16,9 @@
 #      assignOwner 只允许 AutomationOwnerAssigner 一处调用、限流键只能是 tenantId（TECHNICAL §5.4）
 #   L22 需求视图必带标签（r39 Q-1）：View 构造器无默认空标签、无把 tags 写死的构造点，
 #      详情与版本详情都经 RequirementTagQuery 显式查标签（列表与详情同源，AC-14 §9.2）
+#   L23 详情页辅助探测必须 silentForbidden（r45）：审批实例 / 评估审批 / 审批待办探测的
+#      调用点数必须等于带 `{ silentForbidden: true }` 的数量，且页面不得裸调 http；配套负向
+#      自检（含裸调用的夹具必须判红），否则「审批 403」会把整页替换成 403 页（AC-9）
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/lib.sh"
 
 TOTAL=0
@@ -682,6 +685,57 @@ requirement_view_carries_tags() {
     return "$bad"
 }
 
+# ---- L23 详情页辅助探测必须 silentForbidden（r45）----
+# 缺陷类（不是那一个点位）：详情页把「审批实例 / 评估审批 / 审批待办探测」当辅助信息加载，
+# 却没在同一次 http 调用上声明 silentForbidden；client.ts 对任何 403 先 navigate('/403')
+# 再抛错，于是非审批参与人（dev1/qa1/vendor1）一打开详情就被整页替换。
+# 三个判据：
+#   (a) getApprovalInstance( / listApprovalMine( 的调用点数 == 带 { silentForbidden: true } 的数量；
+#   (b) 页面不得绕过 api 层裸调 http.get/http.post（否则 api 层的声明点被旁路）；
+#   (c) 负向自检：同一套计数逻辑喂「含裸调用」的夹具必须判红——否则这条断言只会 grep 字符串。
+# 约束：调用点必须写在同一行；纯注释行（// * /*）在计数前被剔除，注释里提到函数名不算调用。
+_page_optional_probe_scan() {
+    local f="$1" code call silent bad=0
+    [[ -f "$f" ]] || { echo "文件不存在: $f"; return 1; }
+    code="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$f" 2>/dev/null || true)"
+    call="$(printf '%s\n' "$code" | grep -oE 'getApprovalInstance\(' | wc -l | tr -d ' ' || true)"
+    silent="$(printf '%s\n' "$code" | grep -oE 'getApprovalInstance\([^)]*\{[[:space:]]*silentForbidden:[[:space:]]*true' | wc -l | tr -d ' ' || true)"
+    if [[ "$call" != "$silent" ]]; then
+        echo "getApprovalInstance 裸调用：调用 ${call} 处，带 silentForbidden 仅 ${silent} 处"
+        printf '%s\n' "$code" | grep -nE 'getApprovalInstance\(' | sed 's/^/    /'
+        bad=1
+    fi
+    call="$(printf '%s\n' "$code" | grep -oE 'listApprovalMine\(' | wc -l | tr -d ' ' || true)"
+    silent="$(printf '%s\n' "$code" | grep -oE 'listApprovalMine\([^)]*\{[[:space:]]*silentForbidden:[[:space:]]*true' | wc -l | tr -d ' ' || true)"
+    if [[ "$call" != "$silent" ]]; then
+        echo "listApprovalMine 裸调用：调用 ${call} 处，带 silentForbidden 仅 ${silent} 处"
+        printf '%s\n' "$code" | grep -nE 'listApprovalMine\(' | sed 's/^/    /'
+        bad=1
+    fi
+    if printf '%s\n' "$code" | grep -qE '(^|[^.[:alnum:]_])http\.(get|post|put|patch|del)(<|\()'; then
+        echo "详情页出现裸 http 调用（必须走 api 层，否则 silentForbidden 无法统一声明）："
+        printf '%s\n' "$code" | grep -nE '(^|[^.[:alnum:]_])http\.(get|post|put|patch|del)(<|\()' | sed 's/^/    /'
+        bad=1
+    fi
+    return "$bad"
+}
+
+detail_optional_probes_are_silent() {
+    local view="$ROOT/web/src/views/req/RequirementDetailView.vue"
+    local bad=0 tmp
+    _page_optional_probe_scan "$view" || bad=1
+    tmp="$(mktemp "${TMPDIR:-/tmp}/l23-negative.XXXXXX")" || { echo "无法创建负向夹具"; return 1; }
+    printf '%s\n' \
+        'const a = await getApprovalInstance(1)' \
+        'const b = await listApprovalMine({ page: 1 })' > "$tmp"
+    if _page_optional_probe_scan "$tmp" >/dev/null 2>&1; then
+        echo "负向自检失败：含裸调用的夹具未被判红（L23 退化成 grep 字符串）"
+        bad=1
+    fi
+    rm -f "$tmp"
+    return "$bad"
+}
+
 log "静态门禁：脚本语法 / 变量插值 / 单点实现 / 错误提示 / 文档一致性"
 run_check "L1 所有脚本 bash -n 语法通过且 source 目标存在" syntax_and_sources_ok
 run_check "L2 无 \$VAR 紧跟全角标点（防 set -u 吞变量名）" no_bare_var_before_wide_char
@@ -707,6 +761,7 @@ run_check "L19 授权判定只有 PermissionService 一个入口（无直连常�
 run_check "L20 前端不复刻矩阵 + 权限总览只读" readonly_permission_overview
 run_check "L21 automation 包边界：不改状态/审批/发布单、不拼隔离列、禁动作码只在拒绝名单、assignOwner 单点、限流只按租户" automation_boundary
 run_check "L22 需求视图必带标签：无默认空标签构造器/重载，详情与版本详情都显式查标签" requirement_view_carries_tags
+run_check "L23 详情页辅助探测一律 silentForbidden（裸调用计数==带 silent 计数 + 无裸 http + 负向自检必红）" detail_optional_probes_are_silent
 
 if (( FAILED > 0 )); then
     err "lint 失败 ${FAILED}/${TOTAL} 项：按上面的行号修正后重跑 make lint"

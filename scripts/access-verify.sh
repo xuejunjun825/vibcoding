@@ -1,29 +1,30 @@
 #!/usr/bin/env bash
 # access-verify.sh — 角色×页面×菜单准入验收（20261110-r7 P0 修复的门禁；r13 扩到 143，r17 到 148，
 #                     r24 加入 VENDOR_PM 窄例外后到 165，r25 加入写按钮门禁 a6 后到 190，
-#                     r26 加入工时评估门 a7 后到 206）
+#                     r26 加入工时评估门 a7 后到 206，r45 加入详情页审批探测静默 a8 后到 219）
 #
-# 八段按关注点分段，失败能定位到「字典契约 / 隔离 / 页面矩阵 / 导航声明 / 菜单可见集 / 能力探测 / 写按钮 / 评估门」：
+# 九段按关注点分段，失败能定位到「字典契约 / 隔离 / 页面矩阵 / 导航声明 / 菜单可见集 / 能力探测 / 写按钮 / 评估门 / 详情页审批探测」：
 #   a0 字典契约（29）· a1 租户与厂商隔离（8）· a2 9 页 × 8 角色精确状态码（73）
 #   a3 导航静态审计（11，R11 = internalOnly 窄例外同源）· a4 8 角色真实权限 → 菜单可见集（19）
 #   a5 可选能力探测：8 账号 × 2 端点 + 调用点静态审计 + 审计器自检 + 动作授权单点真相（25）
 #   a6 写按钮门禁：写入口形态（disabled + 需要权限 + handler 兜底）14 + 403 降级 5 + vpm1 运行时 403 4 + 自检 2（25）
 #   a7 工时评估门：文案单一来源 + 六态 gateWord 4 + 渲染看权限/禁用看门 3 + 审批中心标签 1 + DTO 对齐 1 + 动态事件 1 + 运行时 6（16）
+#   a8 详情页审批探测：静态 4（api 签名 / 调用点静默 / 403 收敛+文案唯一 / 注释锚点）+ 运行时 6（三角色各可见需求与详情 200）+ 负向 3（非参与实例仍 403）（13）
 # 聚合器只做编排：各段自己打印断言明细并写一行计数到 ${ACCESS_COUNTS}，
-# 这里求和后做 PASS==TOTAL、八段齐全、总数 ≥206（r26 下限）、分段下限四道守卫。
-# 注：206 = 190（r25）+ 16（a7，含 D-04 动态事件断言）；a3 的 9→11 是 R11 新增 + R10 基线，a4 的 16→19 是 vpm1 三条断言。
-# 绝不为凑数字去删 a5/a6/a7 的断言（AC-17 明令不得删项放宽）。
+# 这里求和后做 PASS==TOTAL、九段齐全、总数 ≥219（r45 下限）、分段下限四道守卫。
+# 注：219 = 206（r26）+ 13（a8）；a3 的 9→11 是 R11 新增 + R10 基线，a4 的 16→19 是 vpm1 三条断言。
+# 绝不为凑数字去删 a5/a6/a7/a8 的断言（AC-17 明令不得删项放宽）。
 # 分段下限比总数更早定位「哪一段掉了几条」；只对本次实际跑过的段生效（调试子集不误伤）。
 #
 # 用法：
-#   ./scripts/access-verify.sh            # 全部八段（需 make platform-up + platform-seed）
+#   ./scripts/access-verify.sh            # 全部九段（需 make platform-up + platform-seed）
 #   ./scripts/access-verify.sh a0 a2      # 只跑指定段（调试用，仍要求栈就绪）
 set -uo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 ACCESS_DIR="$ROOT/scripts/tests/access"
-ALL_SEGMENTS=(a0 a1 a2 a3 a4 a5 a6 a7)
+ALL_SEGMENTS=(a0 a1 a2 a3 a4 a5 a6 a7 a8)
 
 SELECTED=()
 if (( $# > 0 )); then
@@ -42,7 +43,7 @@ fi
 segment_cmd() {
     case "$1" in
         a0|a1|a2) printf 'bash %s/%s-*.sh' "$ACCESS_DIR" "$1" ;;
-        a3|a4|a5|a6|a7) printf 'node %s/%s-*.mjs' "$ACCESS_DIR" "$1" ;;
+        a3|a4|a5|a6|a7|a8) printf 'node %s/%s-*.mjs' "$ACCESS_DIR" "$1" ;;
     esac
 }
 segment_file() {
@@ -55,6 +56,7 @@ segment_file() {
         a5) printf '%s/a5-capability-probe.mjs' "$ACCESS_DIR" ;;
         a6) printf '%s/a6-write-button-gate.mjs' "$ACCESS_DIR" ;;
         a7) printf '%s/a7-estimate-gate.mjs' "$ACCESS_DIR" ;;
+        a8) printf '%s/a8-detail-optional-probe.mjs' "$ACCESS_DIR" ;;
     esac
 }
 
@@ -72,6 +74,8 @@ segment_min() {
         a6) printf 24 ;;
         # a7 静态 9 条是硬底线（运行时 6 条依赖栈与演示夹具）；下限 12 = 静态 9 + 运行时至少 3
         a7) printf 12 ;;
+        # a8 静态 4 条是硬底线；13 = 静态 4 + 运行时 3 角色 ×2 + 负向 3（缺夹具也判红，不接受退化）
+        a8) printf 13 ;;
         *)  printf 0 ;;
     esac
 }
@@ -108,7 +112,7 @@ for seg in "${SELECTED[@]}"; do
     [[ -f "$file" ]] || { err "缺少脚本: ${file}"; FAILED_SEGMENTS+=("${seg}(缺失)"); continue; }
     printf '\n\033[1;35m────────── %s ──────────\033[0m\n' "$(basename "$file")"
     start=$(date +%s)
-    if [[ "$seg" == a3 || "$seg" == a4 || "$seg" == a5 || "$seg" == a6 || "$seg" == a7 ]]; then
+    if [[ "$seg" == a3 || "$seg" == a4 || "$seg" == a5 || "$seg" == a6 || "$seg" == a7 || "$seg" == a8 ]]; then
         node "$file"; rc=$?
     else
         bash "$file"; rc=$?
@@ -139,9 +143,9 @@ printf '\n'
 (( ${#MISSING[@]} == 0 )) || err "以下段没有产出计数（脚本中途失败）: ${MISSING[*]}"
 (( ${#FAILED_SEGMENTS[@]} == 0 )) || err "失败段: ${FAILED_SEGMENTS[*]}"
 
-# 206 条是「全量八段」的下限（r26：190 + a7 的 16）；调试子集（如 a0 a3）不适用，否则调试永远红
-if (( ${#SELECTED[@]} == ${#ALL_SEGMENTS[@]} && TOTAL < 206 )); then
-    err "断言总数 ${TOTAL} < 206（r26 下限）：有段没跑起来，或断言被删（a0-a7 一条都不许减少）"
+# 219 条是「全量九段」的下限（r45：206 + a8 的 13）；调试子集（如 a0 a3）不适用，否则调试永远红
+if (( ${#SELECTED[@]} == ${#ALL_SEGMENTS[@]} && TOTAL < 219 )); then
+    err "断言总数 ${TOTAL} < 219（r45 下限）：有段没跑起来，或断言被删（a0-a8 一条都不许减少）"
     exit 1
 fi
 if (( PASS != TOTAL )); then
@@ -152,4 +156,4 @@ if (( ${#MISSING[@]} > 0 || ${#FAILED_SEGMENTS[@]} > 0 )); then
     exit 1
 fi
 
-ok "角色×页面准入验收通过：${PASS}/${TOTAL} 项（字典契约 / 隔离 / 页面矩阵 / 导航声明 / 菜单可见集 / 能力探测 / 写按钮 / 估算门）"
+ok "角色×页面准入验收通过：${PASS}/${TOTAL} 项（字典契约 / 隔离 / 页面矩阵 / 导航声明 / 菜单可见集 / 能力探测 / 写按钮 / 估算门 / 详情页审批探测）"

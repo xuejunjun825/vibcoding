@@ -62,7 +62,7 @@ import { useDictStore } from '@/stores/dict'
 
 /**
  * P2 需求详情（7 tab）。动作区只认服务端 allowedActions（唯一真相，AC-3）：
- * 按钮不做本地权限二次过滤；403 就地 toast 并刷新详情同步按钮，不跳 /403；
+ * 按钮不做本地权限二次过滤；403 就地 toast 并刷新详情同步按钮，不跳全局 403 页；
  * 409 用常驻条展示，不弹 toast、不假装成功。
  */
 const route = useRoute()
@@ -79,6 +79,9 @@ const errorStatus = ref<number | undefined>()
 const approval = ref<ApprovalInstanceDetail | null>(null)
 const approvalLoading = ref(false)
 const approvalError = ref('')
+/** 403 = 无权看审批进度：页签内降级，绝不进 approvalError（那会渲染成"加载失败+重试"） */
+const approvalForbidden = ref(false)
+const estimateForbidden = ref(false)
 
 const TAB_KEYS = ['overview', 'children', 'tasks', 'testing', 'defects', 'approval', 'change', 'trace', 'integration', 'documents'] as const
 type TabKey = (typeof TAB_KEYS)[number]
@@ -255,7 +258,7 @@ const gateActionTip = computed(() => {
   return pinned.permitted ? estimateGateTip(estimateStatus.value) : `需要权限：req.action.${pinned.action}`
 })
 
-/** 被门钉住的按钮点击不产生任何请求、不改 URL、不落 /403 —— 只有提示可读。 */
+/** 被门钉住的按钮点击不产生任何请求、不改 URL、不落全局 403 页 —— 只有提示可读。 */
 function onPinnedClick(): void {
   return
 }
@@ -292,20 +295,23 @@ async function loadApproval(): Promise<void> {
   if (!detail.value) return
   approvalLoading.value = true
   approvalError.value = ''
+  approvalForbidden.value = false
   try {
     const direct = (detail.value as unknown as { approvalInstanceId?: number }).approvalInstanceId
     if (direct != null) {
-      approval.value = await getApprovalInstance(direct)
+      approval.value = await getApprovalInstance(direct, { silentForbidden: true })
       return
     }
-    const mine = await listApprovalMine({ page: 1, size: 50 })
+    const mine = await listApprovalMine({ page: 1, size: 50 }, { silentForbidden: true })
     const hit = mine.items.find(
       (row: ApprovalTodoRow) => Number(row.bizId) === id.value && String(row.bizType).toUpperCase().includes('REQ'),
     )
-    approval.value = hit ? await getApprovalInstance(hit.instanceId) : null
+    approval.value = hit ? await getApprovalInstance(hit.instanceId, { silentForbidden: true }) : null
   } catch (error) {
     approval.value = null
-    approvalError.value = messageOf(error)
+    const status = (error as { status?: number }).status
+    approvalForbidden.value = status === 403
+    approvalError.value = approvalForbidden.value ? '' : messageOf(error)
   } finally {
     approvalLoading.value = false
   }
@@ -347,16 +353,20 @@ async function loadEstimateApproval(): Promise<void> {
   if (instanceId == null) {
     estimateInstance.value = null
     estimateError.value = ''
+    estimateForbidden.value = false
     estimateLoading.value = false
     return
   }
   estimateLoading.value = true
   estimateError.value = ''
+  estimateForbidden.value = false
   try {
-    estimateInstance.value = await getApprovalInstance(instanceId)
+    estimateInstance.value = await getApprovalInstance(instanceId, { silentForbidden: true })
   } catch (error) {
     estimateInstance.value = null
-    estimateError.value = messageOf(error)
+    const status = (error as { status?: number }).status
+    estimateForbidden.value = status === 403
+    estimateError.value = estimateForbidden.value ? '' : messageOf(error)
   } finally {
     estimateLoading.value = false
   }
@@ -780,6 +790,8 @@ onMounted(async () => {
           :instance="approval"
           :loading="approvalLoading"
           :error="approvalError"
+          :forbidden="approvalForbidden"
+          :estimate-forbidden="estimateForbidden"
           :can-submit="canSubmit"
           :estimate="estimate"
           :estimate-instance="estimateInstance"

@@ -18,7 +18,12 @@ export interface RequestOptions {
   headers?: Record<string, string>
   /** 401 不跳登录（登录接口自身的失败由页面内联展示） */
   silentAuth?: boolean
-  /** 403 不跳 /403，交回调用方（用于“可选能力探测”） */
+  /**
+   * 403 不跳 /403，交回调用方（**仅限页内可选探测**）。
+   * 约定（lint L23 / access a8 钉住）：页面内「读不到也不阻断」的探测——审批实例/评估审批、
+   * 审批待办探测、变更计数、字典、集成配置、执行器台账——必须在**同一次 http 调用**上声明；
+   * 主数据请求（如 getRequirement）**不得**声明：越权必须落到全局 /403，不能被静默吞成空壳。
+   */
   silentForbidden?: boolean
   responseType?: 'json' | 'text' | 'blob'
   signal?: AbortSignal

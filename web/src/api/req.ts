@@ -210,15 +210,23 @@ export function listApprovalDone(params: {
   return http.get<PageResponse<ApprovalTodoRow>>(`${REQ}/approvals/done`, params)
 }
 
-export function listApprovalMine(params: {
-  page?: number
-  size?: number
-}): Promise<PageResponse<ApprovalTodoRow>> {
-  return http.get<PageResponse<ApprovalTodoRow>>(`${REQ}/approvals/mine`, params)
+export function listApprovalMine(
+  params: { page?: number; size?: number },
+  extra?: Partial<RequestOptions>,
+): Promise<PageResponse<ApprovalTodoRow>> {
+  return http.get<PageResponse<ApprovalTodoRow>>(`${REQ}/approvals/mine`, params, extra)
 }
 
-export function getApprovalInstance(id: number | string): Promise<ApprovalInstanceDetail> {
-  return http.get<ApprovalInstanceDetail>(`${REQ}/approvals/instances/${id}`)
+/**
+ * 审批实例详情。**页内可选探测**：详情页把它当辅助信息加载时，调用点必须传
+ * `{ silentForbidden: true }`（约定见 client.ts；静态断言 lint L23、access a8 S2）。
+ * 不传时行为不变：403 由 client.ts 统一跳 /403 —— 审批中心 / 变更详情依赖这一点。
+ */
+export function getApprovalInstance(
+  id: number | string,
+  extra?: Partial<RequestOptions>,
+): Promise<ApprovalInstanceDetail> {
+  return http.get<ApprovalInstanceDetail>(`${REQ}/approvals/instances/${id}`, undefined, extra)
 }
 
 export function handleApprovalTask(

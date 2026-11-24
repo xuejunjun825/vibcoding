@@ -139,6 +139,28 @@ TODO --start_dev--> IN_DEV --submit_test--> PENDING_TEST --test_pass--> TEST_PAS
 
 r40 的变更入口**不变**：§5.5 的 409 `CHANGE_REQUIRED` + `changeEndpoint` + 预填抽屉继续是晚期态改内容的唯一正道；r43 只是把「哪些字段属于这一类」从服务里的一处判断变成契约里的一张表，并把终态/父人天等原 `400` 收口为 `409 FIELD_LOCKED`。变更单列表每行新增 `fields[]`（规范序的真实变化字段，空快照为 `[]`），字段级中文标签与审批结果词只在 `web/src/views/req/change.ts` 提供。
 
+## 5.7 审批可见性 ≠ 页面准入（r45：详情页 403 就地降级）
+
+**审批可见性只决定「审批区能不能看」，绝不决定「需求详情能不能打开」。** 详情页里的审批实例、我的待办、工时评估审批都是**页内可选探测**（读不到也不阻断主数据），不是主数据准入。
+
+r45 之前这几处探测没在同一次 http 调用上声明 `silentForbidden`，而 `client.ts` 的 403 处理是「先 `navigate('/403')` 再抛错」⇒ dev1/qa1/厂商等**非审批参与人**一进详情页就被整页替换成 `/403`（「无权查看该审批实例」），既看不到自己负责的需求，也点不到「开始开发 / 提交测试 / 测试通过」。修复只动前端请求声明与审批页签降级，**服务端零改动**：
+
+| 场景 | 结果 |
+|---|---|
+| 参与人（发起人/审批人/抄送人）打开详情 | 审批区正常渲染进度，行为与 r8 前一致 |
+| 非参与人打开详情 | 需求详情正常打开，审批区就地显示唯一文案 `无权查看审批进度（仅发起人/审批人/抄送人可见）`；**不跳 `/403`、不白屏** |
+| 非参与人直接调 `/api/req/approvals/instances/{id}` | 仍 `403 FORBIDDEN`（`visibleInstance` 与 403 code/message/detail 一字未改；深链越权仍由路由守卫落 `/403`） |
+| 审批接口 500 / 网络错误 | 审批区仍 `ErrorState`「暂不可用 + 重试」，**不显示**上面的无权文案（403 与「加载失败」在数据层就分叉，不会把 500 误降级） |
+| 真的无权打开需求本身 | `getRequirement` **不**声明静默 ⇒ 照旧落全局 `/403` |
+
+三条实现契约（细节见 [TECHNICAL.md](20261124-r45-req-detail-403-fix/TECHNICAL.md)）：
+
+- **声明点**：`web/src/api/req.ts` 的 `getApprovalInstance(id, extra?)` / `listApprovalMine(params, extra?)` 透传第三参，默认 `undefined`（审批中心与变更详情的旧行为逐字不变）；只有详情页的调用点单行写 `{ silentForbidden: true }`。
+- **错误收敛**：`RequirementDetailView.vue` 把 403 收敛成 `approvalForbidden` / `estimateForbidden` 两个布尔（每次 loader 开头复位，避免跨需求残留上次的 403），非 403 才进 `approvalError` / `estimateError`。
+- **文案唯一**：常量 `FORBIDDEN_HINT` 只在 `web/src/views/req/tabs/ApprovalTab.vue`，主审批区 `EmptyState` 与评估块内联说明共用；`forbidden` 分支必须排在 `error` 之前。
+
+门禁双钉：`make lint` **L23**（详情页 `getApprovalInstance`/`listApprovalMine` 裸调用计数必须等于带 `silentForbidden` 计数、页面不得裸调 `http.`、负向夹具必红，24→**25**）；`make access-verify` **a8** 段 **13** 条（S1–S4 静态 + 三角色运行时 R1–R6 + 非参与实例 N1–N3 仍 403，206→**219**）。
+
 ## 6. 这张图的依据
 
 | 依据 | 位置 |
@@ -150,6 +172,9 @@ r40 的变更入口**不变**：§5.5 的 409 `CHANGE_REQUIRED` + `changeEndpoin
 | 变更子流程（r40） | `RequirementChangeService` / `RequirementChangeApplyService` / `RequirementEditGuard`（r43 起取代已删除的 `RequirementChangeGuard`），见 [CHANGE-REQUEST-FLOW.md](CHANGE-REQUEST-FLOW.md) |
 | 可编辑性矩阵（r43） | `platform-contract/.../RequirementEditability.java`（3 类型 × 全状态 × 11 字段 → 决策 + reasonCode，未知 fail-closed） |
 | 三数组与两类 409（r43） | `RequirementService.detail/update`（先投影三数组、PUT 重排队）+ `RequirementEditGuard`（真实变化判定、LOCKED 优先）+ `RequirementErrors.FIELD_LOCKED` |
+| 审批探测静默（r45） | `web/src/api/req.ts` 的 `getApprovalInstance(id, extra?)` / `listApprovalMine(params, extra?)` 第三参透传（`{ silentForbidden: true }` 由详情页单行声明）+ `web/src/api/client.ts` 的 `RequestOptions.silentForbidden` 约定（主数据请求禁声明） |
+| 403 就地降级（r45） | `web/src/views/req/RequirementDetailView.vue` 的 `approvalForbidden`/`estimateForbidden`（loader 开头复位，仅 `status === 403` 置位）+ `web/src/views/req/tabs/ApprovalTab.vue` 唯一 `FORBIDDEN_HINT`（`forbidden` 分支先于 `error`） |
+| 双门禁（r45） | `scripts/tests/lint.sh` L23（裸调用计数==带 silent 计数 + 负向自检必红）、`scripts/tests/access/a8-detail-optional-probe.mjs`（13 条：静态 4 + 运行时 6 + 负向 3） |
 | 实测 | 视频演示同一套流程已跑通（`docs/teamflow/demo-video/demo-roles.mp4`），截图见 `docs/teamflow/demo-shots/flow-*.png` |
 
 > 图是按 18 个**主操作节点**画的主干：会签/或签的具体审批人来源、加签减签、超时催办等分支没有画进来，它们在审批引擎内部，属于节点 3/4/8 的细节。
