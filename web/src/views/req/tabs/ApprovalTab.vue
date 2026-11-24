@@ -38,12 +38,16 @@ const props = withDefaults(
     estimateInstance?: ApprovalInstanceDetail | null
     estimateLoading?: boolean
     estimateError?: string
+    forbidden?: boolean
+    estimateForbidden?: boolean
   }>(),
   {
     estimate: null,
     estimateInstance: null,
     estimateLoading: false,
     estimateError: '',
+    forbidden: false,
+    estimateForbidden: false,
   },
 )
 const emit = defineEmits<{
@@ -53,6 +57,8 @@ const emit = defineEmits<{
 }>()
 
 const auth = useAuthStore()
+/** 403 的唯一文案（AC-2：全 web/src 只出现 1 次，主审批区与评估块共用） */
+const FORBIDDEN_HINT = '无权查看审批进度（仅发起人/审批人/抄送人可见）'
 const { can } = usePermission()
 const { userName } = usePlatformDict()
 
@@ -353,6 +359,13 @@ watch(
       </header>
 
       <div v-if="estimateLoading" class="skeleton skeleton__row" />
+      <p
+        v-else-if="estimateForbidden"
+        class="estimate-block__reason estimate-block__reason--warning"
+        data-test="estimate-forbidden"
+      >
+        {{ FORBIDDEN_HINT }}
+      </p>
       <ErrorState
         v-else-if="estimateError"
         compact
@@ -382,6 +395,14 @@ watch(
     </section>
 
     <div v-if="loading" class="skeleton skeleton__row" />
+    <EmptyState
+      v-else-if="forbidden"
+      title="无权查看审批进度"
+      :description="FORBIDDEN_HINT"
+      icon="lock"
+      compact
+      data-test="approval-forbidden"
+    />
     <ErrorState v-else-if="error" compact title="审批信息暂不可用" :message="error" />
 
     <EmptyState

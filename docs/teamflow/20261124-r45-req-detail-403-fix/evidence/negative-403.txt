@@ -1,0 +1,25 @@
+# r45 / AC-13：非参与审批实例仍 403（服务端语义零改动）
+# 采集：bash logs/teamflow/tf-mwues0su-fpi3ea/scripts/r45-curl-evidence.sh
+#      真栈 127.0.0.1:8080（网关）· 租户 t1 · 采集时间 2026-11-24
+# token 已脱敏：原文为 /api/req/auth/login 返回的 Bearer JWT，不落盘、不打印。
+
+## dev1（研发-赵）
+# 账号: dev1 / 需求: 645905 (DEMO-R-04 订单审批页面) / 审批实例: 43776
+# 请求: GET /api/req/approvals/instances/43776  Authorization: Bearer <redacted>  X-Tenant-Id: 1
+HTTP/1.1 403 Forbidden
+Content-Type: application/json
+{"code":"FORBIDDEN","message":"无权查看该审批实例"}
+
+## qa1（测试-孙）
+# 账号: qa1 / 需求: 645905 (DEMO-R-04 订单审批页面) / 审批实例: 43776
+# 请求: GET /api/req/approvals/instances/43776  Authorization: Bearer <redacted>  X-Tenant-Id: 1
+HTTP/1.1 403 Forbidden
+Content-Type: application/json
+{"code":"FORBIDDEN","message":"无权查看该审批实例"}
+
+## vendor1（厂商管理员-钱）
+# 账号: vendor1 / 需求: 645910 (DEMO-R-09 外协订单对账（VEN-A 承接）) / 审批实例: 43785
+# 请求: GET /api/req/approvals/instances/43785  Authorization: Bearer <redacted>  X-Tenant-Id: 1
+HTTP/1.1 403 Forbidden
+Content-Type: application/json
+{"code":"FORBIDDEN","message":"无权查看该审批实例"}
