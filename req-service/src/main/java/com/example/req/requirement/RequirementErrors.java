@@ -167,6 +167,24 @@ public final class RequirementErrors {
                 detail);
     }
 
+    /**
+     * 变更类型缺失或未知（r44）：在既有三键之后追加 {@code allowedTypes}（四种合法值），
+     * 前端/QA 据此直接给出可选类型，而不是只看到「字段不允许」。缺类型时 changeType 为
+     * null，由 {@code ApiException} 丢弃，故实际形状是两键 + allowedTypes。
+     */
+    public static ApiException changeFieldNotAllowed(String changeType, String field,
+                                                     List<String> allowedFields,
+                                                     List<String> allowedTypes) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("changeType", changeType);
+        detail.put("field", field);
+        detail.put("allowedFields", allowedFields == null ? List.of() : allowedFields);
+        detail.put("allowedTypes", allowedTypes == null ? List.of() : allowedTypes);
+        return new ApiException(400, CHANGE_FIELD_NOT_ALLOWED,
+                field == null ? "该变更类型不允许修改字段" : "字段 " + field + " 不允许通过该变更类型修改",
+                detail);
+    }
+
     /** 晚期态直接改受管字段：409，detail 带需求 id、命中的字段与发起变更的端点。 */
     public static ApiException changeRequired(long requirementId, List<String> fields,
                                               String changeEndpoint) {

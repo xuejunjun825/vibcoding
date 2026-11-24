@@ -43,9 +43,10 @@ public class RequirementChangeValidator {
      */
     public Map<String, Object> validateCreate(RequirementEntity entity, String changeType,
                                               String reason, Map<String, Object> patch) {
-        // 1) 变更类型：未知类型没有白名单，detail 的 allowedFields 给空数组
+        // 1) 变更类型：未知类型没有白名单，detail 的 allowedFields 给空数组、allowedTypes 给合法值全集
         if (!RequirementChangeFields.knownType(changeType)) {
-            throw RequirementErrors.changeFieldNotAllowed(changeType, null, List.of());
+            throw RequirementErrors.changeFieldNotAllowed(changeType, null, List.of(),
+                    RequirementChangeFields.TYPES);
         }
         // 2) 原因：必填、≤500；创建时就是审批人看到的唯一说明
         if (reason == null || reason.strip().isEmpty()) {

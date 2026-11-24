@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # change-verify.sh — r40 需求变更单闭环门禁（AC-19）。
 #
-# 40 条断言，六组：
+# 46 条断言，六组：
 #   S1 迁移与结构（5）        V16 在 flyway 历史且 V1–V15 各一条成功、req_change 列齐全、
 #                            req_change_item 主键 = (change_id, field)、两表索引存在、起跑 req_change = 0 行
-#   S2 申请与影响（8）        preview 200（7 键 before/after + 8 键 impact + fields）且不落库、
+#   S2 申请与影响（13）       preview 200（7 键 before/after + 8 键 impact + fields）且不落库、
+#                            缺 changeType / 空串 / 单空格 → 400 CHANGE_FIELD_NOT_ALLOWED（不是 500）、
+#                            上述三条错误响应统一过 err_shape_ok（4xx + code，禁止用 500 表达校验失败）、
 #                            非白名单 400 CHANGE_FIELD_NOT_ALLOWED、空原因 400 REASON_REQUIRED、
 #                            无变化 400 VALIDATION_FAILED、创建 201 PENDING + 审批实例/待办、
 #                            CHANGE_REQUESTED 审计 1 条、两张 PENDING 并存（列表 total）
@@ -16,7 +18,7 @@
 #   S5 人天与锁（7）          恰好 +20% 不 STALE、+20.1% STALE、预测(冻结 impact) == 实际(评估状态)、
 #                            LOCKED 版本 apply 200 + CHANGE_AFTER_RELEASE_LOCK 恰 1 条、PLAN 不写锁审计、
 #                            晚期态 PUT 四类字段 409 CHANGE_REQUIRED（detail.changeEndpoint/fields）
-#   S6 收口与审计查询（6）    早期态 PUT 不误拦、列表分页/过滤/total、详情 before/after/items/impact 形状、
+#   S6 收口与审计查询（7）    早期态 PUT 不误拦、列表分页/过滤/total、详情 before/after/items/impact 形状、
 #                            厂商 VENDOR_PM 发起变更 403、按 changeId 查审计 ≥2 条、
 #                            退出复位成功、复位后本轮 tag 需求 0 条且 req_change 0 行
 #
@@ -27,7 +29,7 @@
 #   bash scripts/change-verify.sh --static-only  # 不连栈，只查脚本/文档/计数自洽（12 条）
 #
 # 约定（与 release-flow-verify / wbs-backfill-verify 一致）：
-#   - 脚本自声明 CHANGE_VERIFY_TOTAL=42；静态检查会用 grep 数 `ck "` 调用点，声明与实现不符即红，
+#   - 脚本自声明 CHANGE_VERIFY_TOTAL=46；静态检查会用 grep 数 `ck "` 调用点，声明与实现不符即红，
 #     所以「少跑一条断言」不可能悄悄变绿；
 #   - 前置缺失（栈没起、V16 没跑、变更接口 404）直接 die，不 skip（r28 教训：条件跳过=假绿）；
 #   - 本轮所有夹具标题带 RTAG，退出复位交给 scripts/lib/gate-fixture.sh（demo-reset + 基线断言），
@@ -43,7 +45,7 @@ source "${ROOT}/scripts/lib.sh"
 source "${ROOT}/scripts/lib/gate-fixture.sh"
 set +e
 
-CHANGE_VERIFY_TOTAL=42
+CHANGE_VERIFY_TOTAL=46
 CASE=0
 PASS=0
 FAIL=0
@@ -226,6 +228,19 @@ chg_get() {
 }
 err_code() { jqv '.code // empty' "${1:-$CB}"; }
 err_field() { jqv '.detail.field // empty' "${1:-$CB}"; }
+
+# err_shape_ok <expectedCode|""> [body] [httpCode] → 0 合规 / 1 不合规
+# 契约错误响应 = HTTP 4xx（5xx 一律不算「按契约拒绝」）+ body.code 非空；
+# expectedCode 非空时还要求 code 精确匹配。函数体内不得出现行首 ck（静态计数会漂移），
+# 调用方写 `err_shape_ok ... && echo 1 || echo 0`。httpCode 省略时回退 ${CC}，再回退 ${HTTP_CODE}。
+err_shape_ok() {
+    local want="${1:-}" body="${2:-$CB}" http="${3:-${CC:-${HTTP_CODE:-}}}" code
+    [[ "$http" =~ ^4[0-9][0-9]$ ]] || return 1
+    code="$(jqv '.code // empty' "$body")"
+    [[ -n "$code" ]] || return 1
+    [[ -z "$want" || "$code" == "$want" ]] || return 1
+    return 0
+}
 req_title() { api_call GET "/api/req/requirements/$1"; jqv '.view.title // empty' "$HTTP_BODY"; }
 req_status() { api_call GET "/api/req/requirements/$1"; jqv '.view.status // empty' "$HTTP_BODY"; }
 chg_status() { chg_get "$1"; jqv '.status // empty' "$CB"; }
@@ -443,6 +458,47 @@ run_main() {
 
     local before_title n0 pv_before_keys pv_after_keys pv_impact_keys pv_fields n1
     before_title="$(req_title "$F_EARLY")"
+
+    # r44：变更类型是外部输入的第一道边界。chg_create 总会塞 changeType 键，所以「缺键」必须直发
+    # {reason,patch}，否则测到的是「未知类型」。三条都必须 400 -> 4xx + 稳定 code；
+    # 500 且无 code（不可变集合 contains(null) → NPE）正是本轮要钉死的缺陷形态。
+    local ct_miss_http ct_miss_body ct_blank_http ct_blank_body ct_space_http ct_space_body
+    api_call POST "/api/req/requirements/${F_EARLY}/changes" \
+        "$(jq -cn --arg r "r44 缺变更类型" --argjson p '{"title":"r44-缺类型"}' '{reason:$r,patch:$p}')"
+    ct_miss_http="$HTTP_CODE"
+    ct_miss_body="$HTTP_BODY"
+    api_call POST "/api/req/requirements/${F_EARLY}/changes" \
+        "$(jq -cn --arg t "" --arg r "r44 空串类型" --argjson p '{"title":"r44-空串类型"}' '{changeType:$t,reason:$r,patch:$p}')"
+    ct_blank_http="$HTTP_CODE"
+    ct_blank_body="$HTTP_BODY"
+    api_call POST "/api/req/requirements/${F_EARLY}/changes" \
+        "$(jq -cn --arg t " " --arg r "r44 空格类型" --argjson p '{"title":"r44-空格类型"}' '{changeType:$t,reason:$r,patch:$p}')"
+    ct_space_http="$HTTP_CODE"
+    ct_space_body="$HTTP_BODY"
+
+    ck "$([[ "$ct_miss_http" == "400" ]] && err_shape_ok CHANGE_FIELD_NOT_ALLOWED "$ct_miss_body" "$ct_miss_http" && echo 1 || echo 0)" \
+        "缺 changeType（body 只有 reason+patch）→ 400 CHANGE_FIELD_NOT_ALLOWED（detail 带 allowedFields/allowedTypes），不是 500" \
+        "缺类型未按契约拒绝：http=${ct_miss_http:-?} code=$(err_code "$ct_miss_body") body=${ct_miss_body:0:160}" \
+        "knownType 必须对 null 短路返回 false：不可变集合 contains(null) 直接抛，而 500 的 body 没有 code，前端只能弹「服务器错误」"
+
+    ck "$([[ "$ct_blank_http" == "400" && "$(err_code "$ct_blank_body")" == "CHANGE_FIELD_NOT_ALLOWED" ]] && echo 1 || echo 0)" \
+        "changeType 为空串 → 400 CHANGE_FIELD_NOT_ALLOWED（空白不归一，与「未知类型」走同一分支）" \
+        "空串类型不符：http=${ct_blank_http:-?} code=$(err_code "$ct_blank_body")" \
+        "knownType 用 isBlank 短路；不要 trim 后回填默认类型——前端常量必须原样传，静默归一只会掩盖前端 bug"
+
+    ck "$([[ "$ct_space_http" == "400" && "$(err_code "$ct_space_body")" == "CHANGE_FIELD_NOT_ALLOWED" ]] && echo 1 || echo 0)" \
+        "changeType 为单个空格 → 400 CHANGE_FIELD_NOT_ALLOWED（刻意不 trim / 不做大小写归一）" \
+        "空格类型不符：http=${ct_space_http:-?} code=$(err_code "$ct_space_body")" \
+        "类型串来自前端常量，\" content \" 被归一成 CONTENT 会让「传错了」变成「悄悄对了」；大小写同理"
+
+    ck "$(err_shape_ok "" "$ct_miss_body" "$ct_miss_http" \
+        && err_shape_ok "" "$ct_blank_body" "$ct_blank_http" \
+        && err_shape_ok "" "$ct_space_body" "$ct_space_http" \
+        && echo 1 || echo 0)" \
+        "三条类型缺失响应统一过 err_shape_ok：全部 4xx 且 body.code 非空（禁止 500/空 code 表达校验失败）" \
+        "错误形状不合契约：缺键 http=${ct_miss_http:-?} code=$(err_code "$ct_miss_body")｜空串 http=${ct_blank_http:-?} code=$(err_code "$ct_blank_body")｜空格 http=${ct_space_http:-?} code=$(err_code "$ct_space_body")" \
+        "校验失败必须走 ApiException→ApiError（4xx + 稳定 code + detail）；500 或空 code 等于把契约错误降级成事故"
+
     n0="$(db_count req_change "tenant_id=${TID}")"
     chg_preview "$F_EARLY" CONTENT "r40 预览" '{"title":"r40-预览标题"}'
     pv_before_keys="$(jlen "$(jqv '.before' "$CB")")"

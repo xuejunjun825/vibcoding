@@ -1,0 +1,7 @@
+{
+  "reqId": "req-44",
+  "runId": "tf-mwu9qgf4-ljjad4",
+  "title": "修复变更单创建接口漏传 changeType 时的 500，并把同族隐患（不可变集合 contains(null) 抛 NPE）做一次全仓扫描与加固。",
+  "mode": "tech",
+  "createdAt": 1795498981145
+}
