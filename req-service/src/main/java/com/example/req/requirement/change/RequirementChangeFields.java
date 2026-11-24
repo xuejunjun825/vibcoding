@@ -1,5 +1,6 @@
 package com.example.req.requirement.change;
 
+import com.example.platform.contract.RequirementEditability;
 import com.example.req.requirement.RequirementEntity;
 import com.example.req.requirement.RequirementErrors;
 import com.example.req.requirement.RequirementRollup;
@@ -15,14 +16,16 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 变更白名单、7 字段快照、字段归一化与逐类型早期态——这些规则只允许存在这一份。
+ * 变更白名单、7 字段快照与字段归一化；「哪些状态能直改」已上移到
+ * {@link RequirementEditability}，这里只做委托。
  *
  * <p>为什么快照不复用 {@code RequirementService.update} 的 auditSnapshot：后者故意不含
  * description/parentId，而变更单的 before/after 必须覆盖全部可变更字段，否则 apply 无法
  * 证明「改了什么」。两者形状相似但语义不同，合并会让审计口径互相污染。</p>
  *
- * <p>为什么前端不复制早期态表：前端只读服务端下发的 {@code permissions.editableFields}，
- * 状态表分支只在这里维护，避免「后端放行、前端仍锁」这类双源漂移。</p>
+ * <p>为什么早期态表不在本文件：可编辑性是前后端、变更单、门禁共用的协议，第二份
+ * 「状态 → 字段」判定会让「后端放行、前端仍锁」重新出现；本类保留的
+ * {@link #editableFields} 只是 r40 的 7 字段兼容投影（{@code permissions.editableFields}）。</p>
  */
 public final class RequirementChangeFields {
 
@@ -59,11 +62,6 @@ public final class RequirementChangeFields {
     public static final List<String> GUARDED_FIELDS = FIELDS;
 
     private static final Set<String> PRIORITIES = Set.of("P0", "P1", "P2", "P3");
-
-    private static final Map<String, List<String>> EARLY_STATUSES = Map.of(
-            RequirementRules.TYPE_BUS, List.of("SUBMITTED", "APPROVING", "PENDING_REVIEW"),
-            RequirementRules.TYPE_PDR, List.of("PENDING_ANALYSIS"),
-            RequirementRules.TYPE_RD, List.of("TODO"));
 
     private RequirementChangeFields() {
     }
@@ -173,20 +171,24 @@ public final class RequirementChangeFields {
     }
 
     /**
-     * 逐类型早期态：只有列表中的状态允许直接 PUT 这些字段，其余状态必须走变更单。
-     * 返回全部 7 字段表示「当前可直改」，空列表表示「全部需变更单」。
+     * r40 兼容投影：矩阵判定为 {@code EDIT} 且属于本类 7 字段的字段，顺序沿用 {@link #FIELDS}。
+     * 仅用于详情旧的 {@code permissions.editableFields} 键（前端 r43 起读三数组），
+     * 「哪些状态是早期态」只由 {@link RequirementEditability} 决定。
      */
     public static List<String> editableFields(String type, String status) {
-        if (type == null || status == null) {
-            return List.of();
+        List<String> editable = RequirementEditability.editableFields(type, status);
+        List<String> projected = new ArrayList<>();
+        for (String field : FIELDS) {
+            if (editable.contains(field)) {
+                projected.add(field);
+            }
         }
-        List<String> early = EARLY_STATUSES.get(type);
-        return early != null && early.contains(status) ? FIELDS : List.of();
+        return List.copyOf(projected);
     }
 
-    /** 给定状态是否处于该类型的早期态。 */
+    /** 给定状态是否处于该类型的早期态（委托 contract 矩阵）。 */
     public static boolean earlyStage(String type, String status) {
-        return !editableFields(type, status).isEmpty();
+        return RequirementEditability.earlyStage(type, status);
     }
 
     // ------------------------------------------------------------------ 归一化

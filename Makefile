@@ -6,7 +6,7 @@ SHELL := /bin/bash
         platform-seed platform-unit platform-perf quality-verify quality-e2e integration-verify \
         collab-verify collab-perf access-verify rbac-verify analytics-i18n-verify platform-demo-reset \
         wbs-backfill-verify release-flow-verify release-flow-upgrade gate-order-verify automation-verify \
-        change-verify
+        change-verify editability-verify
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
@@ -114,6 +114,10 @@ automation-verify: ## 自动化规则引擎门禁 S1–S6 共 39 条（正例/�
 # ---- r40 需求变更单 (20261123-r40) ----
 change-verify: ## 需求变更单闭环门禁 S1–S6 共 40 条（迁移/申请/影响/审批/应用/人天/锁/PUT 收口/审计；先 make platform-up && platform-seed && platform-demo-reset；--static-only 免栈，--twice 连跑两次）
 	@./scripts/change-verify.sh
+
+# ---- r43 需求字段可编辑性 (20261124-r43) ----
+editability-verify: ## 需求字段可编辑性门禁 S1–S6 共 36 条（矩阵/三数组/PUT 两类 409/字段级变更记录/负向自检；先 make platform-up && platform-seed && platform-demo-reset；--static-only 免栈，--twice 连跑两次）
+	@./scripts/editability-verify.sh
 
 release-flow-upgrade: ## 存量库幂等升级：连跑两次 /internal/seed，定义/绑定/version 不增（先 make platform-up）
 	@./scripts/release-flow-upgrade.sh

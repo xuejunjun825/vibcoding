@@ -97,9 +97,15 @@ public class RequirementChangeValidator {
         if (priority == null || String.valueOf(priority).isBlank()) {
             throw RequirementErrors.validation("priority 只能是 P0/P1/P2/P3");
         }
-        // 5b) 人天：父需求只读汇总，RD 0.5 天精度——与 PUT 同一份规则
+        // 5b) 人天：父需求只读汇总，RD 0.5 天精度——与 PUT 同一份规则。
+        //     只对「本次真的改了人天」的单据判：after 是整份快照（snapshot + patch），
+        //     父需求库里本就带汇总人天，原样比较必然命中 PARENT_DAYS_READONLY，
+        //     会把 CONTENT/PARENT/RELEASE 这类与人天无关的变更单一并拦死。
         BigDecimal afterDays = asDecimal(after.get(RequirementChangeFields.F_ESTIMATE_DAYS));
-        throwIfViolation(RequirementRules.checkDays(type, afterDays, entity.getActualDays()));
+        boolean daysChanged = !RequirementChangeFields.sameValue(
+                after.get(RequirementChangeFields.F_ESTIMATE_DAYS), entity.getEstimateDays());
+        throwIfViolation(RequirementRules.checkDays(type,
+                daysChanged ? afterDays : null, daysChanged ? entity.getActualDays() : null));
         // 5c) 父链：类型组合 → 祖先环 → 父状态门（创建时父可能还没入池/排期）
         Long parentId = asLong(after.get(RequirementChangeFields.F_PARENT_ID));
         RequirementEntity parent = parentId == null ? null : requireParent(parentId);

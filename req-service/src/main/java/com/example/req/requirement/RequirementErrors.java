@@ -38,6 +38,11 @@ public final class RequirementErrors {
     public static final String CHANGE_NOT_APPROVED = "CHANGE_NOT_APPROVED";
     public static final String CHANGE_ALREADY_APPLIED = "CHANGE_ALREADY_APPLIED";
     public static final String CHANGE_CONFLICT = "CHANGE_CONFLICT";
+    /**
+     * 字段在当前类型/状态下不可改（r43 可编辑性矩阵）：与 {@code CHANGE_REQUIRED} 同为 409，
+     * 但语义是「不可能改」而非「走变更单」——前端据此不给「发起变更」入口。
+     */
+    public static final String FIELD_LOCKED = "FIELD_LOCKED";
 
     private RequirementErrors() {
     }
@@ -169,6 +174,21 @@ public final class RequirementErrors {
                 Map.of("requirementId", requirementId,
                         "fields", fields == null ? List.of() : fields,
                         "changeEndpoint", changeEndpoint == null ? "" : changeEndpoint));
+    }
+
+    /**
+     * 字段被可编辑性矩阵判为 {@code LOCKED}：409，detail 与 {@code CHANGE_REQUIRED} 同源
+     * （{@code requirementId/fields}），另带首个命中字段 {@code field} 与其原因 {@code reasonCode}，
+     * 前端才能按同一套解析给出「不可改 + 原因」，而不是泛化成「参数错误」。
+     */
+    public static ApiException fieldLocked(long requirementId, String field, String reasonCode,
+                                           List<String> fields) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("requirementId", requirementId);
+        detail.put("field", field == null ? "" : field);
+        detail.put("reasonCode", reasonCode == null ? "" : reasonCode);
+        detail.put("fields", fields == null ? List.of() : fields);
+        return new ApiException(409, FIELD_LOCKED, "该字段在当前状态不可修改", detail);
     }
 
     /** 审批未通过（或仍在审批中）时应用变更单。 */

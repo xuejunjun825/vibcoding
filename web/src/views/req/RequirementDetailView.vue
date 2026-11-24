@@ -38,7 +38,14 @@ import TraceTab from '@/views/req/tabs/TraceTab.vue'
 import ChangeTab from '@/views/req/tabs/ChangeTab.vue'
 import ChangeCreateDrawer from '@/components/req/ChangeCreateDrawer.vue'
 import RequirementEditDrawer from '@/components/req/RequirementEditDrawer.vue'
-import { changePermissionsOf, changeTypeOfField } from '@/views/req/change'
+import { changePermissionsOf, changeTypeOfField, fieldLabel } from '@/views/req/change'
+import {
+  canOpenEdit,
+  editDisabledHint,
+  editDisabledReason,
+  editabilityOf,
+  reasonText,
+} from '@/views/req/editability'
 import DecomposeDialog from '@/views/req/DecomposeDialog.vue'
 import {
   ACTION_IMPACT,
@@ -78,7 +85,17 @@ type TabKey = (typeof TAB_KEYS)[number]
 const activeTab = ref<TabKey>(TAB_KEYS.includes(String(route.query.tab) as TabKey) ? (String(route.query.tab) as TabKey) : 'overview')
 const tabCounts = reactive({ children: 0, tasks: 0, changePending: 0 })
 
-const actionBanner = ref<{ text: string; code?: string; changeFields?: string[] } | null>(null)
+/**
+ * 常驻动作错误条（400/409）：`code` 决定文案与语气；`reasonCode`/`field` 只由
+ * `FIELD_LOCKED` 带（TECHNICAL §3.4）；`changeFields` 供「发起变更」预填。
+ */
+const actionBanner = ref<{
+  text: string
+  code?: string
+  reasonCode?: string
+  field?: string
+  changeFields?: string[]
+} | null>(null)
 const busy = ref(false)
 
 // —— 变更单入口（r40）：一个 720 抽屉，四个触发点共用 ——
@@ -92,6 +109,29 @@ const changeTabs = ref<InstanceType<typeof ChangeTab> | null>(null)
 const changePermissions = computed(() => changePermissionsOf(detail.value))
 /** 发起变更：渲染但无权限时禁用 + 原因（DESIGN §4.5），应用权限不在这里复刻 */
 const changeRequestDenied = computed(() => !changePermissions.value.changeRequest)
+
+// —— 可编辑性（r43）：矩阵只回答「能不能直接改」，页面不做本地推断 ——
+/** 编辑入口：三数组里有任一 EDIT 才可点；数组缺失 = fail-closed 全只读（AC-6） */
+const editAllowed = computed(() => canOpenEdit(detail.value))
+const editHint = computed(() => editDisabledHint(detail.value))
+const editDeniedReason = computed(() => editDisabledReason(detail.value))
+/** 三数组整块缺失时给一条常驻提示，而不是把按钮悄悄变灰让人猜（DESIGN §0.4） */
+const editRulesMissing = computed(() => detail.value != null && editabilityOf(detail.value) === null)
+
+/** 横幅前缀：FIELD_LOCKED 与 CHANGE_REQUIRED 是两类事，不能共用一句（DESIGN §3.4） */
+const bannerPrefix = computed(() => {
+  const code = actionBanner.value?.code
+  if (code === 'FIELD_LOCKED') return '字段已锁定：'
+  if (code === 'CHANGE_REQUIRED') return '需要走变更单：'
+  return '提交被拒绝：'
+})
+/** FIELD_LOCKED = info（变更单也救不了），CHANGE_REQUIRED = warning（有 CTA） */
+const bannerToneClass = computed(() => {
+  const code = actionBanner.value?.code
+  if (code === 'FIELD_LOCKED') return 'action-banner--locked'
+  if (code === 'CHANGE_REQUIRED') return 'action-banner--change'
+  return 'action-banner--danger'
+})
 
 function openChangeDrawer(type?: ChangeType | null, fields?: string[]): void {
   changePresetType.value = type ?? null
@@ -113,6 +153,17 @@ function onChangeCounts(counts: { pending: number; approved: number }): void {
 async function onEditRequestChange(payload: { type: ChangeType | null; fields: string[] }): Promise<void> {
   editOpen.value = false
   openChangeDrawer(payload.type, payload.fields)
+}
+
+/** 概览的字段级「发起变更」：按字段推变更单类型并只预填这一个字段（AC-11） */
+function onFieldRequestChange(field: string): void {
+  openChangeDrawer(changeTypeOfField(field), [field])
+}
+
+/** 编辑按钮的守卫：禁用态下 click 仍可能被键盘/测试触发，首行再判一次 */
+function guardEditOpen(): void {
+  if (!editAllowed.value) return
+  editOpen.value = true
 }
 
 async function onChangeCreated(): Promise<void> {
@@ -334,12 +385,29 @@ function handleActionError(error: unknown): void {
     // 评估门的 409 与其它 409 共用既有分支（常驻 banner + 就地刷新），
     // 但把「哪张评估单挡住了」补进文案，避免只看到一句泛化报错
     const gateSuffix = code === 'ESTIMATE_NOT_APPROVED' ? `（${estimateGateTip(estimateStatus.value)}）` : ''
-    const detailBag = (error as { detail?: { fields?: unknown } }).detail
-    const changeFields =
-      code === 'CHANGE_REQUIRED' && Array.isArray(detailBag?.fields)
-        ? detailBag.fields.filter((item): item is string => typeof item === 'string')
-        : undefined
-    actionBanner.value = { text: `${messageOf(error)}${gateSuffix}`, code, changeFields }
+    const detailBag = (error as { detail?: { fields?: unknown; reasonCode?: unknown; field?: unknown } }).detail
+    const declaredFields = Array.isArray(detailBag?.fields)
+      ? detailBag.fields.filter((item): item is string => typeof item === 'string')
+      : []
+    // r43：两类 409 话术不同。FIELD_LOCKED = 这个字段矩阵上根本不允许改（终态/不可变/父汇总），
+    // 连「发起变更」都不该给——给了也是必然被拒的假 CTA（AC-12/AC-13）。
+    if (code === 'FIELD_LOCKED') {
+      const reasonCode = typeof detailBag?.reasonCode === 'string' ? detailBag.reasonCode : undefined
+      const field = typeof detailBag?.field === 'string' ? detailBag.field : undefined
+      actionBanner.value = {
+        text: field ? `${reasonText(reasonCode)}：${fieldLabel(field)}` : reasonText(reasonCode),
+        code,
+        reasonCode,
+        field,
+      }
+      void refreshAll()
+      return
+    }
+    actionBanner.value = {
+      text: `${messageOf(error)}${gateSuffix}`,
+      code,
+      changeFields: code === 'CHANGE_REQUIRED' && declaredFields.length ? declaredFields : undefined,
+    }
     void refreshAll()
     return
   }
@@ -593,7 +661,23 @@ onMounted(async () => {
             >
               发起变更
             </el-button>
-            <el-button size="small" data-test="requirement-edit" @click="editOpen = true">编辑</el-button>
+            <el-button
+              class="btn--disabled-reason"
+              size="small"
+              data-test="requirement-edit"
+              :disabled="!editAllowed"
+              :title="editDeniedReason"
+              @click="guardEditOpen"
+            >
+              编辑
+            </el-button>
+            <!-- 只变灰的按钮等于让用户自己猜；禁用时必须紧邻一句原因（DESIGN §3.1） -->
+            <span
+              v-if="!editAllowed"
+              class="detail__edit-hint"
+              data-test="edit-disabled-hint"
+              aria-live="polite"
+            >{{ editHint }}</span>
             <!-- 受工时评估门约束的动作：无条件渲染、门未过时 disabled（r25 三色），
                  点击不发请求不改 URL；原因由 estimateGateTip / 权限前缀各自生成 -->
             <el-button
@@ -617,9 +701,20 @@ onMounted(async () => {
         </div>
       </header>
 
-      <div v-if="actionBanner" class="action-banner" role="alert" data-test="action-banner">
+      <!-- 三数组整块缺失（旧后端/灰度窗口）：明说「按只读处理」，不静默全灰（DESIGN §0.4） -->
+      <p v-if="editRulesMissing" class="edit-rules-missing" role="status" data-test="edit-rules-missing">
+        未获取到可编辑性规则，字段暂按只读处理（刷新页面可重试）
+      </p>
+
+      <div
+        v-if="actionBanner"
+        class="action-banner"
+        :class="bannerToneClass"
+        role="alert"
+        data-test="action-banner"
+      >
         <div>
-          <strong>{{ actionBanner.code === 'CHANGE_REQUIRED' ? '需要走变更单：' : '提交被拒绝：' }}</strong>{{ actionBanner.text }}
+          <strong>{{ bannerPrefix }}</strong>{{ actionBanner.text }}
           <span v-if="actionBanner.code" class="action-banner__code">{{ actionBanner.code }}</span>
         </div>
         <div class="action-banner__actions">
@@ -670,6 +765,7 @@ onMounted(async () => {
           :estimate="estimate"
           @open-approval="openEstimateApproval"
           @submitted="refreshAll"
+          @request-change="onFieldRequestChange"
         />
         <ChildrenTab v-else-if="activeTab === 'children'" :detail="detail" @decompose="decomposeOpen = true" />
         <TasksTab
@@ -760,6 +856,7 @@ onMounted(async () => {
       :detail="detail"
       @changed="refreshAll"
       @request-change="onEditRequestChange"
+      @refresh="refreshAll"
     />
 
     <el-dialog v-model="deliverOpen" title="提交交付" width="520px" append-to-body>
@@ -951,6 +1048,38 @@ onMounted(async () => {
   border-radius: var(--r-cell);
   background: var(--color-danger-bg);
   color: var(--danger-ink);
+  font-size: 12px;
+  line-height: 1.6;
+}
+/* 两类 409 语气必须不同：受控字段还有 CTA（warning），锁定字段没有（info，见 §3.4） */
+.action-banner--change {
+  border-color: var(--color-warning);
+  border-left-color: var(--color-warning);
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
+}
+.action-banner--locked {
+  border-color: var(--color-info);
+  border-left-color: var(--color-info);
+  background: var(--color-info-bg);
+  color: var(--info-ink);
+}
+/* 编辑按钮的禁用原因：12px 灰、不换行，紧贴按钮右侧 */
+.detail__edit-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted-aa);
+  white-space: nowrap;
+}
+/* 三数组整块缺失时的常驻提示（与动作横幅同形，语气取 info） */
+.edit-rules-missing {
+  margin: 0 0 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-info);
+  border-left: 3px solid var(--color-info);
+  border-radius: var(--r-cell);
+  background: var(--color-info-bg);
+  color: var(--info-ink);
   font-size: 12px;
   line-height: 1.6;
 }

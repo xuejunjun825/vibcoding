@@ -22,9 +22,13 @@ public final class RequirementChangeViews {
     private RequirementChangeViews() {
     }
 
+    /**
+     * 列表行；{@code fields} 是这次变更的真实变化字段（规范序，由已冻结的 before/after 就地算），
+     * 空快照的历史行降级为 {@code []} 而不是省略键——前端「—」与 200 都是契约的一部分。
+     */
     public record Row(long id, String changeType, String status, String reason,
                       Long createdBy, LocalDateTime createdAt, LocalDateTime appliedAt,
-                      Map<String, Object> impactSummary) {
+                      List<String> fields, Map<String, Object> impactSummary) {
     }
 
     public record RequirementRef(long id, String code, String title, String type, String status) {

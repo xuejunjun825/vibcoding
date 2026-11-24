@@ -62,8 +62,27 @@ public final class RequirementViews {
     public record TagView(String tag, String source) {
     }
 
+    /**
+     * 详情顶层下发的可编辑性规则：只描述「字段 → 原因」，不重复决策。
+     *
+     * <p>三个数组（{@code editableFields}/{@code changeRequiredFields}/{@code lockedFields}）互斥且
+     * 并集恰好 11 个字段，数组本身已表明决策，故元素只留 {@code field + reasonCode}；顺序与
+     * contract 的 {@code RequirementEditability.FIELDS} 一致，前端无需再排序。</p>
+     */
+    public record FieldRule(String field, String reasonCode) {
+    }
+
+    /**
+     * 详情响应：{@code View} 供列表批量复用，域集合与 Sonar 键只在详情按需装配
+     * （放进 {@code View} 会让列表逐行多查一次域关系）。
+     */
     public record Detail(View view, List<Child> children, List<String> allowedActions,
                          Map<String, Object> permissions,
+                         List<FieldRule> editableFields,
+                         List<FieldRule> changeRequiredFields,
+                         List<FieldRule> lockedFields,
+                         List<Long> domainIds,
+                         String sonarProjectKey,
                          WbsEstimateViews.EstimateView estimate) {
     }
 

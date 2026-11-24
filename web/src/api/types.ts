@@ -138,6 +138,18 @@ export interface NotificationRow {
 export type RequirementType = 'BUS' | 'PDR' | 'RD'
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3'
 
+/**
+ * 字段可编辑性三态（r43）。唯一判定源是服务端 `RequirementEditability` 矩阵
+ * （`platform-contract`），前端只在 `views/req/editability.ts` 里消费，不本地推断。
+ */
+export type FieldDecision = 'EDIT' | 'CHANGE_REQUIRED' | 'LOCKED'
+
+/** 详情顶层三数组的元素：字段名 + 服务端 reasonCode（中文文案见 `editability.ts`） */
+export interface RequirementFieldRule {
+  field: string
+  reasonCode: string
+}
+
 export interface RequirementRow {
   id: number
   code: string
@@ -252,6 +264,17 @@ export interface RequirementDetail extends RequirementRow {
   decomposeGate?: RequirementDecomposeGate
   /** 工时评估块（r26）；BUS 无评估单时后端给 null，NONE 是完整对象 */
   estimate?: EstimateBlock | null
+  /**
+   * r43 字段矩阵投影（Detail 顶层下发）。三数组互斥、并集 11 字段、规范序；
+   * 任一缺失即按 fail-closed 渲染（见 `views/req/editability.ts:editabilityOf`）。
+   */
+  editableFields?: RequirementFieldRule[] | null
+  changeRequiredFields?: RequirementFieldRule[] | null
+  lockedFields?: RequirementFieldRule[] | null
+  /** 业务域 id 列表（详情只读展示；列表行仍只有 `domainId`） */
+  domainIds?: number[] | null
+  /** 需求级 Sonar 项目键（空表示回落版本默认值），只读展示 */
+  sonarProjectKey?: string | null
 }
 
 /**
@@ -266,6 +289,12 @@ export interface RequirementDetailResponse {
   permissions?: RequirementPermissions
   /** r26：评估块在**顶层**（不在 view 里），`normalizeRequirementDetail` 不搬运它 */
   estimate?: EstimateBlock | null
+  /** r43：可编辑性三数组与两个只读展示字段同样在 `Detail` 顶层（不在 view 里） */
+  editableFields?: RequirementFieldRule[] | null
+  changeRequiredFields?: RequirementFieldRule[] | null
+  lockedFields?: RequirementFieldRule[] | null
+  domainIds?: number[] | null
+  sonarProjectKey?: string | null
 }
 
 /** 创建/拆解返回 `{id,code,type,status,allowedActions}`（不是详情）。 */

@@ -1,7 +1,12 @@
 import { ref } from 'vue'
 import { loadDictionaries } from '@/api/dictionaries'
 import type { DictionaryDomain, DictionaryUser, DictionaryVendor } from '@/api/dictionaries'
-import type { ApprovalTimelineEvent, RequirementDetail, RequirementRow } from '@/api/types'
+import type {
+  ApprovalTimelineEvent,
+  RequirementDetail,
+  RequirementFieldRule,
+  RequirementRow,
+} from '@/api/types'
 
 /**
  * 需求/版本/审批/发布四个域共用的展示字典。
@@ -97,7 +102,15 @@ export const ACTION_IMPACT: Record<string, string[]> = {
  * r26：`estimate`（工时评估块）与 `view` **平级**，不随 `view` 展开；早期版本漏搬它，
  * 页面只好各自兜 `{...normalize(raw), estimate: raw.estimate ?? null}`。这里补齐：
  * 包装分支缺省给 null（与后端 BUS/无单据时一致），扁平分支保持原样（调用方仍 `?? null`）。
+ *
+ * r43：`editableFields` / `changeRequiredFields` / `lockedFields` / `domainIds` / `sonarProjectKey`
+ * 同样在 **Detail 顶层**；漏搬会让页面静默 fail-closed 成「全部锁定」，所以逐项显式搬运。
  */
+function rulesOf(value: unknown): RequirementFieldRule[] | null {
+  // 只认数组；元素形状交给 editability.ts 兜底（多一层 schema 校验只会在这里造第三个真相源）
+  return Array.isArray(value) ? (value as RequirementFieldRule[]) : null
+}
+
 export function normalizeRequirementDetail(raw: unknown): RequirementDetail {
   const record = (raw ?? {}) as Record<string, unknown>
   if (record.view && typeof record.view === 'object') {
@@ -112,6 +125,18 @@ export function normalizeRequirementDetail(raw: unknown): RequirementDetail {
         (record.permissions as RequirementDetail['permissions'] | undefined) ?? view.permissions,
       estimate:
         (record.estimate as RequirementDetail['estimate'] | undefined) ?? view.estimate ?? null,
+      // r43：三数组与两个只读展示字段也在 Detail 顶层。这里只做搬运（不排序、不补默认值）：
+      // 搬漏 = 页面按 fail-closed 全锁定，所以空值也必须显式给 null 而不是丢掉键。
+      editableFields: rulesOf(record.editableFields ?? view.editableFields),
+      changeRequiredFields: rulesOf(record.changeRequiredFields ?? view.changeRequiredFields),
+      lockedFields: rulesOf(record.lockedFields ?? view.lockedFields),
+      domainIds: Array.isArray(record.domainIds)
+        ? (record.domainIds as number[])
+        : (view.domainIds ?? null),
+      sonarProjectKey:
+        typeof record.sonarProjectKey === 'string'
+          ? record.sonarProjectKey
+          : (view.sonarProjectKey ?? null),
     }
   }
   const detail = raw as RequirementDetail
