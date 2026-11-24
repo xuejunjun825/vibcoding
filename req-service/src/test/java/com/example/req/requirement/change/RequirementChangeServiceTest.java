@@ -181,6 +181,46 @@ class RequirementChangeServiceTest {
         assertThat(page.items()).hasSize(1);
         assertThat(page.items().get(0).impactSummary()).containsEntry("becomesStale", true);
         assertThat(page.items().get(0).status()).isEqualTo("APPROVED");
+        assertThat(page.items().get(0).fields()).containsExactly("title");
+        // 响应契约：fields 是 Row 的一等键（前端 7 列里的「目标字段」直接读它）。
+        assertThat(json.write(page.items().get(0))).contains("\"fields\":[\"title\"]");
+    }
+
+    @Test
+    void listRowFieldsFollowCanonicalOrderNotSnapshotOrder() {
+        RequirementEntity entity = requirement();
+        Map<String, Object> before = RequirementChangeFields.snapshot(entity);
+        Map<String, Object> after = RequirementChangeFields.merge(before,
+                Map.of("estimateDays", "5", "priority", "P1", "title", "改后的标题"));
+        RequirementChangeEntity row = changeRow("APPROVED");
+        row.setBeforeJson(json.write(before));
+        row.setAfterJson(json.write(after));
+        when(requirements.requireVisible(REQUIREMENT)).thenReturn(entity);
+        when(changes.page(eq(TENANT), eq(REQUIREMENT), eq(null), any()))
+                .thenReturn(new PageImpl<>(List.of(row)));
+        when(assessor.summary(any())).thenReturn(Map.of());
+
+        PageSlice<RequirementChangeViews.Row> page = service.list(REQUIREMENT, null, 1, 20);
+
+        // 规范序 = RequirementChangeFields.FIELDS（title → priority → estimateDays），
+        // 与写入 patch / JSON 键序无关。
+        assertThat(page.items().get(0).fields()).containsExactly("title", "priority", "estimateDays");
+    }
+
+    @Test
+    void listRowWithEmptySnapshotYieldsEmptyFieldsAndStillServes() {
+        RequirementChangeEntity row = changeRow("APPROVED");
+        row.setBeforeJson("{}");
+        row.setAfterJson(null);
+        when(requirements.requireVisible(REQUIREMENT)).thenReturn(requirement());
+        when(changes.page(eq(TENANT), eq(REQUIREMENT), eq("APPROVED"), any()))
+                .thenReturn(new PageImpl<>(List.of(row)));
+        when(assessor.summary(any())).thenReturn(Map.of());
+
+        PageSlice<RequirementChangeViews.Row> page = service.list(REQUIREMENT, "approved", 1, 20);
+
+        assertThat(page.total()).isEqualTo(1);
+        assertThat(page.items().get(0).fields()).isEmpty();
     }
 
     @Test

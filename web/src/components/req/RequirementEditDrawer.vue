@@ -5,23 +5,31 @@ import { listReleases, searchRequirements, updateRequirement } from '@/api/req'
 import type { CreateRequirementPayload, ReleaseRow, RequirementDetail, RequirementRow } from '@/api/types'
 import {
   changeErrorText,
-  changePermissionsOf,
   changeTypeOfField,
   fieldLabel,
 } from '@/views/req/change'
+import {
+  decisionOf,
+  editabilityOf,
+  reasonText,
+  ruleOf,
+  type EditDecision,
+} from '@/views/req/editability'
 import { PRIORITIES } from '@/views/req/platform'
 
 /**
- * 需求编辑抽屉（560，DESIGN §3.4 / AC-13）。
+ * 需求编辑抽屉（560，DESIGN §3.3 / AC-9）。
  *
- * 哪些字段还能直改**只**由服务端 `permissions.editableFields` 决定（早期态表只有后端一份），
- * 前端不复制状态表：锁定 = 不在 editableFields 里，组内给「需发起变更」并预填类型。
+ * 哪些字段还能直改**只**由服务端三数组决定（`editabilityOf`）：矩阵只有 `platform-contract`
+ * 一份，前端不复制状态表、也不按子需求条数推断——父需求人天由 `PARENT_ROLLUP` 原因码表达。
+ * 三数组缺失即 fail-closed：全部只读 + 顶部说明，footer 只留「取消」。
  */
 const props = defineProps<{ modelValue: boolean; detail: RequirementDetail | null }>()
 const emit = defineEmits<{
   (event: 'update:modelValue', value: boolean): void
   (event: 'changed'): void
   (event: 'requestChange', payload: { type: ReturnType<typeof changeTypeOfField>; fields: string[] }): void
+  (event: 'refresh'): void
 }>()
 
 const open = computed({
@@ -46,15 +54,27 @@ const draft = reactive<Record<string, unknown>>({})
 const saving = ref(false)
 const saveError = ref('')
 const conflictFields = ref<string[]>([])
+/** 两类 409 的语气不同：change = warning + 预填入口；locked = info 且**不给**任何发起入口 */
+const errorKind = ref<'change' | 'locked' | 'error'>('error')
+const lockedField = ref('')
+const lockedReason = ref('')
 
-const permissions = computed(() => changePermissionsOf(props.detail))
-const editable = computed(() => permissions.value.editableFields)
+/** 服务端矩阵；null = 三数组缺失 → fail-closed（不猜、不按 status 推断） */
+const matrix = computed(() => editabilityOf(props.detail))
+const matrixMissing = computed(() => matrix.value === null)
+
+function decision(field: string): EditDecision | null {
+  return decisionOf(props.detail, field)
+}
 
 function isEditable(field: string): boolean {
-  if (editable.value === null) return false
-  // 父需求人天由子需求汇总：即使后端放行也不给改
-  if (field === 'estimateDays' && (props.detail?.children?.length ?? 0) > 0) return false
-  return editable.value.includes(field)
+  return decision(field) === 'EDIT'
+}
+
+/** 逐字段原因行：非 EDIT 且有规则时才出（文案一字不差取自 editability.ts） */
+function fieldHint(field: string): string {
+  if (isEditable(field) || decision(field) === null) return ''
+  return reasonText(ruleOf(props.detail, field)?.reasonCode)
 }
 
 function current(field: string): unknown {
@@ -94,11 +114,23 @@ const changed = computed(() => {
 
 const groupLocked = (group: Group): boolean => group.fields.every((field) => !isEditable(field))
 
-/** 全部锁定时，「发起变更」升为唯一主键 */
-const allLocked = computed(() => GROUPS.every((group) => groupLocked(group)))
+/** 全部锁定时，「发起变更」升为唯一主键（矩阵缺失时不算锁定，走 fail-closed 分支） */
+const allLocked = computed(() => !matrixMissing.value && GROUPS.every((group) => groupLocked(group)))
+
+/** 部分锁定：footer 的次级「发起变更」预填第一个被锁组 */
+const firstLockedGroup = computed(
+  () => GROUPS.find((group) => groupLocked(group)) ?? GROUPS[0],
+)
+
+/** FIELD_LOCKED 横幅正文：「{原因句}：{字段名}」，没有字段名时只留原因句 */
+const lockedBannerText = computed(() => {
+  const reason = reasonText(lockedReason.value)
+  return lockedField.value ? `${reason}：${fieldLabel(lockedField.value)}` : reason
+})
 
 /** 被锁字段跨了两个类型时提示「要分两次」——一次变更只能改一类字段 */
 const spanningTypes = computed(() => {
+  if (matrixMissing.value) return false
   const types = new Set(
     GROUPS.flatMap((group) => group.fields)
       .filter((field) => !isEditable(field))
@@ -121,6 +153,9 @@ function reset(): void {
   draft.parentId = detail.parentId ?? null
   saveError.value = ''
   conflictFields.value = []
+  errorKind.value = 'error'
+  lockedField.value = ''
+  lockedReason.value = ''
 }
 
 watch(
@@ -175,10 +210,13 @@ async function save(): Promise<void> {
   saving.value = true
   saveError.value = ''
   conflictFields.value = []
+  errorKind.value = 'error'
+  lockedField.value = ''
+  lockedReason.value = ''
   const payload: Record<string, unknown> = {}
   for (const field of changed.value) payload[field] = draft[field]
   try {
-    // 只提交真正改了的字段；后端仍会按早期态与白名单复核
+    // 只提交真正改了的字段；后端仍会按矩阵与业务规则复核
     await updateRequirement(detail.id, payload as Partial<CreateRequirementPayload>)
     ElMessage.success('已保存')
     open.value = false
@@ -186,10 +224,20 @@ async function save(): Promise<void> {
   } catch (error) {
     const parsed = changeErrorText(error)
     if (parsed.code === 'CHANGE_REQUIRED') {
-      // 409 不 toast 后清空：顶部 banner 点明被拦字段，并给出预填入口
+      // 409 不 toast：顶部 banner 点明被拦字段，并给出预填入口
+      errorKind.value = 'change'
       conflictFields.value = parsed.fields
       saveError.value = '这些字段已不能直接修改'
+    } else if (parsed.code === 'FIELD_LOCKED') {
+      // 字段被矩阵锁死：只说原因、**不给**任何「发起变更」入口（AC-11 死路条款）；
+      // 数组可能已变（如需求刚关闭），让父级重取详情，抽屉保持打开
+      errorKind.value = 'locked'
+      lockedField.value = parsed.field || (parsed.fields[0] ?? '')
+      lockedReason.value = parsed.reasonCode
+      conflictFields.value = []
+      emit('refresh')
     } else {
+      errorKind.value = 'error'
       saveError.value = parsed.text
     }
   } finally {
@@ -216,18 +264,29 @@ function requestFromConflict(): void {
     <div v-if="!detail" class="edit-empty">加载中…</div>
 
     <template v-else>
-      <p v-if="saveError" class="edit-banner" role="alert">
+      <p v-if="matrixMissing" class="edit-banner edit-banner--locked" role="alert">
+        <span>未获取到可编辑性规则，暂不可编辑</span>
+      </p>
+      <p v-else-if="errorKind === 'locked'" class="edit-banner edit-banner--locked" role="alert">
+        <span>{{ lockedBannerText }}</span>
+      </p>
+      <p
+        v-else-if="saveError"
+        class="edit-banner"
+        :class="{ 'edit-banner--change': errorKind === 'change' }"
+        role="alert"
+      >
         <span>{{ saveError }}</span>
-        <template v-if="conflictFields.length">
+        <template v-if="errorKind === 'change' && conflictFields.length">
           ：{{ conflictFields.map((field) => fieldLabel(field)).join('、') }}
           <button type="button" class="edit-banner__link" @click="requestFromConflict">发起变更（预填）</button>
         </template>
       </p>
 
-      <section v-for="group in GROUPS" :key="group.key" class="edit-group" :class="{ 'is-locked': groupLocked(group) }">
+      <section v-for="group in GROUPS" :key="group.key" class="edit-group">
         <header class="edit-group__head">
           <h3 class="edit-group__title">{{ group.label }}</h3>
-          <template v-if="groupLocked(group)">
+          <template v-if="!matrixMissing && groupLocked(group)">
             <span class="edit-group__locked">需发起变更</span>
             <button
               type="button"
@@ -239,7 +298,12 @@ function requestFromConflict(): void {
           </template>
         </header>
 
-        <div v-for="field in group.fields" :key="field" class="edit-field">
+        <div
+          v-for="field in group.fields"
+          :key="field"
+          class="edit-field"
+          :class="{ 'is-locked': !isEditable(field) }"
+        >
           <label class="edit-field__label" :for="`edit-${field}`">{{ fieldLabel(field) }}</label>
           <div class="edit-field__control">
             <el-input
@@ -323,9 +387,8 @@ function requestFromConflict(): void {
               />
             </el-select>
 
-            <p v-if="field === 'estimateDays' && (detail.children?.length ?? 0) > 0" class="edit-field__hint">
-              父需求人天由子需求汇总
-            </p>
+            <!-- 逐字段原因行：非 EDIT 的字段在控件下说明「为什么不能改」——同一句只在 editability.ts -->
+            <p v-if="fieldHint(field)" class="edit-field__hint">{{ fieldHint(field) }}</p>
           </div>
         </div>
       </section>
@@ -338,32 +401,35 @@ function requestFromConflict(): void {
     <template #footer>
       <div class="edit-footer">
         <el-button size="small" @click="open = false">取消</el-button>
-        <el-button
-          v-if="allLocked"
-          type="primary"
-          size="small"
-          @click="requestChange(groupChangeType(GROUPS[0]), GROUPS.flatMap((group) => group.fields))"
-        >
-          发起变更
-        </el-button>
-        <template v-else>
+        <!-- fail-closed：矩阵缺失时不给任何预填入口（猜错变更类型比不给入口更糟） -->
+        <template v-if="!matrixMissing">
           <el-button
-            v-if="!allLocked && GROUPS.some((group) => groupLocked(group))"
+            v-if="allLocked"
+            type="primary"
             size="small"
-            @click="requestChange(groupChangeType(GROUPS.find((group) => groupLocked(group)) ?? GROUPS[0]), (GROUPS.find((group) => groupLocked(group)) ?? GROUPS[0]).fields)"
+            @click="requestChange(groupChangeType(GROUPS[0]), GROUPS.flatMap((group) => group.fields))"
           >
             发起变更
           </el-button>
-          <el-button
-            v-if="changed.length"
-            type="primary"
-            size="small"
-            :loading="saving"
-            :disabled="saving"
-            @click="save"
-          >
-            保存
-          </el-button>
+          <template v-else>
+            <el-button
+              v-if="GROUPS.some((group) => groupLocked(group))"
+              size="small"
+              @click="requestChange(groupChangeType(firstLockedGroup), firstLockedGroup.fields)"
+            >
+              发起变更
+            </el-button>
+            <el-button
+              v-if="changed.length"
+              type="primary"
+              size="small"
+              :loading="saving"
+              :disabled="saving"
+              @click="save"
+            >
+              保存
+            </el-button>
+          </template>
         </template>
       </div>
     </template>
@@ -386,6 +452,18 @@ function requestFromConflict(): void {
   color: var(--danger-ink);
   font-size: 13px;
   line-height: 20px;
+}
+
+/* 409 CHANGE_REQUIRED：可执行（有预填入口）→ warning */
+.edit-banner--change {
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
+}
+
+/* 409 FIELD_LOCKED / 矩阵缺失：只解释、无入口 → info（DESIGN §5.4） */
+.edit-banner--locked {
+  background: var(--color-info-bg);
+  color: var(--info-ink);
 }
 
 .edit-banner__link {
@@ -435,9 +513,10 @@ function requestFromConflict(): void {
   text-decoration: underline;
 }
 
-.edit-group.is-locked :deep(.el-input__wrapper),
-.edit-group.is-locked :deep(.el-textarea__inner),
-.edit-group.is-locked :deep(.el-select__wrapper) {
+/* 锁定下沉到字段级：同一组里可能「标题可改、描述需变更」，整组灰底会骗人 */
+.edit-field.is-locked :deep(.el-input__wrapper),
+.edit-field.is-locked :deep(.el-textarea__inner),
+.edit-field.is-locked :deep(.el-select__wrapper) {
   background: var(--bg-hover);
 }
 

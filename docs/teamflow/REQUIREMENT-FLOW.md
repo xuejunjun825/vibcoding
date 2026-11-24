@@ -121,6 +121,24 @@ TODO --start_dev--> IN_DEV --submit_test--> PENDING_TEST --test_pass--> TEST_PAS
 - **早期态不受限**：BUS 在 `SUBMITTED/APPROVING/PENDING_REVIEW`、PDR 在 `PENDING_ANALYSIS`、RD 在 `TODO` 时直接 `PUT` 仍然成功（草稿编辑不该被逼进审批）。
 - **锁定的版本仍可应用**：版本 `LOCKED/PUBLISHED` 时变更单照样能 apply，但会多一条 `CHANGE_AFTER_RELEASE_LOCK` 审计——这正是变更单要解决的「锁定后只能线下协调」。
 
+## 5.6 可编辑性判定（r43：能不能改由服务端矩阵回答）
+
+「这个字段现在能不能直接改」不再靠前端按状态猜，也不再散在服务里：唯一矩阵在 `platform-contract/src/main/java/com/example/platform/contract/RequirementEditability.java`（3 类型 × 全状态 × 11 字段 → `EDIT` / `CHANGE_REQUIRED` / `LOCKED` + 9 个 reasonCode）。`req-service` 只委托，**不得**再出现第二份状态→字段表。
+
+详情响应 `Detail` 顶层给出三个数组（元素 `{field, reasonCode}`）：`editableFields`（EDIT）、`changeRequiredFields`（走 §5.5 变更单）、`lockedFields`（谁都不能改）。三者**两两互斥、并集恰 11 个字段、按规范序**；`permissions.editableFields` 降级为 `EDIT ∩ 旧七字段` 的兼容投影，前端不再读它。数组缺失时前端 fail-closed（一律不可编辑），**不允许**按 `status`/`type` 本地推断。
+
+`PUT /api/req/requirements/{id}` 的顺序固定为 **可见性 → 矩阵 → 既有业务校验 → 落库**，且先判「真实变化」（11 字段逐一归一比较）：
+
+| 情形 | 结果 |
+|---|---|
+| 11 字段全同值 | `200`，零写库、零审计（`actualDays` 仍走旧 `400`） |
+| 有变化且命中 LOCKED | `409 FIELD_LOCKED`，detail `{fields, field, reasonCode}`，**无** `changeEndpoint` |
+| 有变化且命中受控字段 | `409 CHANGE_REQUIRED`，detail `{fields, changeEndpoint}` |
+
+两条铁律：**LOCKED 优先**（同时改锁定字段与受控字段只报 `FIELD_LOCKED`，一次只报一类）；**矩阵先于业务校验**（锁定字段即使传非法值也先被 409 拦下，不会先报参数错）。
+
+r40 的变更入口**不变**：§5.5 的 409 `CHANGE_REQUIRED` + `changeEndpoint` + 预填抽屉继续是晚期态改内容的唯一正道；r43 只是把「哪些字段属于这一类」从服务里的一处判断变成契约里的一张表，并把终态/父人天等原 `400` 收口为 `409 FIELD_LOCKED`。变更单列表每行新增 `fields[]`（规范序的真实变化字段，空快照为 `[]`），字段级中文标签与审批结果词只在 `web/src/views/req/change.ts` 提供。
+
 ## 6. 这张图的依据
 
 | 依据 | 位置 |
@@ -129,7 +147,9 @@ TODO --start_dev--> IN_DEV --submit_test--> PENDING_TEST --test_pass--> TEST_PAS
 | 动作与所需权限 | `platform-contract/.../ActionRegistry.java`、`RequirementActionMatrix.java` |
 | 门禁判定 | `RequirementRules`、`WbsEstimateService`、`RequirementService.decompose/transition` |
 | 角色×页面/动作授权 | `sys_role_permission`（1903 行种子）+ `PermissionService` |
-| 变更子流程（r40） | `RequirementChangeService` / `RequirementChangeApplyService` / `RequirementChangeGuard`，见 [CHANGE-REQUEST-FLOW.md](CHANGE-REQUEST-FLOW.md) |
+| 变更子流程（r40） | `RequirementChangeService` / `RequirementChangeApplyService` / `RequirementEditGuard`（r43 起取代已删除的 `RequirementChangeGuard`），见 [CHANGE-REQUEST-FLOW.md](CHANGE-REQUEST-FLOW.md) |
+| 可编辑性矩阵（r43） | `platform-contract/.../RequirementEditability.java`（3 类型 × 全状态 × 11 字段 → 决策 + reasonCode，未知 fail-closed） |
+| 三数组与两类 409（r43） | `RequirementService.detail/update`（先投影三数组、PUT 重排队）+ `RequirementEditGuard`（真实变化判定、LOCKED 优先）+ `RequirementErrors.FIELD_LOCKED` |
 | 实测 | 视频演示同一套流程已跑通（`docs/teamflow/demo-video/demo-roles.mp4`），截图见 `docs/teamflow/demo-shots/flow-*.png` |
 
 > 图是按 18 个**主操作节点**画的主干：会签/或签的具体审批人来源、加签减签、超时催办等分支没有画进来，它们在审批引擎内部，属于节点 3/4/8 的细节。

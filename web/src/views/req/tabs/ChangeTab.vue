@@ -8,17 +8,27 @@ import ErrorState from '@/components/ErrorState.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import {
   changeDetailPath,
+  fieldLabel,
   impactSummaryLines,
   statusLabel,
   typeLabel,
+  verdictText,
+  verdictTone,
 } from '@/views/req/change'
+import { usePlatformDict } from '@/views/req/platform'
 import { formatDateTime } from '@/utils/format'
 
 /**
- * 需求详情第 10 个 Tab「变更」（DESIGN §3.1）。
+ * 需求详情第 10 个 Tab「变更」（DESIGN §3.5）。
  *
  * 列表与详情分离：这里只列表/筛选/分页，点行进深链详情页；
  * 角标（PENDING 总数）与 APPROVED 横幅由父级拿 counts 渲染——Tab 自身不占头部空间。
+ *
+ * r43：7 列两行制。新增「目标字段」（chips）与「审批结果」两列，把原来的「原因」
+ * 「影响摘要」两列并入目标字段的次行——列数与横向宽度都必须落在 DESIGN §0.7 的
+ * `620 固定 + 320 弹性 = 940 最小宽` 上，否则 1280 视口要横向滚动。
+ * 字段名一律走 `change.ts:fieldLabel`（11 字段），审批结果词走 `verdictText`，
+ * 这里不拼中文（AC-10/AC-12）。
  */
 const props = defineProps<{ requirementId: number }>()
 const emit = defineEmits<{
@@ -28,6 +38,7 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
+const { ensure, userName } = usePlatformDict()
 
 const rows = ref<ChangeRow[]>([])
 const total = ref(0)
@@ -41,6 +52,50 @@ const statusOptions = computed(() =>
   (['PENDING', 'APPROVED', 'APPLIED', 'REJECTED', 'WITHDRAWN'] as ChangeStatus[]).map((value) => ({
     value,
     label: statusLabel(value),
+  })),
+)
+
+/**
+ * `ChangeRow.fields` 由服务端 r43 新增（TECHNICAL §3.5）；声明已在 `api/req.ts`，
+ * 字段缺失/为 null（老响应）→ 空列表 → 渲染「—」。
+ */
+function fieldsOf(row: ChangeRow): string[] {
+  const value = row.fields
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+/** 次行 = 「原因：… ｜影响：…」；两条都空才返回 null（空行不占高） */
+function noteOf(row: ChangeRow): { line: string; title: string } | null {
+  const reason = (row.reason ?? '').trim()
+  const impact = impactSummaryLines(row.impactSummary)
+  const parts: string[] = []
+  if (reason) parts.push(`原因：${reason}`)
+  if (impact.line1) parts.push(`影响：${impact.line1}`)
+  if (!parts.length) return null
+  const titleParts = [...parts]
+  if (impact.line2) titleParts.push(`影响：${impact.line2}`)
+  return { line: parts.join(' ｜'), title: titleParts.join(' ｜') }
+}
+
+function applicantOf(row: ChangeRow): string {
+  if (row.createdBy == null) return '—'
+  return userName(row.createdBy)
+}
+
+interface RowView {
+  row: ChangeRow
+  fields: string[]
+  note: { line: string; title: string } | null
+  applicant: string
+}
+
+/** 每行只算一次（`userName` 依赖字典装载，字典到位后自动重算） */
+const viewRows = computed<RowView[]>(() =>
+  rows.value.map((row) => ({
+    row,
+    fields: fieldsOf(row),
+    note: noteOf(row),
+    applicant: applicantOf(row),
   })),
 )
 
@@ -105,6 +160,8 @@ watch(
 )
 
 onMounted(() => {
+  // 提出人要显示姓名而不是 `用户 #12`：字典是幂等装载，页面别处也在 ensure
+  void ensure()
   void refresh()
 })
 
@@ -131,9 +188,9 @@ defineExpose({ refresh })
           <col style="width: 96px" />
           <col style="width: var(--w-change-status)" />
           <col style="width: var(--w-change-type)" />
-          <col />
-          <col style="width: var(--w-change-impact)" />
-          <col style="width: var(--w-change-applicant)" class="col--applicant" />
+          <col class="col--target" />
+          <col style="width: var(--w-change-verdict, 88px)" />
+          <col style="width: var(--w-change-applicant)" />
           <col style="width: var(--w-change-time)" />
         </colgroup>
         <thead>
@@ -141,9 +198,9 @@ defineExpose({ refresh })
             <th>变更单</th>
             <th>状态</th>
             <th>类型</th>
-            <th>原因</th>
-            <th>影响摘要</th>
-            <th class="col--applicant">申请人</th>
+            <th>目标字段</th>
+            <th>审批结果</th>
+            <th>提出人</th>
             <th>时间</th>
           </tr>
         </thead>
@@ -152,36 +209,36 @@ defineExpose({ refresh })
             <td colspan="7" class="change-table__placeholder">加载中…</td>
           </tr>
           <tr
-            v-for="row in rows"
-            :key="row.id"
+            v-for="item in viewRows"
+            :key="item.row.id"
             class="change-table__row"
             tabindex="0"
-            @click="openRow(row)"
-            @keyup.enter="openRow(row)"
+            @click="openRow(item.row)"
+            @keyup.enter="openRow(item.row)"
           >
             <td>
               <router-link
-                class="change-table__code mono"
-                :to="changeDetailPath(requirementId, row.id)"
+                class="change-table__code"
+                :to="changeDetailPath(requirementId, item.row.id)"
                 @click.stop
               >
-                #{{ row.id }}
+                #{{ item.row.id }}
               </router-link>
             </td>
-            <td><StatusPill kind="reqChange" :value="row.status" size="sm" /></td>
-            <td class="change-table__type">{{ typeLabel(row.changeType) }}</td>
-            <td class="change-table__reason">{{ row.reason }}</td>
-            <td class="change-table__impact">
-              <template v-if="row.impactSummary">
-                <span class="change-table__impact-line">{{ impactSummaryLines(row.impactSummary).line1 }}</span>
-                <span v-if="impactSummaryLines(row.impactSummary).line2" class="change-table__impact-line">
-                  {{ impactSummaryLines(row.impactSummary).line2 }}
-                </span>
-              </template>
-              <span v-else class="change-table__impact-line">无法评估</span>
+            <td><StatusPill kind="reqChange" :value="item.row.status" size="sm" /></td>
+            <td class="change-table__type">{{ typeLabel(item.row.changeType) }}</td>
+            <td class="change-table__target" data-test="change-target-fields">
+              <div v-if="item.fields.length" class="change-table__chips">
+                <span v-for="field in item.fields" :key="field" class="field-chip">{{ fieldLabel(field) }}</span>
+              </div>
+              <div v-else class="change-table__chips change-table__chips--empty">—</div>
+              <div v-if="item.note" class="change-table__note" :title="item.note.title">{{ item.note.line }}</div>
             </td>
-            <td class="col--applicant change-table__applicant">{{ row.createdBy ? `#${row.createdBy}` : '—' }}</td>
-            <td class="change-table__time">{{ formatDateTime(row.appliedAt || row.createdAt) }}</td>
+            <td class="change-table__verdict" :class="`verdict--${verdictTone(item.row.status)}`">
+              {{ verdictText(item.row.status) }}
+            </td>
+            <td class="change-table__applicant">{{ item.applicant }}</td>
+            <td class="change-table__time">{{ formatDateTime(item.row.appliedAt || item.row.createdAt) }}</td>
           </tr>
         </tbody>
       </table>
@@ -236,13 +293,16 @@ defineExpose({ refresh })
   flex: 1;
 }
 
+/* 7 列固定 620 + 弹性 320 = 940；比这窄就横向滚动，而不是藏列（DESIGN §3.5） */
 .change-tab__surface {
   padding: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .change-table {
   width: 100%;
+  min-width: 940px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -255,18 +315,19 @@ defineExpose({ refresh })
   font-weight: 500;
   color: var(--text-muted-aa);
   text-align: left;
+  white-space: nowrap;
 }
 
 .change-table td {
+  height: var(--h-change-row, 60px);
   padding: 8px 12px;
   border-top: 1px solid var(--border);
   font-size: 13px;
   color: var(--text-body);
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .change-table__row {
-  min-height: 48px;
   cursor: pointer;
   transition: background 120ms var(--ease);
 }
@@ -288,6 +349,7 @@ defineExpose({ refresh })
 }
 
 .change-table__code {
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-primary);
   text-decoration: none;
@@ -301,23 +363,67 @@ defineExpose({ refresh })
   color: var(--text-title);
 }
 
-.change-table__reason {
-  word-break: break-word;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+/* —— 目标字段：chips（规范序、不可点）+ 次行原因/影响 —— */
+.change-table__target {
+  min-width: 0;
 }
 
-.change-table__impact {
+.change-table__chips {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 20px;
 }
 
-.change-table__impact-line {
+.change-table__chips--empty {
+  align-items: center;
+  color: var(--text-muted-aa);
+}
+
+.field-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-cell);
+  background: var(--bg-hover);
   font-size: 12px;
-  line-height: 16px;
+  line-height: 1;
+  color: var(--text-title);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.change-table__note {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-muted-aa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* —— 审批结果：语义色文字，不做 pill（§0 反模式） —— */
+.change-table__verdict {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.verdict--success {
+  color: var(--success-ink);
+}
+
+.verdict--danger {
+  color: var(--danger-ink);
+}
+
+.verdict--warning {
+  color: var(--warning-ink);
+}
+
+.verdict--neutral {
   color: var(--text-muted-aa);
 }
 
@@ -326,15 +432,11 @@ defineExpose({ refresh })
   font-size: 12px;
   color: var(--text-muted-aa);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .change-tab__pager {
   align-self: flex-end;
-}
-
-@media (max-width: 1280px) {
-  .col--applicant {
-    display: none;
-  }
 }
 </style>

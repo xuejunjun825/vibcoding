@@ -286,12 +286,15 @@ api_call GET "/api/req/requirements/${PDR_ID}"
 expect_jq "PDR 人天 = 子需求之和 2.0" '.view.rollup.estimateDays|tonumber' "2" "父需求人天必须在子需求增删后重算（0.5 精度）"
 
 api_call PUT "/api/req/requirements/${PDR_ID}" '{"estimateDays":3}'
-expect "父需求手填人天 → 400 PARENT_DAYS_READONLY" 400 "PARENT_DAYS_READONLY"
+# r43 取代 r40：PUT 侧父人天由 400 改判 409 FIELD_LOCKED（reasonCode=PARENT_ROLLUP）；
+# 变更单侧（apply）仍是 400 PARENT_DAYS_READONLY，由 change-verify 覆盖。
+expect "父需求手填人天 → 409 FIELD_LOCKED/PARENT_ROLLUP（r43）" 409 "PARENT_ROLLUP"
 
-# 环：把 BUS 的父设为 PDR。类型分层先于祖先链生效，所以这里命中的是 INVALID_PARENT
-# （BUS 只能是顶层）；RequirementRules.checkAncestorCycle 由单测覆盖，属于直连改库的兜底。
+# 环：把 BUS 的父设为 PDR。r43 起 BUS 的 parentId 在任何非终态都是 LOCKED/NO_PARENT，
+# 矩阵先于类型分层/祖先链生效，所以这里命中的是 409 FIELD_LOCKED(NO_PARENT) 而不是 400 INVALID_PARENT。
+# 祖先环校验仍由 RequirementRules.checkAncestorCycle 的单测覆盖：类型分层让 HTTP 侧无法构造 A→B→A。
 api_call PUT "/api/req/requirements/${BUS_ID}" "{\"parentId\":${PDR_ID}}"
-expect "父子成环 → 400（类型分层/祖先链校验）" 400 "INVALID_PARENT"
+expect "父需求设父 → 409 FIELD_LOCKED/NO_PARENT（r43：BUS 只能是顶层）" 409 "NO_PARENT"
 
 # =====================================================================
 section "AC-2 同源静态检查（r27）：池查询不得自建 allowedActions"

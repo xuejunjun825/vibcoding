@@ -187,6 +187,16 @@
   --w-change-current: 216px;
   --w-change-arrow: 20px;
 
+  /* ---- r43 需求字段可编辑性：字段标记 + 变更表两行制（只增不改，0 新色板） ---- */
+  /* DESIGN §5.1 的六条里，实际被引用的四条在此声明；--w-change-code(96px) 的
+     列宽仍是 ChangeTab 的 colgroup 内联值，--w-change-target(320px) 是「目标字段」
+     弹性列的最小宽（该列按设计不写 width，由 table min-width: 940px 兜底），
+     两者暂无引用点，按「不落无用令牌」不声明——真要用时从 DESIGN §5.1 取值补这里。 */
+  --w-change-verdict: 88px; /* 变更列表「审批结果」列 */
+  --h-change-row: 60px; /* 变更列表行最小高（两行内容：字段 chips + 原因/影响） */
+  --flag-gap: 4px; /* 字段行标记与值的间隙（标记本身无底无边，靠间隙分隔） */
+  --tooltip-max: 320px; /* 原因 tooltip 最大宽：21 字 ≈ 252 + 16 padding ≤ 320 */
+
   /* ---- 字体 ---- */
   --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

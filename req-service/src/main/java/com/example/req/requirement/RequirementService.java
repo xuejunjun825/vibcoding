@@ -11,6 +11,7 @@ import com.example.platform.contract.DataScope;
 import com.example.platform.contract.GateDecision;
 import com.example.platform.contract.GatePort;
 import com.example.platform.contract.RequirementActionMatrix;
+import com.example.platform.contract.RequirementEditability;
 import com.example.req.integration.sonar.SonarProjectKeys;
 import com.example.req.requirement.RequirementDtos.AssignVendorRequest;
 import com.example.req.requirement.RequirementDtos.CreateCommand;
@@ -204,15 +205,34 @@ public class RequirementService {
     public View update(long id, RequirementDtos.UpdateRequest req) {
         DataScope scope = TenantContext.require();
         rejectStatusInBody(req.extra());
-        RequirementEntity entity = requireWritable(id);
+        // ① 先可见性、后矩阵：终态需求的可写判定由矩阵的 LOCKED 接管（409 FIELD_LOCKED），
+        //    不再在入口先抛 400「需求已关闭」——否则 AC-7 的错误码永远走不到。
+        RequirementEntity entity = requireVisible(id);
         Long oldParentId = entity.getParentId();
         // 真正的 before 必须在 applyXxx 之前取：applyDaysChange 会直接写 entity.estimateDays，
         // 放在后面取快照会把「新值」当成旧值，FIELD_CHANGE 就永远不产生。
         Map<String, Object> before = auditSnapshot(entity,
                 String.valueOf(entity.getExpectedDeliveryDate()));
-        // 收口判定要跟「改之前」的值比；入参校验会就地写 entity，所以先冻结一份快照。
-        Map<String, Object> guardBefore =
-                com.example.req.requirement.change.RequirementChangeFields.snapshot(entity);
+        // ② 真实变化判定：11 字段快照 vs 请求 patch，两边都做「空域→主域」归一后比较。
+        //    入参校验会就地写 entity，所以判定必须在 applyXxx 之前完成。
+        List<Long> currentDomains = domainsOf(id);
+        Map<String, Object> guardBefore = RequirementEditGuard.snapshot(entity, currentDomains);
+        List<String> changed = RequirementEditGuard.changed(
+                guardBefore, RequirementEditGuard.patch(req, currentDomains));
+
+        if (changed.isEmpty()) {
+            if (!RequirementEditGuard.carriesActualDays(req)) {
+                // 全部同值：200 / 零写库 / 零审计。「保存」按钮重复提交不该刷新 updatedAt。
+                return toView(entity, null);
+            }
+            // actualDays 不是矩阵字段（只是父需求只读），保持 r40 的终态 400 并照旧落库。
+            requireWritable(id);
+        } else {
+            // ③ 两类 409：LOCKED 优先，一次只报一类；必须在任何写库/关联行移动之前。
+            RequirementEditGuard.reject(id, entity.getType(), entity.getStatus(), changed);
+        }
+
+        // ④ 以下与 r40 一致：矩阵通过后才是既有业务校验（非法父链/人天精度仍是 400）。
         applyParentChange(entity, req.extra());
         applyDaysChange(entity, req.extra());
         applySonarKeyChange(entity, req.extra());
@@ -230,12 +250,6 @@ public class RequirementService {
             entity.setExpectedDeliveryDate(req.expectedDeliveryDate);
         }
 
-        // r40 PUT 收口（AC-13）：内容/日期/父子/版本字段的**真实变化**在早期态之外只能走变更单。
-        // 必须放在所有入参校验之后：非法父链/人天精度要先按既有 400 暴露，不能被 409 盖掉
-        // （否则 PUT 改出一个环也只会得到「请走变更单」，错误码与修复指引都错）。
-        // 同时又必须在写库（repository.save / release 成员移动）之前：拦下时一行都没动。
-        com.example.req.requirement.change.RequirementChangeGuard.rejectDirectEdit(
-                entity, guardBefore, req);
         // F2：releaseId 以前在 PUT 里被静默忽略。早期态允许直接改，但必须真正移动关联行，
         // 否则 requirement.release_id 变了、release_requirement 没变，版本侧看不到它。
         applyReleaseChange(entity, req.extra(), scope.userId());
@@ -333,8 +347,8 @@ public class RequirementService {
     /**
      * 早期态 PUT 改 releaseId：真正移动关联行（r40 F2）。
      *
-     * <p>晚期态的该字段已被 {@code RequirementChangeGuard} 拦成 409，所以执行到这里一定是
-     * 早期态或值未变。值未变时不移动，避免「提交整张表单」也 delete+insert 一遍。
+     * <p>晚期态的该字段已被 {@code RequirementEditGuard} 按矩阵拦成 409 FIELD_LOCKED，所以执行到这里
+     * 一定是早期态或值未变。值未变时不移动，避免「提交整张表单」也 delete+insert 一遍。
      * 十参单测没有装关联端口，此时跳过（那类单测本来就不覆盖 release 双写）。</p>
      */
     private void applyReleaseChange(RequirementEntity entity, Map<String, Object> extra, long actorId) {
@@ -402,10 +416,28 @@ public class RequirementService {
         List<Child> childViews = children.stream().map(child -> new Child(child.getId(), child.getCode(),
                 child.getType(), child.getStatus(), child.getTitle(), child.getOwnerUserId(),
                 child.getEstimateDays(), child.getActualDays())).toList();
+        // 可编辑性：一次 rules() 得到 11 字段的完整决策，再按三态投影成三个数组。
+        // 三个数组与 permissions.editableFields 必须同源于这一次调用，否则两套来源必然漂移。
+        List<RequirementEditability.Rule> rules =
+                RequirementEditability.rules(entity.getType(), entity.getStatus());
+        List<Long> domainIds = domainsOf(id);
         return new Detail(toView(entity, rollup), childViews,
                 gateFiltered(entity,
                         allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId())),
-                changePermissions(entity), estimateOf(entity));
+                changePermissions(entity),
+                project(rules, RequirementEditability.Decision.EDIT),
+                project(rules, RequirementEditability.Decision.CHANGE_REQUIRED),
+                project(rules, RequirementEditability.Decision.LOCKED),
+                domainIds, entity.getSonarProjectKey(), estimateOf(entity));
+    }
+
+    /** 详情三数组的唯一投影点：过滤后只留 {@code field + reasonCode}，顺序天然是 contract 的 FIELDS 序。 */
+    private static List<RequirementViews.FieldRule> project(
+            List<RequirementEditability.Rule> rules, RequirementEditability.Decision decision) {
+        return rules.stream()
+                .filter(rule -> rule.decision() == decision)
+                .map(rule -> new RequirementViews.FieldRule(rule.field(), rule.reasonCode()))
+                .toList();
     }
 
     /** 工时评估块的唯一入口（BUS 为 null，未评估为完整 NONE 对象）。 */
@@ -1011,7 +1043,8 @@ public class RequirementService {
      * <ul>
      *   <li>{@code changeRequest}：有「发起变更」动作档且当前状态可写（终态需求不能发起）；</li>
      *   <li>{@code changeApply}：有「应用变更」动作档（是否真能应用还要看单据状态 {@code APPROVED}）；</li>
-     *   <li>{@code editableFields}：本类型的早期态可直编字段，晚期态为空表——编辑抽屉据此锁定分组。</li>
+     *   <li>{@code editableFields}：<b>deprecated</b>（r43）——矩阵 EDIT ∩ r40 七字段的兼容投影，
+     *       前端改读详情顶层的三数组；这里保留只为旧客户端与旧断言，来源仍是同一次矩阵判定。</li>
      * </ul>
      *
      * <p>权限只读 {@link ActionPermissionResolver}：动作是否被授权由平台统一判定，这里只做

@@ -755,6 +755,8 @@ export interface ChangeRow {
   createdBy?: number | null
   createdAt?: string | null
   appliedAt?: string | null
+  /** r43：该变更单真实改动的字段（规范序）；历史空快照行为 [] */
+  fields?: string[] | null
   impactSummary?: ChangeImpactSummary | null
 }
 

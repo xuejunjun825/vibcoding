@@ -186,10 +186,22 @@ public class RequirementChangeService {
 
     // ------------------------------------------------------------------ mapping
 
+    /**
+     * 行上的 before/after 已是冻结快照，{@code fields} 就地算，零额外查询。
+     *
+     * <p>空快照（历史行或未携带快照）返回空列表而不是 null：列表接口必须保持 200，
+     * 前端把空列表显示成「—」，不区分「没有字段」与「字段未知」。</p>
+     */
     RequirementChangeViews.Row toRow(RequirementChangeEntity row) {
+        Map<String, Object> before = json.readMap(row.getBeforeJson());
+        Map<String, Object> after = json.readMap(row.getAfterJson());
+        List<String> fields = (before == null || before.isEmpty()
+                || after == null || after.isEmpty())
+                ? List.of()
+                : RequirementChangeFields.changedFields(before, after);
         return new RequirementChangeViews.Row(row.getId(), row.getChangeType(), row.getStatus(),
                 row.getReason(), row.getCreatedBy(), row.getCreatedAt(), row.getAppliedAt(),
-                assessor.summary(json.readMap(row.getImpactJson())));
+                fields, assessor.summary(json.readMap(row.getImpactJson())));
     }
 
     RequirementChangeViews.Detail toDetail(RequirementChangeEntity row, RequirementEntity entity) {

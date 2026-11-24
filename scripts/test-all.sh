@@ -42,6 +42,7 @@ run_step "r1 负向（verify-negative）"    bash "$ROOT/scripts/tests/verify-ne
 run_step "平台起栈（platform-up）"       bash "$ROOT/scripts/platform-up.sh"
 run_step "AC-1..AC-20（platform-verify）" bash "$ROOT/scripts/platform-verify.sh"
 run_step "需求变更单（change-verify）"    bash "$ROOT/scripts/change-verify.sh"
+run_step "需求字段可编辑性（editability-verify）" bash "$ROOT/scripts/editability-verify.sh"
 run_step "角色×页面准入（access-verify a0..a4）" bash "$ROOT/scripts/access-verify.sh"
 run_step "分析域中文标签（analytics-i18n-verify）" bash "$ROOT/scripts/analytics-i18n-verify.sh"
 run_step "平台负向（platform-test-negative）" bash "$ROOT/scripts/platform-test-negative.sh"

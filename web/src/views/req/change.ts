@@ -2,8 +2,11 @@
  * 需求变更单的纯函数层（r40，TECHNICAL §11.2 / DESIGN §3.1–§4.5）。
  *
  * 两份文档对本模块的分工是一致的：**标签与格式化只在这里与 dict.ts 各写一份**，
- * 页面组件不再自造文案；**早期态表不在这里复制**——锁定状态只读服务端下发的
- * `permissions.editableFields`（AC-12/AC-13，后端 `RequirementChangeFields.editableFields` 是唯一来源）。
+ * 页面组件不再自造文案；**状态表不在这里复制**。
+ *
+ * r43：可编辑性判定搬到 `views/req/editability.ts`（服务端三数组 + reasonCode 文案单点）；
+ * 这里的 `permissions.editableFields` 只剩「旧投影」语义（EDIT ∩ 七字段），留作兼容，
+ * 新代码一律用 `editabilityOf()`——两处都读会是两份真相。
  */
 import type { ChangeImpact, ChangeStatus, ChangeType, ChangeImpactSummary } from '@/api/req'
 import { CHANGE_STATUS, CHANGE_TYPE } from '@/stores/dict'
@@ -42,8 +45,12 @@ export const CHANGE_TYPES: ChangeTypeMeta[] = [
   { type: 'PARENT', label: '父需求', hint: '把需求挂到另一个父需求下', fields: ['parentId'] },
 ]
 
-/** 字段中文标签（变更单语境；automation 规则句另有一份 snake_case 词表，展示语境不同） */
+/**
+ * 字段中文标签（变更单语境；automation 规则句另有一份 snake_case 词表，展示语境不同）。
+ * r43：覆盖矩阵全部 11 字段——详情/抽屉展示的字段名不能露英文键（AC-10 配套）。
+ */
 const FIELD_LABELS: Record<string, string> = {
+  type: '需求类型',
   title: '标题',
   description: '描述',
   priority: '优先级',
@@ -51,6 +58,9 @@ const FIELD_LABELS: Record<string, string> = {
   estimateDays: '预估人天',
   releaseId: '所属版本',
   parentId: '父需求',
+  domainIds: '业务域',
+  ownerUserId: '负责人',
+  sonarProjectKey: 'Sonar 项目键',
 }
 
 export function fieldLabel(field: string): string {
@@ -105,6 +115,27 @@ export function typeLabel(type?: string | null): string {
 export function statusLabel(status?: string | null): string {
   if (!status) return '—'
   return CHANGE_STATUS[status]?.label ?? status
+}
+
+/**
+ * 变更列表「审批结果」列的词（r43，DESIGN §3.5）：只描述审批终局，不复述状态机原文；
+ * 未知状态回退 `statusLabel`，不吞掉新状态。
+ */
+export function verdictText(status?: string | null): string {
+  if (!status) return '—'
+  if (status === 'PENDING') return '审批中'
+  if (status === 'APPROVED' || status === 'APPLIED') return '通过'
+  if (status === 'REJECTED') return '驳回'
+  if (status === 'WITHDRAWN') return '撤回'
+  return statusLabel(status)
+}
+
+/** 「审批结果」列的语气（DESIGN §5.4）：通过 success / 驳回 danger / 撤回 neutral / 审批中 warning */
+export function verdictTone(status?: string | null): ChangeTone {
+  if (status === 'APPROVED' || status === 'APPLIED') return 'success'
+  if (status === 'REJECTED') return 'danger'
+  if (status === 'PENDING') return 'warning'
+  return 'neutral'
 }
 
 /* ---------------- 路径 ---------------- */
@@ -278,6 +309,10 @@ export interface ChangeErrorText {
   code: string
   /** CHANGE_REQUIRED 时被拦的字段（用于 banner 预填） */
   fields: string[]
+  /** r43 FIELD_LOCKED 的 `detail.field`：点名字段用（无则空串） */
+  field: string
+  /** r43 FIELD_LOCKED 的 `detail.reasonCode`：中文原因句由 `editability.ts:reasonText` 出（无则空串） */
+  reasonCode: string
 }
 
 const ERROR_TEXT: Record<string, string> = {
@@ -289,6 +324,7 @@ const ERROR_TEXT: Record<string, string> = {
   PARENT_NOT_POOLED: '父需求尚未入池，不能挂接',
   PARENT_NOT_SCHEDULED: '父需求当前状态不允许拆解',
   CHANGE_REQUIRED: '这些字段已不能直接修改，请发起变更单',
+  FIELD_LOCKED: '该字段已锁定，不能直接修改',
   CHANGE_NOT_APPROVED: '变更单尚未审批通过，不能应用',
   CHANGE_ALREADY_APPLIED: '变更单已应用，不能重复应用',
   CHANGE_CONFLICT: '字段在申请之后又被改过，本次不应用（未写入任何字段）',
@@ -300,11 +336,13 @@ const ERROR_TEXT: Record<string, string> = {
 export function changeErrorText(error: unknown): ChangeErrorText {
   const record = (error ?? {}) as { code?: unknown; message?: unknown; detail?: unknown }
   const code = typeof record.code === 'string' ? record.code : ''
-  const detail = record.detail as { fields?: unknown } | undefined
+  const detail = record.detail as { fields?: unknown; field?: unknown; reasonCode?: unknown } | undefined
   const fields = Array.isArray(detail?.fields)
     ? (detail?.fields as unknown[]).filter((item): item is string => typeof item === 'string')
     : []
+  const field = typeof detail?.field === 'string' ? detail.field : ''
+  const reasonCode = typeof detail?.reasonCode === 'string' ? detail.reasonCode : ''
   const message = typeof record.message === 'string' ? record.message : ''
   const text = ERROR_TEXT[code] ?? (message || '操作失败')
-  return { text, code, fields }
+  return { text, code, fields, field, reasonCode }
 }

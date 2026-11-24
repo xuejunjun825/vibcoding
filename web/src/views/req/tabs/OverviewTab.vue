@@ -9,10 +9,13 @@ import type {
   RequirementDetail,
 } from '@/api/types'
 import ApprovalTimeline from '@/components/ApprovalTimeline.vue'
+import FieldFlag from '@/views/req/FieldFlag.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import TagChips from '@/components/TagChips.vue'
 import { usePermission } from '@/composables/usePermission'
 import { formatDate, formatDateTime, formatDays } from '@/utils/format'
+import { changePermissionsOf } from '@/views/req/change'
+import { ruleOf } from '@/views/req/editability'
 import {
   ESTIMATE_CTA_LABEL,
   ESTIMATE_EVENT_LABEL,
@@ -23,14 +26,17 @@ import {
   estimateGateTip,
   estimateStatusOf,
 } from '@/views/req/estimate'
-import { childInfo, messageOf, typeLabel, usePlatformDict } from '@/views/req/platform'
+import { messageOf, requirementPath, typeLabel, usePlatformDict } from '@/views/req/platform'
 
 /**
  * P2 · 概览 tab：左字段网格，右审批进度小卡 + 最近 5 条动态。
- * 父需求的人天来自子需求汇总，只读并带锁标记（DESIGN §5 P2）。
  *
  * r26：顶部整宽「工时评估」卡片（六态 + 提交弹窗）。卡片门提示与动作行提示
  * 共用 `estimateGateTip()`，禁在模板里拼字符串（AC-13 逐字一致）。
+ *
+ * r43：字段行末尾挂 `FieldFlag`，可编辑性只读服务端三数组（`editability.ts`）。
+ * **不再有本地「父需求」推断**——父需求人天为什么只读由矩阵的 `PARENT_ROLLUP` 说，
+ * 子需求条数从此不参与任何字段判定（AC-3）。锁定只是标记，字段值永远可见。
  */
 const props = defineProps<{
   detail: RequirementDetail
@@ -44,13 +50,25 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'open-approval'): void
   (event: 'submitted'): void
+  /** r43 · 字段级「发起变更」：字段名交给详情页预填抽屉（AC-11） */
+  (event: 'requestChange', field: string): void
 }>()
 
 const { domainName, vendorName, userName } = usePlatformDict()
 const { can } = usePermission()
 
-const rollup = computed(() => childInfo(props.detail))
-const isParent = computed(() => rollup.value.childCount > 0)
+/** 字段级 CTA 的权限 = 服务端 `permissions.changeRequest`（未下发按允许，见 change.ts 注释） */
+const canChange = computed(() => changePermissionsOf(props.detail).changeRequest)
+
+/**
+ * 业务域支持多值（r43 新增只读投影 `domainIds`）；旧响应回退单值。
+ * 值永远渲染，锁定只在行尾加标记——「11 字段值全可见」是 anti-goal 红线（AC-9）。
+ */
+const domainsText = computed(() => {
+  const ids = props.detail.domainIds
+  if (Array.isArray(ids) && ids.length > 0) return ids.map((domainId) => domainName(domainId)).join('、')
+  return props.detail.domainName ?? domainName(props.detail.domainId)
+})
 const pendingTasks = computed(() => (props.approval?.tasks ?? []).filter((task) => task.status === 'PENDING'))
 /** 最近 5 条 = 时间线末尾（升序渲染），不能取头部，否则评估事件永远进不来 */
 const recent = computed(() => props.timeline.slice(-5))
@@ -275,11 +293,25 @@ async function submitForm(): Promise<void> {
         <dl class="grid">
           <div>
             <dt>需求类型</dt>
-            <dd>{{ typeLabel(detail.type) }}</dd>
+            <dd>
+              {{ typeLabel(detail.type) }}
+              <FieldFlag
+                :rule="ruleOf(detail, 'type')"
+                :change-disabled="!canChange"
+                @request-change="emit('requestChange', 'type')"
+              />
+            </dd>
           </div>
           <div>
             <dt>业务域</dt>
-            <dd>{{ detail.domainName ?? domainName(detail.domainId) }}</dd>
+            <dd>
+              {{ domainsText }}
+              <FieldFlag
+                :rule="ruleOf(detail, 'domainIds')"
+                :change-disabled="!canChange"
+                @request-change="emit('requestChange', 'domainIds')"
+              />
+            </dd>
           </div>
           <div>
             <dt>厂商</dt>
@@ -287,28 +319,89 @@ async function submitForm(): Promise<void> {
           </div>
           <div>
             <dt>负责人</dt>
-            <dd>{{ detail.ownerName ?? userName(detail.ownerId) }}</dd>
+            <dd>
+              {{ detail.ownerName ?? userName(detail.ownerId) }}
+              <FieldFlag
+                :rule="ruleOf(detail, 'ownerUserId')"
+                :change-disabled="!canChange"
+                @request-change="emit('requestChange', 'ownerUserId')"
+              />
+            </dd>
           </div>
           <div>
             <dt>期望交付</dt>
-            <dd>{{ formatDate(detail.expectedDeliveryDate) }}</dd>
+            <dd>
+              {{ formatDate(detail.expectedDeliveryDate) }}
+              <FieldFlag
+                :rule="ruleOf(detail, 'expectedDeliveryDate')"
+                :change-disabled="!canChange"
+                @request-change="emit('requestChange', 'expectedDeliveryDate')"
+              />
+            </dd>
           </div>
           <div>
             <dt>所属版本</dt>
-            <dd>{{ detail.releaseName ?? (detail.releaseId ? `版本 #${detail.releaseId}` : '未排期') }}</dd>
+            <dd>
+              {{ detail.releaseName ?? (detail.releaseId ? `版本 #${detail.releaseId}` : '未排期') }}
+              <FieldFlag
+                :rule="ruleOf(detail, 'releaseId')"
+                :change-disabled="!canChange"
+                @request-change="emit('requestChange', 'releaseId')"
+              />
+            </dd>
           </div>
           <div>
             <dt>预估人天</dt>
             <dd class="num">
               {{ formatDays(detail.estimateDays) }}
-              <span v-if="isParent" class="lock" title="父需求人天由子需求汇总，只读">🔒 汇总</span>
+              <FieldFlag
+                :rule="ruleOf(detail, 'estimateDays')"
+                :change-disabled="!canChange"
+                @request-change="emit('requestChange', 'estimateDays')"
+              />
             </dd>
           </div>
           <div>
             <dt>实际人天</dt>
             <dd class="num">
               {{ formatDays(detail.actualDays) }}
-              <span v-if="isParent" class="lock" title="父需求人天由子需求汇总，只读">🔒 汇总</span>
+              <span class="rollup-mark" data-test="actual-days-rollup">汇总</span>
+            </dd>
+          </div>
+          <div data-test="overview-parent">
+            <dt>父需求</dt>
+            <dd>
+              <router-link
+                v-if="detail.parent"
+                :to="requirementPath(detail.parent.id)"
+                class="parent-link"
+                :title="`${detail.parent.code} ${detail.parent.title}`"
+              >
+                <span class="code-mono">{{ detail.parent.code }}</span>
+                <span class="parent-title">{{ detail.parent.title }}</span>
+              </router-link>
+              <span v-else class="parent-none">顶层需求</span>
+              <FieldFlag
+                :rule="ruleOf(detail, 'parentId')"
+                :change-disabled="!canChange"
+                @request-change="emit('requestChange', 'parentId')"
+              />
+            </dd>
+          </div>
+          <div data-test="overview-sonar">
+            <dt>Sonar 项目键</dt>
+            <dd>
+              <span
+                v-if="detail.sonarProjectKey"
+                class="code-mono"
+                :title="detail.sonarProjectKey"
+              >{{ detail.sonarProjectKey }}</span>
+              <span v-else class="parent-none">—</span>
+              <FieldFlag
+                :rule="ruleOf(detail, 'sonarProjectKey')"
+                :change-disabled="!canChange"
+                @request-change="emit('requestChange', 'sonarProjectKey')"
+              />
             </dd>
           </div>
           <div>
@@ -629,9 +722,48 @@ async function submitForm(): Promise<void> {
 .num {
   font-variant-numeric: tabular-nums;
 }
-.lock {
+/**
+ * 「实际人天」不是矩阵字段（永远由交付/子需求汇总出来），所以只留一个静态来源说明，
+ * 不带锁图标、不依赖子需求条数（r43：本地父需求推断已删）。
+ */
+.rollup-mark {
   margin-left: 6px;
-  font-size: 11px;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+/* 父需求 / Sonar 两行是 r43 补齐的只读展示（DESIGN §3.2） */
+.parent-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+.parent-link:hover .parent-title {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.parent-link:focus-visible {
+  outline: none;
+  border-radius: var(--r-cell);
+  box-shadow: var(--focus-ring);
+}
+.code-mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted-aa);
+  white-space: nowrap;
+}
+.parent-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.parent-none {
+  font-size: 13px;
   color: var(--text-muted-aa);
 }
 .overview__tags {
