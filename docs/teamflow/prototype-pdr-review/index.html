@@ -35,6 +35,20 @@
   .member-pick{display:flex;flex-wrap:wrap;gap:8px}
   .member-pick .m{display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:16px;padding:5px 10px;font-size:12px;background:#fff}
   .member-pick .m.sel{border-color:var(--primary);background:var(--primary-light);color:var(--primary)}
+  .bar-row{display:flex;align-items:center;gap:10px;margin:9px 0;font-size:12px}
+  .bar-row .muted{width:112px;flex:0 0 112px}
+  .bar-row .track{flex:1;height:8px;background:#F2F3F5;border-radius:4px;overflow:hidden}
+  .bar-row .fill{height:8px;background:var(--primary);border-radius:4px}
+  .bar-row b{width:64px;text-align:right;font-size:12px}
+  .cats{display:flex;flex-wrap:wrap;gap:6px}
+  .cats .c{font-size:12px;padding:3px 9px;border-radius:12px;border:1px solid var(--border);color:var(--text-body);background:#fff}
+  .cats .c.sel{background:var(--primary);border-color:var(--primary);color:#fff}
+  .dist{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text-body);margin:2px 0 12px;border:1px solid var(--divider);border-radius:6px;padding:8px 10px;background:#FAFBFC}
+  .dist .b{display:flex;align-items:center;gap:8px}
+  .dist .b .nm{width:56px;flex:0 0 56px;color:var(--text-muted)}
+  .dist .track{flex:1;height:6px;background:#F2F3F5;border-radius:3px;overflow:hidden}
+  .dist .fill{height:6px;background:var(--primary)}
+  .dist .num{width:20px;text-align:right;color:var(--text-title)}
   .attach{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
   .attach .a{display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;color:var(--text-body);background:#fff}
   .attach .a .ic{width:16px;height:16px;border-radius:3px;background:var(--primary-light);color:var(--primary);font-size:10px;display:inline-flex;align-items:center;justify-content:center}
@@ -60,12 +74,13 @@
   <div class="main">
     <div class="topnav"><a class="active">需求</a><a>版本</a><a>审批</a><a>发布</a><a>缺陷</a><a>测试</a><a>追溯</a><a>设置</a></div>
     <div class="page">
-      <div class="proto-bar">交互稿 · 产品需求评审 + 厂商工时评估 · 四屏：① PDR 评审 ② 指派/换厂商 ③ 厂商提交评估 ④ 评审附件 —— 静态示意，无交互逻辑</div>
+      <div class="proto-bar">交互稿 · 产品需求评审 + 厂商工时评估 · 五屏：① PDR 评审（含分类） ② 指派/换厂商 ③ 厂商提交评估 ④ 评审附件 ⑤ 评审统计 —— 静态示意，无交互逻辑</div>
       <div class="switcher">
         <button class="btn on" data-sec="s1">① PDR 评审</button>
         <button class="btn" data-sec="s2">② 指派 / 换厂商</button>
         <button class="btn" data-sec="s3">③ 厂商提交评估</button>
         <button class="btn" data-sec="s4">④ 评审附件</button>
+        <button class="btn" data-sec="s5">⑤ 评审统计</button>
       </div>
 
       <!-- ============ 屏 1：PDR 评审 ============ -->
@@ -130,18 +145,25 @@
 
                 <div class="panel" style="border:none">
                   <div class="panel-head" style="padding:0 0 10px"><span>评审意见</span><span class="muted">2 条 · 附件 3 个</span></div>
+                  <div class="dist">
+                    <span class="muted" style="margin-bottom:2px">意见分类分布（本单）</span>
+                    <span class="b"><span class="nm">范围</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="num">3</span></span>
+                    <span class="b"><span class="nm">技术</span><span class="track"><span class="fill" style="width:66%"></span></span><span class="num">2</span></span>
+                    <span class="b"><span class="nm">验收</span><span class="track"><span class="fill" style="width:33%"></span></span><span class="num">1</span></span>
+                    <span class="b"><span class="nm">工期</span><span class="track"><span class="fill" style="width:0%"></span></span><span class="num">0</span></span>
+                  </div>
                   <div class="opinion">
-                    <div class="who">王坤 · 通过 <span class="muted" style="font-weight:400">2026-11-25 09:12</span></div>
+                    <div class="who"><span class="pill pill-gray">范围</span> 王坤 · 通过 <span class="muted" style="font-weight:400">2026-11-25 09:12</span></div>
                     <div class="body">范围清晰。导出字段与对账表一致，建议默认只导差异行。</div>
                     <div class="attach"><span class="a"><span class="ic">PDF</span>规格说明-v2.pdf · 1.2 MB</span></div>
                   </div>
                   <div class="opinion">
-                    <div class="who">李雯 · 通过 <span class="muted" style="font-weight:400">2026-11-25 10:04</span></div>
+                    <div class="who"><span class="pill pill-gray">验收标准</span> 李雯 · 通过 <span class="muted" style="font-weight:400">2026-11-25 10:04</span></div>
                     <div class="body">业务侧确认：需要带差异原因列，导出后能直接发供应商。</div>
                     <div class="attach"><span class="a"><span class="ic">XLS</span>差异样例.xlsx · 240 KB</span><span class="a"><span class="ic">PNG</span>对账界面截图.png · 880 KB</span></div>
                   </div>
                   <div class="opinion" style="background:#FFF7E6;border-color:#FFE0B2">
-                    <div class="who">示例：需修改（陈晓）</div>
+                    <div class="who"><span class="pill pill-gray">技术可行性</span> 示例：需修改（陈晓）</div>
                     <div class="body">导出走异步任务更稳，10 万行以内要能 1 分钟内完成；请在方案里写清上限与失败重试。</div>
                   </div>
                 </div>
@@ -172,6 +194,10 @@
                 <label>评审材料（可选，评审人可下载）</label>
                 <div class="upload">＋ 点击或拖拽上传（pdf / docx / xlsx / png / jpg / zip / csv / md，单个 ≤ 20MB）</div>
                 <div class="attach"><span class="a"><span class="ic">PDF</span>需求规格说明.pdf · 1.2 MB</span></div>
+              </div>
+              <div class="field">
+                <label>评审意见分类（评审人填写时必选，用于统计）</label>
+                <div class="cats"><span class="c sel">范围 / 需求理解</span><span class="c">技术可行性</span><span class="c">工期 / 排期</span><span class="c">风险 / 依赖</span><span class="c">验收标准</span><span class="c">界面 / 交互</span><span class="c">数据 / 兼容</span><span class="c">合规 / 安全</span><span class="c">其他</span></div>
               </div>
               <div class="field" style="margin:0">
                 <label>结论汇总规则</label>
@@ -289,6 +315,40 @@
           </div>
         </div>
       </section>
+      <!-- ============ 屏 5：评审统计 ============ -->
+      <section class="sec" id="s5">
+        <div class="page-head"><div class="page-title">评审质量 · 意见分类统计</div><div class="head-actions"><button class="btn">导出 XLSX（带水印）</button></div></div>
+        <div class="kpi-row" style="margin-bottom:12px">
+          <div class="kpi"><div class="muted">评审单</div><div class="v">38</div><div class="hint">近 30 天 · 全部域</div></div>
+          <div class="kpi"><div class="muted">评审意见</div><div class="v">126</div><div class="hint">6 条/单</div></div>
+          <div class="kpi"><div class="muted">需修改率</div><div class="v">23.8%</div><div class="hint">按意见口径</div></div>
+          <div class="kpi"><div class="muted">平均评审时长</div><div class="v">21.4h</div><div class="hint">P90 46h</div></div>
+        </div>
+        <div class="cols-2">
+          <div class="panel"><div class="panel-head"><span>意见分类分布</span><span class="muted">近 30 天</span></div>
+            <div class="panel-body">
+              <div class="bar-row"><span class="muted">范围 / 需求理解</span><div class="track" style="flex:1"><div class="fill" style="width:86%"></div></div><b>43</b></div>
+              <div class="bar-row"><span class="muted">技术可行性</span><div class="track" style="flex:1"><div class="fill" style="width:58%"></div></div><b>29</b></div>
+              <div class="bar-row"><span class="muted">工期 / 排期</span><div class="track" style="flex:1"><div class="fill" style="width:34%"></div></div><b>17</b></div>
+              <div class="bar-row"><span class="muted">验收标准</span><div class="track" style="flex:1"><div class="fill" style="width:26%"></div></div><b>13</b></div>
+              <div class="bar-row"><span class="muted">风险 / 依赖</span><div class="track" style="flex:1"><div class="fill" style="width:20%"></div></div><b>10</b></div>
+              <div class="bar-row"><span class="muted">界面 / 交互</span><div class="track" style="flex:1"><div class="fill" style="width:14%"></div></div><b>7</b></div>
+              <div class="bar-row"><span class="muted">数据 / 兼容</span><div class="track" style="flex:1"><div class="fill" style="width:10%"></div></div><b>5</b></div>
+              <div class="bar-row"><span class="muted">合规 / 安全</span><div class="track" style="flex:1"><div class="fill" style="width:4%"></div></div><b>2</b></div>
+            </div>
+          </div>
+          <div class="panel"><div class="panel-head"><span>按评审人</span><span class="muted">意见 / 需修改</span></div>
+            <div class="panel-body">
+              <div class="bar-row"><span class="muted">陈晓 · DEV</span><div class="track" style="flex:1"><div class="fill" style="width:70%"></div></div><b>34 / 9</b></div>
+              <div class="bar-row"><span class="muted">孙倩 · QA</span><div class="track" style="flex:1"><div class="fill" style="width:52%"></div></div><b>26 / 6</b></div>
+              <div class="bar-row"><span class="muted">王坤 · PO</span><div class="track" style="flex:1"><div class="fill" style="width:44%"></div></div><b>22 / 5</b></div>
+              <div class="bar-row"><span class="muted">李雯 · SME</span><div class="track" style="flex:1"><div class="fill" style="width:30%"></div></div><b>15 / 9</b></div>
+              <div class="hint" style="margin-top:10px">与「自助报表」用同一套数据集：`pdr_review` / `pdr_review_opinion`，页面、看板、导出三处数字同源。</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ============ 屏 4：评审附件 ============ -->
       <section class="sec" id="s4">
         <div class="panel" style="max-width:860px">
@@ -304,6 +364,9 @@
 
           <div class="panel" style="border:none">
             <div class="panel-head" style="padding:0 0 10px"><span>我的评审意见</span><span class="muted">提交后可修改，直到结论生成</span></div>
+            <div class="field"><label>意见分类（必选，用于统计）</label>
+              <div class="cats"><span class="c">范围 / 需求理解</span><span class="c sel">技术可行性</span><span class="c">工期 / 排期</span><span class="c">风险 / 依赖</span><span class="c">验收标准</span><span class="c">界面 / 交互</span><span class="c">数据 / 兼容</span><span class="c">合规 / 安全</span><span class="c">其他</span></div>
+            </div>
             <div class="field"><label>结论</label>
               <div class="member-pick"><span class="m">通过</span><span class="m sel">需修改</span><span class="m">驳回</span></div>
             </div>

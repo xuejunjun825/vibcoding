@@ -293,8 +293,8 @@ vendor</td>
 </tr>
 <tr>
 <td><code>pdr_review_opinion</code></td>
-<td><code>id, tenant_id, review_id, reviewer_id, decision(PASS/NEED_CHANGE/REJECT), comment, created_at</code></td>
-<td><code>uk(review_id, reviewer_id)</code>（同一人只留一条有效意见，重提覆盖并进历史）</td>
+<td><code>id, tenant_id, review_id, reviewer_id, decision(PASS/NEED_CHANGE/REJECT), **category**, comment, created_at</code></td>
+<td><code>uk(review_id, reviewer_id)</code>；<code>idx(tenant_id, category)</code>（统计用）</td>
 </tr>
 </tbody>
 </table>
@@ -363,6 +363,76 @@ vendor</td>
 汇总表加列以便查询/校验；两种存法都要在验收里断言「换厂商后读出来是
 STALE」。</p>
 </blockquote>
+<h3 id="44-评审意见分类便于统计">4.4 评审意见分类（便于统计）</h3>
+<p>意见必须带<strong>一个</strong>分类（单选，够统计且不逼用户做多标签判断）；分类走
+<code>sys_dict</code> 字典而不是硬编码枚举，业务可自行增删：</p>
+<table>
+<thead>
+<tr>
+<th>code</th>
+<th>中文</th>
+<th>典型用法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RANGE</code></td>
+<td>范围 / 需求理解</td>
+<td>边界不清、漏场景、与父需求不一致</td>
+</tr>
+<tr>
+<td><code>TECH</code></td>
+<td>技术可行性</td>
+<td>实现方案、性能、异步/批量、依赖能力</td>
+</tr>
+<tr>
+<td><code>SCHEDULE</code></td>
+<td>工期 / 排期</td>
+<td>人天评估、排期冲突、依赖顺序</td>
+</tr>
+<tr>
+<td><code>RISK</code></td>
+<td>风险 / 依赖</td>
+<td>外部系统、数据迁移、上线风险</td>
+</tr>
+<tr>
+<td><code>ACCEPTANCE</code></td>
+<td>验收标准</td>
+<td>通过条件、测试口径、口径不一致</td>
+</tr>
+<tr>
+<td><code>UI</code></td>
+<td>界面 / 交互</td>
+<td>页面流程、字段展示、状态可读性</td>
+</tr>
+<tr>
+<td><code>DATA</code></td>
+<td>数据 / 兼容</td>
+<td>字段口径、历史数据、导入导出格式</td>
+</tr>
+<tr>
+<td><code>COMPLIANCE</code></td>
+<td>合规 / 安全</td>
+<td>权限、脱敏、审计、水印</td>
+</tr>
+<tr>
+<td><code>OTHER</code></td>
+<td>其他</td>
+<td>兜底（缺省值，允许但不鼓励）</td>
+</tr>
+</tbody>
+</table>
+<p>统计口径（三处同源，避免"页面一个数、报表另一个数"）：</p>
+<ul>
+<li>意见数、各分类占比、需修改/驳回率（按意见、按评审单两种口径都要给）；</li>
+<li>平均评审时长 = 评审单
+<code>created_at → closed_at</code>（小时），以及 P90；</li>
+<li>评审人维度：每人发起/参与/意见数/需修改比例。</li>
+<li>维度表：<code>pdr_review</code>（评审单）、<code>pdr_review_opinion</code>（意见）作为新数据集进分析域，供
+<code>/reports</code> 自助报表与看板直接取数（复用既有
+<code>AnalyticsDatasets</code> 白名单机制，<strong>不写第二套 SQL
+引擎</strong>）。</li>
+</ul>
 <h2 id="5-接口变更">5. 接口变更</h2>
 <h3 id="51-新增">5.1 新增</h3>
 <table>
@@ -396,7 +466,8 @@ STALE」。</p>
 <tr>
 <td><code>POST</code></td>
 <td><code>/pdr-reviews/{reviewId}/opinions</code></td>
-<td>评审人提交意见：<code>{decision, comment}</code></td>
+<td>评审人提交意见：<code>{decision, **category**, comment}</code>（<code>category</code>
+必填，非法值 400 <code>INVALID_CATEGORY</code>）</td>
 <td>动作码 <code>req.action.pdr_review_opinion</code></td>
 </tr>
 <tr>
@@ -410,6 +481,19 @@ STALE」。</p>
 <td><code>/requirements/{id}/pdr-review</code></td>
 <td>读评审单 + 意见列表</td>
 <td>页面码 <code>req.pool</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/pdr-reviews/stats</code></td>
+<td>意见分类统计：<code>?domainId&amp;from&amp;to&amp;groupBy=CATEGORY|REVIEWER|DECISION</code>
+→ 计数 / 占比 / 平均评审时长</td>
+<td>页面码 <code>req.pool</code>（读）</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/pdr-reviews/datasets</code></td>
+<td>分析域数据集白名单元信息（<code>pdr_review</code>、<code>pdr_review_opinion</code>，含维度/度量）</td>
+<td>复用 <code>/reports/datasets</code> 机制</td>
 </tr>
 </tbody>
 </table>
@@ -481,8 +565,10 @@ STALE」。</p>
 409 <code>PDR_REVIEW_REQUIRED</code>；未指派厂商 → 评估 409
 <code>VENDOR_NOT_ASSIGNED</code>；评估未通过 → 排期 409
 <code>ESTIMATE_NOT_APPROVED</code>（已有）。</li>
-<li><strong>R2
-评审结论</strong>：<code>MODE_ALL</code>（默认全员通过才算通过）；任一
+<li><strong>R2 评审结论与分类</strong>：意见必须带
+<code>category</code>（非法/缺失 → 400
+<code>INVALID_CATEGORY</code>，<code>detail.allowed[]</code>
+列可选值）；<code>MODE_ALL</code>（默认全员通过才算通过）；任一
 <code>NEED_CHANGE</code>/<code>REJECT</code> → 评审
 <code>REJECTED</code>，PDR
 保持可编辑并记录意见；重新发起评审需新建单据（历史保留）。</li>
@@ -564,8 +650,15 @@ alt="指派/换厂商" /> <img
 src="prototype-pdr-review/shot-3-vendor-estimate.png"
 alt="厂商提交评估" /> <img
 src="prototype-pdr-review/shot-4-review-attachments.png"
-alt="评审附件" /></p>
+alt="评审附件" /> <img
+src="prototype-pdr-review/shot-5-review-stats.png" alt="评审统计" /></p>
 <ol start="0" type="1">
+<li><strong>意见分类</strong>：提交意见时先选分类（9 个
+chip，单选，必填），意见卡左上角展示分类标签；评审 tab
+顶部一行「分类分布」小条形（范围 3 / 技术 1 / 工期 2
+…），点分类可过滤意见列表。 0.1
+<strong>统计视图</strong>：分析域「评审质量」看板卡：各分类意见数堆叠柱、需修改率、平均评审时长
+P90、按评审人 Top N（复用 <code>MetricFormulas</code> 同源口径）。</li>
 <li><strong>评审附件</strong>：发起评审弹窗里可先挂「评审材料」；每位评审人提交意见时可附
 1–5 个附件（截图里是「规格说明.pdf /
 差异样例.xlsx」这类），意见卡下方展示附件 chip（文件名 + 大小 +
@@ -601,7 +694,8 @@ alt="评审附件" /></p>
 <tr>
 <td>PDR-1</td>
 <td>待评审（评审单 IN_REVIEW，2/4 已评），带 2
-个评审附件（<code>规格说明.pdf</code>、<code>差异样例.xlsx</code>）</td>
+个评审附件（<code>规格说明.pdf</code>、<code>差异样例.xlsx</code>）；已有意见覆盖
+3 个分类（RANGE/TECH/ACCEPTANCE）</td>
 </tr>
 <tr>
 <td>PDR-2</td>
@@ -701,6 +795,31 @@ alt="评审附件" /></p>
 <td>413 <code>FILE_TOO_LARGE</code> / 415
 <code>UNSUPPORTED_MEDIA_TYPE</code></td>
 </tr>
+<tr>
+<td>C1</td>
+<td>提交意见不带 <code>category</code> / 传
+<code>category=FOO</code></td>
+<td>400 <code>INVALID_CATEGORY</code>（<code>detail.allowed[]</code> 含
+9 个 code）</td>
+</tr>
+<tr>
+<td>C2</td>
+<td>一次评审 6 条意见（3 RANGE / 2 TECH / 1 ACCEPTANCE）</td>
+<td><code>GET /pdr-reviews/stats?groupBy=CATEGORY</code>
+返回与明细逐分类相等，占比合计 100%</td>
+</tr>
+<tr>
+<td>C3</td>
+<td>同一批数据在 <code>/reports</code> 用新数据集
+<code>pdr_review_opinion</code> 拉交叉表</td>
+<td>与 <code>/pdr-reviews/stats</code> 数字逐项相等（同源断言）</td>
+</tr>
+<tr>
+<td>C4</td>
+<td>统计按域/厂商隔离</td>
+<td>厂商账号的 <code>stats</code>
+只统计本厂商可见评审（与明细条数一致）</td>
+</tr>
 </tbody>
 </table>
 <p>门禁：既有 9 套不得降（<code>rbac</code> / <code>access</code> /
@@ -708,7 +827,7 @@ alt="评审附件" /></p>
 <code>release-flow</code> / <code>gate-order</code> /
 <code>automation</code> / <code>change</code> /
 <code>demo-reset</code>）；新增 <code>scripts/pdr-flow-verify.sh</code>
-≥24 条断言（含 A1–A5、B1–B9、换厂商幂等与附件越权），接入
+≥30 条断言（含 A1–A5、B1–B9、C1–C4、换厂商幂等与附件越权），接入
 <code>make test</code>。</p>
 <h2 id="11-迁移与兼容">11. 迁移与兼容</h2>
 <ul>
@@ -736,6 +855,12 @@ tab、评估卡、指派厂商弹窗）、项目组管理页、审批中心（�
 <strong>附件</strong>：<code>AttachmentService.normalizeType</code> 加
 <code>PDR_REVIEW</code>、<code>resolveBiz</code>
 增加评审单归属解析、上传/删除的评审态校验、前端评审 tab 附件区。
+<strong>统计</strong>：<code>sys_dict</code> 加
+<code>review_opinion_category</code>
+字典、<code>/pdr-reviews/stats</code> 聚合（单条 SQL 按
+category/reviewer/decision 分组，避免 N+1）、分析域新增两个数据集进
+<code>AnalyticsDatasets</code> 白名单、看板卡与自助报表复用
+<code>MetricFormulas</code> 同源口径。
 <strong>脚本/数据</strong>：<code>platform-demo-reset.sh</code>（新夹具）、<code>pdr-flow-verify.sh</code>（新门禁）、<code>SeedService</code>（项目组种子）、<code>DEMO-BY-ROLE.md</code>、<code>FLOW-CONTROL-AUDIT.md</code>。</p>
 <p><strong>风险</strong> | 风险 | 影响 | 缓解 | |---|---|---| | 评审人多
 → 流程卡住 | PDR 长期停在待评审 | 超时提醒（48h
@@ -746,7 +871,9 @@ tab、评估卡、指派厂商弹窗）、项目组管理页、审批中心（�
 旧门禁/演示脚本红 | 不改 PDR
 状态机（用门禁而非新态），把风险限制在规则层 | | 厂商权限放大 |
 越权看到别家需求 | 复用既有 <code>ScopeSql</code> 行级隔离 +
-<code>OUT_OF_SCOPE</code> 负向断言 | |
+<code>OUT_OF_SCOPE</code> 负向断言 | | 分类体系设计不当 |
+统计维度失真、填了没用 | 先给 9 类最小集合 + <code>OTHER</code>
+兜底；字典可配、后续按实际使用率收敛；统计口径三处同源断言（C2/C3） | |
 评审附件被滥用（大文件/恶意类型/越权下载） | 存储膨胀、信息泄露 | 20MB
 上限 + 类型白名单 + <code>sha256</code> + 鉴权下载（越权 404）+
 评审结束只读；病毒扫描列为 P2（接 ClamAV 或不接，需产品确认） |</p>
@@ -763,8 +890,9 @@ tab、评估卡、指派厂商弹窗）、项目组管理页、审批中心（�
 <ol type="1">
 <li><code>docs/teamflow/CHANGE-PDR-REVIEW-VENDOR-ESTIMATE.md</code> +
 <code>.html</code>（本文）</li>
-<li><code>docs/teamflow/prototype-pdr-review/index.html</code>（4
-屏交互稿：PDR 评审 / 指派换厂商 / 厂商评估 / 评审附件）+ 截图</li>
+<li><code>docs/teamflow/prototype-pdr-review/index.html</code>（5
+屏交互稿：PDR 评审（含分类）/ 指派换厂商 / 厂商评估 / 评审附件 /
+评审统计）+ 截图</li>
 <li>流水线 PRD（由 TeamFlow 依据本文生成）→ 设计 → 技术方案 → 开发 → QA
 → 验收</li>
 </ol>
