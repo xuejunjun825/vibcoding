@@ -156,6 +156,23 @@ vendor</td>
 <td>需新增，否则「评审人从项目组成员里选」没有数据来源</td>
 </tr>
 <tr>
+<td>附件能力</td>
+<td><strong>已有通用附件基础设施</strong>：<code>attachment</code>
+表（<code>biz_type/biz_id/file_name/path/size/content_type/sha256/uploader_id</code>）+
+<code>GET/POST/DELETE /attachments</code> +
+<code>/{id}/download</code>；限制 20MB、校验 bizId 归属、写
+<code>ATTACH_DELETE</code> 审计</td>
+<td><code>req-service/src/main/java/com/example/req/attachment/{AttachmentController,AttachmentService,AttachmentEntity}.java</code>；<code>AttachmentService.java:55</code>（20MB）、<code>:278-294</code>（bizType
+白名单）</td>
+</tr>
+<tr>
+<td>附件业务类型</td>
+<td>目前只支持 <code>REQ / DEFECT / TEST_PLAN / WIKI_PAGE</code>
+四类；路由权限落
+<code>page("req.pool","defect.list","test.cases","collab.wiki")</code></td>
+<td><code>AttachmentService.java:278-294</code>、<code>PermissionRouteTable.java:393-394</code></td>
+</tr>
+<tr>
 <td>迁移现状</td>
 <td>最新 <code>V16__requirement_change.sql</code>，新增从
 <strong>V17</strong> 起</td>
@@ -281,7 +298,41 @@ vendor</td>
 </tr>
 </tbody>
 </table>
-<h3 id="42-既有表增量">4.2 既有表增量</h3>
+<h3 id="42-评审附件复用既有附件表不新增表">4.2
+评审附件（复用既有附件表，不新增表）</h3>
+<p>评审意见要能带附件，<strong>不新建表</strong>，复用
+<code>attachment</code>：</p>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>取值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>biz_type</code></td>
+<td>新增白名单值
+<code>PDR_REVIEW</code>（<code>AttachmentService.normalizeType</code>
+扩展）</td>
+</tr>
+<tr>
+<td><code>biz_id</code></td>
+<td><code>pdr_review.id</code>（评审单级，不挂到单条意见上——意见与附件都在评审单下，读侧按人分组）</td>
+</tr>
+<tr>
+<td>可选扩展</td>
+<td>若需要"附件属于某条意见"，加一列
+<code>ref_id BIGINT NULL</code>（指向
+<code>pdr_review_opinion.id</code>），缺省<strong>不加</strong>，先按评审单维度</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>路由权限沿用
+<code>page("req.pool", …)</code>（<code>PermissionRouteTable.java:393-394</code>），上传的<strong>归属校验</strong>放在服务层（只允许本次评审的评审人/发起人在评审进行中上传）。</p>
+</blockquote>
+<h3 id="43-既有表增量">4.3 既有表增量</h3>
 <table>
 <thead>
 <tr>
@@ -362,7 +413,41 @@ STALE」。</p>
 </tr>
 </tbody>
 </table>
-<h3 id="52-变更">5.2 变更</h3>
+<h3 id="52-评审附件复用-attachments不新增端点">5.2 评审附件（复用
+<code>/attachments</code>，不新增端点）</h3>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>路径</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/attachments?bizType=PDR_REVIEW&amp;bizId={reviewId}</code></td>
+<td>评审人上传附件（multipart <code>file</code>）；仅
+<code>IN_REVIEW</code> 期间、仅该评审的评审人/发起人</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/attachments?bizType=PDR_REVIEW&amp;bizId={reviewId}</code></td>
+<td>列附件（评审人、发起人、能看到该需求的角色）</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/attachments/{id}/download</code></td>
+<td>下载（走现有鉴权与范围校验）</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/attachments/{id}</code></td>
+<td>删除：仅上传者本人或产品经理，且评审未结束</td>
+</tr>
+</tbody>
+</table>
+<h3 id="53-变更">5.3 变更</h3>
 <table>
 <thead>
 <tr>
@@ -416,6 +501,16 @@ PMO/研发<strong>保留提交权</strong>（缺省保留，便于兜底），�
 <code>IN_REVIEW</code> 评审单、1 张 <code>ACTIVE</code>
 评估单；并发发起/重复提交用唯一约束 + 409
 兜底；换厂商与提交评估加乐观锁（<code>version</code>）避免「换厂商后立刻被旧厂商提交评估」。</li>
+<li><strong>R7 评审附件</strong>：<code>bizType=PDR_REVIEW</code>
+时，服务层校验「调用者是本次评审的评审人或发起人」且「评审单状态 =
+IN_REVIEW」，否则 <code>403 NOT_REVIEWER</code> /
+<code>409 REVIEW_CLOSED</code>；上传沿用 20MB 上限与
+<code>sha256</code>；类型白名单（缺省
+<code>pdf/docx/xlsx/png/jpg/zip/csv/md</code>），非白名单
+<code>415 UNSUPPORTED_MEDIA_TYPE</code>；<strong>不落公开
+URL</strong>，下载一律过鉴权（越权
+404，不泄露存在性）；评审结束后附件只读，删除 → 409
+<code>REVIEW_CLOSED</code>。</li>
 <li><strong>R6 审计</strong>：<code>PDR_REVIEW_START</code> /
 <code>PDR_REVIEW_OPINION</code> / <code>PDR_REVIEW_REJECT</code> /
 <code>PDR_REVIEW_PASS</code> / <code>VENDOR_CHANGED</code> /
@@ -467,8 +562,14 @@ alt="PDR 评审" /> <img
 src="prototype-pdr-review/shot-2-vendor-transfer.png"
 alt="指派/换厂商" /> <img
 src="prototype-pdr-review/shot-3-vendor-estimate.png"
-alt="厂商提交评估" /></p>
-<ol type="1">
+alt="厂商提交评估" /> <img
+src="prototype-pdr-review/shot-4-review-attachments.png"
+alt="评审附件" /></p>
+<ol start="0" type="1">
+<li><strong>评审附件</strong>：发起评审弹窗里可先挂「评审材料」；每位评审人提交意见时可附
+1–5 个附件（截图里是「规格说明.pdf /
+差异样例.xlsx」这类），意见卡下方展示附件 chip（文件名 + 大小 +
+下载）；评审结束后 chip 变只读、无删除按钮。</li>
 <li><strong>PDR 详情新增「评审」tab</strong>：发起按钮 +
 评审人选择（只能选项目组成员，多选）+
 说明；列表展示每人「通过/需修改/驳回 + 意见 + 时间」；顶部结论条（N/M
@@ -499,7 +600,8 @@ alt="厂商提交评估" /></p>
 </tr>
 <tr>
 <td>PDR-1</td>
-<td>待评审（评审单 IN_REVIEW，2/4 已评）</td>
+<td>待评审（评审单 IN_REVIEW，2/4 已评），带 2
+个评审附件（<code>规格说明.pdf</code>、<code>差异样例.xlsx</code>）</td>
 </tr>
 <tr>
 <td>PDR-2</td>
@@ -577,6 +679,28 @@ alt="厂商提交评估" /></p>
 <td>按回退规则（产品经理+域负责人）成功，响应带
 <code>fallback:true</code></td>
 </tr>
+<tr>
+<td>B6</td>
+<td>评审人 <code>bizType=PDR_REVIEW</code> 上传 2MB PDF</td>
+<td>201；<code>GET /attachments</code> 能看到；下载 200 内容一致（sha256
+相同）</td>
+</tr>
+<tr>
+<td>B7</td>
+<td>非本评审的评审人上传</td>
+<td>403 <code>NOT_REVIEWER</code></td>
+</tr>
+<tr>
+<td>B8</td>
+<td>评审结束后再上传/删除</td>
+<td>409 <code>REVIEW_CLOSED</code>；下载仍可（只读）</td>
+</tr>
+<tr>
+<td>B9</td>
+<td>上传 25MB 文件 / 上传 <code>.exe</code></td>
+<td>413 <code>FILE_TOO_LARGE</code> / 415
+<code>UNSUPPORTED_MEDIA_TYPE</code></td>
+</tr>
 </tbody>
 </table>
 <p>门禁：既有 9 套不得降（<code>rbac</code> / <code>access</code> /
@@ -584,7 +708,7 @@ alt="厂商提交评估" /></p>
 <code>release-flow</code> / <code>gate-order</code> /
 <code>automation</code> / <code>change</code> /
 <code>demo-reset</code>）；新增 <code>scripts/pdr-flow-verify.sh</code>
-≥18 条断言（含 A1–A5、B1–B5 与换厂商幂等），接入
+≥24 条断言（含 A1–A5、B1–B9、换厂商幂等与附件越权），接入
 <code>make test</code>。</p>
 <h2 id="11-迁移与兼容">11. 迁移与兼容</h2>
 <ul>
@@ -609,6 +733,9 @@ V17）。</li>
 CRUD）、<code>platform-contract</code>（动作码/状态表）、<code>platform-common</code>（路由表）、迁移
 2 条。 <strong>前端</strong>：需求详情（评审
 tab、评估卡、指派厂商弹窗）、项目组管理页、审批中心（新单据类型文案）、动作按钮禁用原因。
+<strong>附件</strong>：<code>AttachmentService.normalizeType</code> 加
+<code>PDR_REVIEW</code>、<code>resolveBiz</code>
+增加评审单归属解析、上传/删除的评审态校验、前端评审 tab 附件区。
 <strong>脚本/数据</strong>：<code>platform-demo-reset.sh</code>（新夹具）、<code>pdr-flow-verify.sh</code>（新门禁）、<code>SeedService</code>（项目组种子）、<code>DEMO-BY-ROLE.md</code>、<code>FLOW-CONTROL-AUDIT.md</code>。</p>
 <p><strong>风险</strong> | 风险 | 影响 | 缓解 | |---|---|---| | 评审人多
 → 流程卡住 | PDR 长期停在待评审 | 超时提醒（48h
@@ -619,7 +746,10 @@ tab、评估卡、指派厂商弹窗）、项目组管理页、审批中心（�
 旧门禁/演示脚本红 | 不改 PDR
 状态机（用门禁而非新态），把风险限制在规则层 | | 厂商权限放大 |
 越权看到别家需求 | 复用既有 <code>ScopeSql</code> 行级隔离 +
-<code>OUT_OF_SCOPE</code> 负向断言 |</p>
+<code>OUT_OF_SCOPE</code> 负向断言 | |
+评审附件被滥用（大文件/恶意类型/越权下载） | 存储膨胀、信息泄露 | 20MB
+上限 + 类型白名单 + <code>sha256</code> + 鉴权下载（越权 404）+
+评审结束只读；病毒扫描列为 P2（接 ClamAV 或不接，需产品确认） |</p>
 <h2 id="13-建议分轮">13. 建议分轮</h2>
 <ul>
 <li><strong>轮 1（P0，一轮交付）</strong>：项目组模型 + PDR
@@ -633,8 +763,8 @@ tab、评估卡、指派厂商弹窗）、项目组管理页、审批中心（�
 <ol type="1">
 <li><code>docs/teamflow/CHANGE-PDR-REVIEW-VENDOR-ESTIMATE.md</code> +
 <code>.html</code>（本文）</li>
-<li><code>docs/teamflow/prototype-pdr-review/index.html</code>（3
-屏交互稿）+ 截图</li>
+<li><code>docs/teamflow/prototype-pdr-review/index.html</code>（4
+屏交互稿：PDR 评审 / 指派换厂商 / 厂商评估 / 评审附件）+ 截图</li>
 <li>流水线 PRD（由 TeamFlow 依据本文生成）→ 设计 → 技术方案 → 开发 → QA
 → 验收</li>
 </ol>

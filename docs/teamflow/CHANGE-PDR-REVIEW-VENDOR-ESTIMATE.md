@@ -23,6 +23,8 @@
 | 产品需求评审 | **不存在**。仅业务需求有 `REQ_REVIEW`，且审批通过由回调自动推进 POOLED | `PlatformContract`/`StateTables.java:66-71`；`req-service/.../requirement/RequirementReviewCallback.java:26-30` |
 | 审批引擎能力 | 支持 5 类单据、节点会签/或签（`MODE_ALL`/`MODE_ANY`）、审批人来源 `ROLE/USER/SUPERVISOR/DOMAIN_OWNER`，可复用来做「多人评审」 | `req-service/.../approval/WorkflowDefinition.java:27-28`、`ApproverResolver.java:18-78`、`ApprovalEngine.java:542` |
 | 项目组 / 项目成员 | **全仓不存在**（`grep -rniE "project_member\|projectMember\|sys_project\|项目组"` 零命中） | 需新增，否则「评审人从项目组成员里选」没有数据来源 |
+| 附件能力 | **已有通用附件基础设施**：`attachment` 表（`biz_type/biz_id/file_name/path/size/content_type/sha256/uploader_id`）+ `GET/POST/DELETE /attachments` + `/{id}/download`；限制 20MB、校验 bizId 归属、写 `ATTACH_DELETE` 审计 | `req-service/src/main/java/com/example/req/attachment/{AttachmentController,AttachmentService,AttachmentEntity}.java`；`AttachmentService.java:55`（20MB）、`:278-294`（bizType 白名单） |
+| 附件业务类型 | 目前只支持 `REQ / DEFECT / TEST_PLAN / WIKI_PAGE` 四类；路由权限落 `page("req.pool","defect.list","test.cases","collab.wiki")` | `AttachmentService.java:278-294`、`PermissionRouteTable.java:393-394` |
 | 迁移现状 | 最新 `V16__requirement_change.sql`，新增从 **V17** 起 | `req-service/src/main/resources/db/migration/` |
 
 **一个容易踩的坑**：`POST /requirements/{id}/estimate` 在路由表里落到兜底规则 `^/requirements.*$ → page("req.pool","me.tasks")`（`PermissionRouteTable.java:163`），所以它**看起来**没有权限校验；真正的 403 来自服务层 `requireDeliverPermission`（`WbsEstimateService.java:583-590`）。改造时若要新增动作码，必须把精确规则插在这条兜底之前，否则会被页面权限放行。
@@ -89,7 +91,19 @@
 | `pdr_review` | `id, tenant_id, requirement_id, project_id, instance_id, status(DRAFT/IN_REVIEW/PASSED/REJECTED/CANCELLED), conclusion, initiator_id, created_at, closed_at` | **`uk(requirement_id) where status='IN_REVIEW'`**（同一需求同时只允许 1 张在评）；`idx(tenant_id, status)` |
 | `pdr_review_opinion` | `id, tenant_id, review_id, reviewer_id, decision(PASS/NEED_CHANGE/REJECT), comment, created_at` | `uk(review_id, reviewer_id)`（同一人只留一条有效意见，重提覆盖并进历史） |
 
-### 4.2 既有表增量
+### 4.2 评审附件（复用既有附件表，不新增表）
+
+评审意见要能带附件，**不新建表**，复用 `attachment`：
+
+| 项 | 取值 |
+|---|---|
+| `biz_type` | 新增白名单值 `PDR_REVIEW`（`AttachmentService.normalizeType` 扩展） |
+| `biz_id` | `pdr_review.id`（评审单级，不挂到单条意见上——意见与附件都在评审单下，读侧按人分组） |
+| 可选扩展 | 若需要"附件属于某条意见"，加一列 `ref_id BIGINT NULL`（指向 `pdr_review_opinion.id`），缺省**不加**，先按评审单维度 |
+
+> 路由权限沿用 `page("req.pool", …)`（`PermissionRouteTable.java:393-394`），上传的**归属校验**放在服务层（只允许本次评审的评审人/发起人在评审进行中上传）。
+
+### 4.3 既有表增量
 
 | 表 | 新增列 | 说明 |
 |---|---|---|
@@ -111,7 +125,16 @@
 | `POST` | `/pdr-reviews/{reviewId}/conclude` | 汇总结论（**也可以全票后自动汇总**，见 §6 R2） | 动作码 `req.action.pdr_review_conclude` |
 | `GET` | `/requirements/{id}/pdr-review` | 读评审单 + 意见列表 | 页面码 `req.pool` |
 
-### 5.2 变更
+### 5.2 评审附件（复用 `/attachments`，不新增端点）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/attachments?bizType=PDR_REVIEW&bizId={reviewId}` | 评审人上传附件（multipart `file`）；仅 `IN_REVIEW` 期间、仅该评审的评审人/发起人 |
+| `GET` | `/attachments?bizType=PDR_REVIEW&bizId={reviewId}` | 列附件（评审人、发起人、能看到该需求的角色） |
+| `GET` | `/attachments/{id}/download` | 下载（走现有鉴权与范围校验） |
+| `DELETE` | `/attachments/{id}` | 删除：仅上传者本人或产品经理，且评审未结束 |
+
+### 5.3 变更
 
 | 接口 | 变更 |
 |---|---|
@@ -126,6 +149,7 @@
 - **R3 换厂商**：允许窗口 = RD 处于 `TODO` 且 PDR 未进 `IN_DEV`；换厂商 → 该需求 `APPROVED` 评估单派生 `STALE`（原因 `VENDOR_CHANGED`）→ 状态回到「待评估」；`IN_DEV` 之后 409 `VENDOR_LOCKED`；换厂商必须填原因，写 `VENDOR_CHANGED` 审计并通知新旧厂商。
 - **R4 厂商评估**：厂商账号（`VENDOR_PM` 与厂商研发）可提交评估，且 `requirement.assignee_vendor_id == user.vendorId`，否则 `403 OUT_OF_SCOPE`；内部 PMO/研发**保留提交权**（缺省保留，便于兜底），但同样要求先指派厂商。
 - **R5 幂等与并发**：同一需求同时只有 1 张 `IN_REVIEW` 评审单、1 张 `ACTIVE` 评估单；并发发起/重复提交用唯一约束 + 409 兜底；换厂商与提交评估加乐观锁（`version`）避免「换厂商后立刻被旧厂商提交评估」。
+- **R7 评审附件**：`bizType=PDR_REVIEW` 时，服务层校验「调用者是本次评审的评审人或发起人」且「评审单状态 = IN_REVIEW」，否则 `403 NOT_REVIEWER` / `409 REVIEW_CLOSED`；上传沿用 20MB 上限与 `sha256`；类型白名单（缺省 `pdf/docx/xlsx/png/jpg/zip/csv/md`），非白名单 `415 UNSUPPORTED_MEDIA_TYPE`；**不落公开 URL**，下载一律过鉴权（越权 404，不泄露存在性）；评审结束后附件只读，删除 → 409 `REVIEW_CLOSED`。
 - **R6 审计**：`PDR_REVIEW_START` / `PDR_REVIEW_OPINION` / `PDR_REVIEW_REJECT` / `PDR_REVIEW_PASS` / `VENDOR_CHANGED` / `ESTIMATE_STALE_BY_VENDOR`，全部进动态流与追溯。
 
 ## 7. 权限与动作码
@@ -144,8 +168,10 @@
 ![PDR 评审](prototype-pdr-review/shot-1-pdr-review.png)
 ![指派/换厂商](prototype-pdr-review/shot-2-vendor-transfer.png)
 ![厂商提交评估](prototype-pdr-review/shot-3-vendor-estimate.png)
+![评审附件](prototype-pdr-review/shot-4-review-attachments.png)
 
 
+0. **评审附件**：发起评审弹窗里可先挂「评审材料」；每位评审人提交意见时可附 1–5 个附件（截图里是「规格说明.pdf / 差异样例.xlsx」这类），意见卡下方展示附件 chip（文件名 + 大小 + 下载）；评审结束后 chip 变只读、无删除按钮。
 1. **PDR 详情新增「评审」tab**：发起按钮 + 评审人选择（只能选项目组成员，多选）+ 说明；列表展示每人「通过/需修改/驳回 + 意见 + 时间」；顶部结论条（N/M 已评）。
 2. **指派厂商弹窗改造**：加「换厂商会作废已通过的工时评估，需重新评估」的黄色提示；原因必填；`IN_DEV` 后按钮禁用并给原因。
 3. **工时评估弹窗改造**：显示「承接厂商」徽标；厂商账号进入时默认本单位；非本厂商或无权限时按钮禁用 + 悬停原因（沿用 r25 的 `需要权限：<码>` 文案形态）。
@@ -156,7 +182,7 @@
 | 样例 | 期望 |
 |---|---|
 | 项目 | `DEMO-PROJ-1 供应链平台`，成员 5 人（产品经理/域负责人/研发/测试/厂商 PM） |
-| PDR-1 | 待评审（评审单 IN_REVIEW，2/4 已评） |
+| PDR-1 | 待评审（评审单 IN_REVIEW，2/4 已评），带 2 个评审附件（`规格说明.pdf`、`差异样例.xlsx`） |
 | PDR-2 | 评审通过、已指派 VEN-A、待提交评估 |
 | PDR-3 | 评审通过、VEN-A 评估通过、已排期 |
 | RD | 挂在 PDR-3 下，`TODO`（可用于演示换厂商 → 评估失效） |
@@ -175,8 +201,12 @@
 | B3 | 重新发起并 4 人全通过 | `PASSED`；此后指派厂商 200 |
 | B4 | 评审人不在项目组 | 400 `REVIEWER_NOT_IN_PROJECT` |
 | B5 | 项目组为空发起评审 | 按回退规则（产品经理+域负责人）成功，响应带 `fallback:true` |
+| B6 | 评审人 `bizType=PDR_REVIEW` 上传 2MB PDF | 201；`GET /attachments` 能看到；下载 200 内容一致（sha256 相同） |
+| B7 | 非本评审的评审人上传 | 403 `NOT_REVIEWER` |
+| B8 | 评审结束后再上传/删除 | 409 `REVIEW_CLOSED`；下载仍可（只读） |
+| B9 | 上传 25MB 文件 / 上传 `.exe` | 413 `FILE_TOO_LARGE` / 415 `UNSUPPORTED_MEDIA_TYPE` |
 
-门禁：既有 9 套不得降（`rbac` / `access` / `platform` / `negative` / `release-flow` / `gate-order` / `automation` / `change` / `demo-reset`）；新增 `scripts/pdr-flow-verify.sh` ≥18 条断言（含 A1–A5、B1–B5 与换厂商幂等），接入 `make test`。
+门禁：既有 9 套不得降（`rbac` / `access` / `platform` / `negative` / `release-flow` / `gate-order` / `automation` / `change` / `demo-reset`）；新增 `scripts/pdr-flow-verify.sh` ≥24 条断言（含 A1–A5、B1–B9、换厂商幂等与附件越权），接入 `make test`。
 
 ## 11. 迁移与兼容
 
@@ -189,6 +219,7 @@
 
 **后端**：`requirement`（服务/控制器/规则/错误码）、`approval`（新单据类型 + 回调）、`estimate`（vendors 绑定）、`sys`（项目组 CRUD）、`platform-contract`（动作码/状态表）、`platform-common`（路由表）、迁移 2 条。
 **前端**：需求详情（评审 tab、评估卡、指派厂商弹窗）、项目组管理页、审批中心（新单据类型文案）、动作按钮禁用原因。
+**附件**：`AttachmentService.normalizeType` 加 `PDR_REVIEW`、`resolveBiz` 增加评审单归属解析、上传/删除的评审态校验、前端评审 tab 附件区。
 **脚本/数据**：`platform-demo-reset.sh`（新夹具）、`pdr-flow-verify.sh`（新门禁）、`SeedService`（项目组种子）、`DEMO-BY-ROLE.md`、`FLOW-CONTROL-AUDIT.md`。
 
 **风险**
@@ -199,6 +230,7 @@
 | 存量数据无项目组 | 老 PDR 无法评审 | 回退规则（产品经理 + 域负责人）并标记 `fallback` |
 | 状态机改动面大 | 旧门禁/演示脚本红 | 不改 PDR 状态机（用门禁而非新态），把风险限制在规则层 |
 | 厂商权限放大 | 越权看到别家需求 | 复用既有 `ScopeSql` 行级隔离 + `OUT_OF_SCOPE` 负向断言 |
+| 评审附件被滥用（大文件/恶意类型/越权下载） | 存储膨胀、信息泄露 | 20MB 上限 + 类型白名单 + `sha256` + 鉴权下载（越权 404）+ 评审结束只读；病毒扫描列为 P2（接 ClamAV 或不接，需产品确认） |
 
 ## 13. 建议分轮
 
@@ -208,5 +240,5 @@
 ## 14. 交付物清单
 
 1. `docs/teamflow/CHANGE-PDR-REVIEW-VENDOR-ESTIMATE.md` + `.html`（本文）
-2. `docs/teamflow/prototype-pdr-review/index.html`（3 屏交互稿）+ 截图
+2. `docs/teamflow/prototype-pdr-review/index.html`（4 屏交互稿：PDR 评审 / 指派换厂商 / 厂商评估 / 评审附件）+ 截图
 3. 流水线 PRD（由 TeamFlow 依据本文生成）→ 设计 → 技术方案 → 开发 → QA → 验收

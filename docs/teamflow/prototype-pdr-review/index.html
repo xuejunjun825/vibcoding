@@ -35,6 +35,10 @@
   .member-pick{display:flex;flex-wrap:wrap;gap:8px}
   .member-pick .m{display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:16px;padding:5px 10px;font-size:12px;background:#fff}
   .member-pick .m.sel{border-color:var(--primary);background:var(--primary-light);color:var(--primary)}
+  .attach{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .attach .a{display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;color:var(--text-body);background:#fff}
+  .attach .a .ic{width:16px;height:16px;border-radius:3px;background:var(--primary-light);color:var(--primary);font-size:10px;display:inline-flex;align-items:center;justify-content:center}
+  .upload{border:1px dashed var(--border);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:8px;background:#FAFBFC}
   .diff{display:flex;gap:12px;align-items:center;font-size:13px}
   .diff .old{color:var(--text-muted);text-decoration:line-through}
   .diff .new{color:var(--primary);font-weight:600}
@@ -56,11 +60,12 @@
   <div class="main">
     <div class="topnav"><a class="active">需求</a><a>版本</a><a>审批</a><a>发布</a><a>缺陷</a><a>测试</a><a>追溯</a><a>设置</a></div>
     <div class="page">
-      <div class="proto-bar">交互稿 · 产品需求评审 + 厂商工时评估 · 三屏：① PDR 评审 ② 指派/换厂商 ③ 厂商提交评估 —— 静态示意，无交互逻辑</div>
+      <div class="proto-bar">交互稿 · 产品需求评审 + 厂商工时评估 · 四屏：① PDR 评审 ② 指派/换厂商 ③ 厂商提交评估 ④ 评审附件 —— 静态示意，无交互逻辑</div>
       <div class="switcher">
         <button class="btn on" data-sec="s1">① PDR 评审</button>
         <button class="btn" data-sec="s2">② 指派 / 换厂商</button>
         <button class="btn" data-sec="s3">③ 厂商提交评估</button>
+        <button class="btn" data-sec="s4">④ 评审附件</button>
       </div>
 
       <!-- ============ 屏 1：PDR 评审 ============ -->
@@ -124,14 +129,16 @@
                 </div>
 
                 <div class="panel" style="border:none">
-                  <div class="panel-head" style="padding:0 0 10px"><span>评审意见</span><span class="muted">2 条</span></div>
+                  <div class="panel-head" style="padding:0 0 10px"><span>评审意见</span><span class="muted">2 条 · 附件 3 个</span></div>
                   <div class="opinion">
                     <div class="who">王坤 · 通过 <span class="muted" style="font-weight:400">2026-11-25 09:12</span></div>
                     <div class="body">范围清晰。导出字段与对账表一致，建议默认只导差异行。</div>
+                    <div class="attach"><span class="a"><span class="ic">PDF</span>规格说明-v2.pdf · 1.2 MB</span></div>
                   </div>
                   <div class="opinion">
                     <div class="who">李雯 · 通过 <span class="muted" style="font-weight:400">2026-11-25 10:04</span></div>
                     <div class="body">业务侧确认：需要带差异原因列，导出后能直接发供应商。</div>
+                    <div class="attach"><span class="a"><span class="ic">XLS</span>差异样例.xlsx · 240 KB</span><span class="a"><span class="ic">PNG</span>对账界面截图.png · 880 KB</span></div>
                   </div>
                   <div class="opinion" style="background:#FFF7E6;border-color:#FFE0B2">
                     <div class="who">示例：需修改（陈晓）</div>
@@ -160,6 +167,11 @@
               <div class="field">
                 <label>评审说明</label>
                 <div class="input ph" style="min-height:64px">建议说明：范围、验收要点、需要评审人重点确认的风险…</div>
+              </div>
+              <div class="field">
+                <label>评审材料（可选，评审人可下载）</label>
+                <div class="upload">＋ 点击或拖拽上传（pdf / docx / xlsx / png / jpg / zip / csv / md，单个 ≤ 20MB）</div>
+                <div class="attach"><span class="a"><span class="ic">PDF</span>需求规格说明.pdf · 1.2 MB</span></div>
               </div>
               <div class="field" style="margin:0">
                 <label>结论汇总规则</label>
@@ -274,6 +286,39 @@
               <div class="hint" style="margin-top:10px">审批通过后评估单绑定本厂商；换厂商会使其失效。审批人：产品经理 → 项目域负责人。</div>
             </div>
             <div class="modal-foot"><button class="btn">取消</button><button class="btn btn-primary">提交评估</button></div>
+          </div>
+        </div>
+      </section>
+      <!-- ============ 屏 4：评审附件 ============ -->
+      <section class="sec" id="s4">
+        <div class="panel" style="max-width:860px">
+          <div class="detail-head">
+            <div>
+              <div class="detail-title"><span class="tag tag-pdr">产品</span> <span class="mono">PDR-0102</span> 对账差异导出-产品设计 <span class="pill pill-blue">评审中</span></div>
+              <div class="meta">当前登录：<b>陈晓 · 研发负责人（评审人）</b> · 评审单 #R-2081 · 截止 2026-11-27</div>
+            </div>
+            <div class="head-actions"><button class="btn">下载全部（3）</button></div>
+          </div>
+
+          <div class="warn">附件只有「本次评审的评审人 / 发起人」能在评审进行中上传；评审结束后只读，下载仍走鉴权（越权 404）。</div>
+
+          <div class="panel" style="border:none">
+            <div class="panel-head" style="padding:0 0 10px"><span>我的评审意见</span><span class="muted">提交后可修改，直到结论生成</span></div>
+            <div class="field"><label>结论</label>
+              <div class="member-pick"><span class="m">通过</span><span class="m sel">需修改</span><span class="m">驳回</span></div>
+            </div>
+            <div class="field"><label>意见</label>
+              <div class="input" style="min-height:64px">导出走异步任务更稳，10 万行以内要能 1 分钟内完成；附上压测数据。</div>
+            </div>
+            <div class="field" style="margin:0">
+              <label>附件（最多 5 个，单个 ≤ 20MB）</label>
+              <div class="upload">＋ 上传附件（pdf / docx / xlsx / png / jpg / zip / csv / md）</div>
+              <div class="attach">
+                <span class="a"><span class="ic">XLS</span>10万行压测结果.xlsx · 620 KB</span>
+                <span class="a"><span class="ic">PDF</span>导出方案-v3.pdf · 1.8 MB</span>
+              </div>
+            </div>
+            <div class="modal-foot" style="border:none;padding:12px 0 0"><button class="btn">取消</button><button class="btn btn-primary">提交意见</button></div>
           </div>
         </div>
       </section>
