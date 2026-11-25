@@ -102,6 +102,12 @@ public class RequirementService {
      */
     private PdrReviewService pdrReview;
 
+    /**
+     * 跟单热度端口（r47）。setter 注入而非构造器参数的理由同 {@link #pdrReview}：十参「单测构造」
+     * 不想为一次计数再加参数；未注入时热度退化为 0/false（那些单测只验需求语义）。
+     */
+    private RequirementFollowQuery followQuery;
+
 
 
     /** 十参构造：保留给既有单测（不装配评估门与标签端口时门/estimate/tags 均不生效）。 */
@@ -155,6 +161,11 @@ public class RequirementService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setPdrReview(PdrReviewService pdrReview) {
         this.pdrReview = pdrReview;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setFollowQuery(RequirementFollowQuery followQuery) {
+        this.followQuery = followQuery;
     }
 
     private PdrReviewService pdrGate() {
@@ -1326,6 +1337,7 @@ public class RequirementService {
             parentCode = repository.findByIdAndTenantId(parentId, entity.getTenantId())
                     .map(RequirementEntity::getCode).orElse(null);
         }
+        RequirementFollowQuery.Stats follow = followStats(entity.getId());
         return new View(entity.getId(), entity.getCode(), entity.getType(), entity.getStatus(),
                 entity.getPriority(), entity.getTitle(), entity.getDescription(), parentId, parentCode,
                 entity.getDomainId(), entity.getOriginOrgId(), entity.getOwnerUserId(),
@@ -1340,7 +1352,19 @@ public class RequirementService {
                 RequirementViews.DecomposeGate.from(
                         RequirementRules.decomposeGate(entity.getType(), entity.getStatus()),
                         entity.getStatus()),
-                tagsOf(entity.getId()));
+                follow.followCount(), follow.followedByMe(),
+                entity.getCloseReason(), entity.getMergedIntoId(), tagsOf(entity.getId()));
+    }
+
+    /**
+     * 跟单热度（r47）：详情与列表共用 {@link RequirementFollowQuery}，这里只负责「没有该端口时退化为
+     * 0/false」——十参单测构造不装配它，不能因此让详情 500。
+     */
+    RequirementFollowQuery.Stats followStats(long requirementId) {
+        if (followQuery == null) {
+            return RequirementFollowQuery.Stats.EMPTY;
+        }
+        return followQuery.stats(requirementId);
     }
 
     /**

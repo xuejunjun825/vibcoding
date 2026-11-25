@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createRequirement } from '@/api/req'
+import { listSimilarRequirements } from '@/api/poolOps'
 import { listDictionaryDomains } from '@/api/dictionaries'
 import type { DictionaryDomain } from '@/api/dictionaries'
-import type { CreateRequirementPayload, Priority, RequirementRow } from '@/api/types'
+import type {
+  CreateRequirementPayload,
+  Priority,
+  RequirementRow,
+  SimilarRequirementItem,
+} from '@/api/types'
 import StatusPill from '@/components/StatusPill.vue'
 import { usePermission } from '@/composables/usePermission'
 import { messageOf, PRIORITIES, REQUIREMENT_TYPES, requirementPath, typeLabel } from '@/views/req/platform'
@@ -50,6 +56,68 @@ const submitHint = computed(() => {
   if (domainIds.value.length === 0) return '至少选择一个业务域'
   return ''
 })
+
+/**
+ * r47 · 相似需求探测（可选能力）：
+ * - 标题/首个业务域变化后 400ms 防抖再探测，避免逐字打后端
+ * - 命中 0 条不渲染；403/网络失败静默（`silentForbidden` + 本地 catch），**绝不断提报**
+ * - `similarSeq` 丢弃过期响应，防止慢请求覆盖新关键词的结果
+ */
+const SIMILAR_DEBOUNCE_MS = 400
+const similarItems = ref<SimilarRequirementItem[]>([])
+const similarTotal = ref(0)
+const similarCollapsed = ref(false)
+let similarTimer: ReturnType<typeof setTimeout> | null = null
+let similarSeq = 0
+
+function clearSimilarTimer(): void {
+  if (similarTimer != null) {
+    clearTimeout(similarTimer)
+    similarTimer = null
+  }
+}
+
+async function loadSimilar(): Promise<void> {
+  const keyword = title.value.trim()
+  if (keyword.length < 2) {
+    similarItems.value = []
+    similarTotal.value = 0
+    return
+  }
+  const seq = ++similarSeq
+  try {
+    const page = await listSimilarRequirements({
+      title: keyword,
+      domainId: domainIds.value[0],
+      limit: 5,
+    })
+    if (seq !== similarSeq) return
+    similarItems.value = page.items ?? []
+    similarTotal.value = page.total ?? similarItems.value.length
+  } catch {
+    if (seq !== similarSeq) return
+    similarItems.value = []
+    similarTotal.value = 0
+  }
+}
+
+function scheduleSimilar(): void {
+  clearSimilarTimer()
+  similarTimer = setTimeout(() => {
+    similarTimer = null
+    void loadSimilar()
+  }, SIMILAR_DEBOUNCE_MS)
+}
+
+watch([title, () => domainIds.value[0]], () => {
+  similarCollapsed.value = false
+  scheduleSimilar()
+})
+onBeforeUnmount(clearSimilarTimer)
+
+function openSimilar(item: SimilarRequirementItem): void {
+  void router.push(requirementPath(item.id))
+}
 
 onMounted(async () => {
   try {
@@ -136,6 +204,36 @@ async function submit(): Promise<void> {
 
         <el-form-item label="标题" required>
           <el-input v-model="title" maxlength="120" show-word-limit placeholder="一句话说清要交付什么（≥4 字）" />
+          <!-- r47：相似需求提示是「只帮忙、不挡路」的可选探测：0 条不渲染，失败静默 -->
+          <div v-if="similarItems.length > 0" class="similar" data-test="similar-hints">
+            <header class="similar__head">
+              <span class="similar__title">
+                发现 {{ similarTotal }} 条相似需求
+                <span class="similar__sub">先看看是否已有同样的诉求，避免重复提报</span>
+              </span>
+              <button type="button" class="similar__toggle" @click="similarCollapsed = !similarCollapsed">
+                {{ similarCollapsed ? '展开' : '收起' }}
+              </button>
+            </header>
+            <ul v-if="!similarCollapsed" class="similar__list">
+              <li v-for="item in similarItems" :key="item.id">
+                <button
+                  type="button"
+                  class="similar__item"
+                  :title="`打开 ${item.code}`"
+                  @click="openSimilar(item)"
+                >
+                  <span class="similar__code">{{ item.code }}</span>
+                  <span class="similar__item-title">{{ item.title }}</span>
+                  <StatusPill kind="requirement" :value="item.status" size="sm" />
+                  <span class="similar__follow">{{ item.followCount }} 人需要</span>
+                </button>
+              </li>
+            </ul>
+            <p v-if="!similarCollapsed" class="similar__note">
+              继续提报不受影响；如判定重复，提交后可在详情页合并到主需求。
+            </p>
+          </div>
         </el-form-item>
 
         <el-form-item label="业务域" required>
@@ -313,5 +411,97 @@ async function submit(): Promise<void> {
   font-size: 12px;
   color: var(--text-body);
   line-height: 1.9;
+}
+/* r47 相似需求提示：白底 1px 边框方角卡，行内是完整的可点目标 */
+.similar {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--bg-card);
+}
+.similar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.similar__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-title);
+}
+.similar__sub {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--text-muted-aa);
+}
+.similar__toggle {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--bg-card);
+  color: var(--text-body);
+  font-size: 12px;
+  cursor: pointer;
+}
+.similar__toggle:hover {
+  background: var(--bg-hover);
+}
+.similar__list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.similar__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-cell);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.similar__item:hover {
+  border-color: var(--border);
+  background: var(--bg-hover);
+}
+.similar__item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+.similar__code {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+.similar__item-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-title);
+}
+.similar__follow {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+  font-variant-numeric: tabular-nums;
+}
+.similar__note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted-aa);
 }
 </style>

@@ -140,6 +140,11 @@ public final class ScopeSql {
         map.put("automation_event", TableSpec.NONE);
         map.put("automation_run", TableSpec.NONE);
         map.put("requirement_tag", TableSpec.NONE);
+        // requirement_follow (r47) is a product of a requirement: it has requirement_id + user_id
+        // and no isolation column of its own. Callers that need row isolation join `requirement`
+        // and mark that alias too; a follow row alone must not widen a vendor/domain caller's
+        // view, so the tenant predicate here is the only thing this table can contribute.
+        map.put("requirement_follow", TableSpec.NONE);
         return Map.copyOf(map);
     }
 

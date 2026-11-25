@@ -87,6 +87,9 @@ id="toc-17-需求变更单r402026-11-23">17.
 id="toc-17-产品需求评审--厂商工时评估r46第-38-页-pdrreview">17.
 产品需求评审 + 厂商工时评估（r46，第 38 页
 <code>pdr.review</code>）</a></li>
+<li><a href="#18-需求池运营相似--我也需要--合并重复r47"
+id="toc-18-需求池运营相似--我也需要--合并重复r47">18. 需求池运营：相似 /
+我也需要 / 合并重复（r47）</a></li>
 </ul></li>
 </ul></div>
 <h1 id="已交付功能模块清单">已交付功能模块清单</h1>
@@ -903,6 +906,80 @@ RD 进 <code>IN_DEV</code> 后换厂商 <code>409 VENDOR_LOCKED</code></td>
 <code>subagents</code> 注册表为空，<code>teamflow_start</code> 恒报
 noProvider）：后端/QA 门禁/前端/门禁修复分别由子代理完成，Lead
 复验并提交</td>
+</tr>
+</tbody>
+</table>
+<h2 id="18-需求池运营相似--我也需要--合并重复r47">18. 需求池运营：相似 /
+我也需要 / 合并重复（r47）</h2>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>事实</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数据</td>
+<td><code>V22__requirement_follow.sql</code>（<code>requirement_follow</code>
+唯一键
+<code>(tenant_id, requirement_id, user_id)</code>）、<code>V23__requirement_merge.sql</code>（<code>requirement.merged_into_id</code>
+/ <code>close_reason</code> + 索引）；Flyway 最高成功版本
+<strong>23</strong></td>
+</tr>
+<tr>
+<td>相似检索</td>
+<td>2-gram 打分：同标题 3.0 + 同类型 0.5 + 同域
+1.0（参照域=<code>domainId</code> 参数）+ 细粒度重合
++0.5；<code>GET /requirements/similar?title&amp;domainId&amp;limit</code>
+与 <code>GET /requirements/{id}/similar</code>；只回 ACTIVE
+且未合并</td>
+</tr>
+<tr>
+<td>我也需要</td>
+<td><code>POST /requirements/{id}/follow {note?}</code>（201
+幂等）、<code>DELETE .../follow</code>（204）、<code>GET .../followers?page&amp;size</code>（含
+orgs 聚合）；热度 <code>followCount/followedByMe</code> 由
+<code>RequirementFollowQuery</code> 单点批量查，列表与详情同源</td>
+</tr>
+<tr>
+<td>合并重复</td>
+<td><code>POST /requirements/{id}/merge {targetId, reason}</code>：6
+条前置 + 单事务（源
+CLOSED+<code>close_reason=MERGED</code>+<code>merged_into_id</code>、跟单迁移去重、子需求
+reparent、审计 <code>REQUIREMENT_MERGED</code>）；重复合并 409
+<code>ALREADY_MERGED</code>、目标已合并 <code>TARGET_MERGED</code>、成环
+<code>MERGE_CYCLE</code>、终态 <code>REQUIREMENT_CLOSED</code></td>
+</tr>
+<tr>
+<td>权限</td>
+<td>动作 81→<strong>83</strong>（<code>req.action.follow</code> 挂
+<code>notification:read</code>、<code>req.action.merge_duplicate</code>
+挂 <code>req:review</code>，未复用被状态机占用的
+<code>req.action.merge</code>）、<code>sys_role_permission</code>
+1980→<strong>2002</strong>、每角色 <strong>182</strong>；<code>s2</code>
+覆盖例外 11→<strong>12</strong>（域负责人对 <code>merge_duplicate</code>
+DENY）</td>
+</tr>
+<tr>
+<td>前端</td>
+<td>提报相似提示（400ms 防抖）、详情「需求热度」卡 +
+跟单人抽屉、合并弹层（搜索/相似选目标/原因/错误码）、列表「已并入
+#N」与「N 人需要」徽标</td>
+</tr>
+<tr>
+<td>门禁</td>
+<td><code>make pool-ops-verify</code> =
+<code>scripts/pool-ops-verify.sh</code> <strong>33 条</strong>（P1 相似
+7 / P2 跟单 9 / P3 合并 9 / P4 回归
+8），<code>scripts/tests/pool/_lib.sh</code> 共享原语，teardown
+双口径残留 0</td>
+</tr>
+<tr>
+<td>演示数据</td>
+<td>需求 12→<strong>13</strong>（新增 <code>DEMO-R-13</code>）、账号
+14→<strong>15</strong>（新增 <code>biz2</code>）、<code>DEMO-R-02</code>
+预置 6 条跟单</td>
 </tr>
 </tbody>
 </table>

@@ -65,17 +65,17 @@ probe_settle() { # probe_settle <403|allow> [超时秒=70] → 轮询探针直�
     done
 }
 
-grants_of() { # grants_of <roleId> → 扁平 [{subjectType,subjectCode,access}]（每角色 180 个唯一格子）
+grants_of() { # grants_of <roleId> → 扁平 [{subjectType,subjectCode,access}]（每角色 182 个唯一格子）
     # 口径必须与库里的格子一一对应：s3/s4/s7 的 trap 用这份快照还原，少一格就等于把
     # 那一格主动写成 DENY（写侧基底取库内现值，少发=保留；但这份快照就是「库内现值」的唯一来源）。
-    #   1) modules[].pages[] 给 MENU 38 + ACTION 81 + 37 行页面绑定的 FUNCTION
+    #   1) modules[].pages[] 给 MENU 38 + ACTION 83 + 39 行页面绑定的 FUNCTION
     #      （38 页里 pdr.review 绑定码为空，故绑定行仍是 37 行）；
     #      其中 6 行是同一个功能码被多个页面共用（org:manage 5 页、PORTAL_VIEW 2 页、
     #      case:manage 2 页），unique_by 之后是 31 个不同格子 ⇒ 150 个唯一格子；
     #   2) 顶层 unboundFunctions.functions 给不属任何页面的 30 个 FUNCTION 格子；
-    #   150 + 30 = 180 = sys_role_permission 每角色的行数（s2 的等式）。
+    #   152 + 30 = 182 = sys_role_permission 每角色的行数（s2 的等式）。
     # 不 unique_by 会发出 186 行（6 个重复键）：服务端按 (type,code) 归并后结果相同，
-    # 但「payload 行数 = 库行数 = 180」这个可断言的等式就丢了，探针也无法用长度判缺口。
+    # 但「payload 行数 = 库行数 = 182」这个可断言的等式就丢了，探针也无法用长度判缺口。
     api_call GET "/api/req/admin/roles/$1/permissions"
     [[ "${HTTP_CODE:-}" == "200" ]] || return 1
     printf '%s' "$HTTP_BODY" | jq -c '([.modules[]? | .pages[]? as $p

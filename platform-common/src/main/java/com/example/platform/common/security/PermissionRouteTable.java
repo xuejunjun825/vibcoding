@@ -147,6 +147,16 @@ public final class PermissionRouteTable {
         rules.add(rule("POST", "^/requirements/\\d+/integration/mr/refresh$", page("req.pool")));
         rules.add(rule("POST", "^/requirements/\\d+/sonar/refresh$", page("req.pool")));
         rules.add(rule("POST", "^/requirements/\\d+/mr-sync$", page("req.pool")));
+        // 需求池运营（r47）：跟单与重复合并。必须排在下面的 /requirements 兜底之前——否则
+        // POST/DELETE 会被页规则直接放行（「有需求池页面权限」就变成「能合并别人的需求」）。
+        // follow 的动作格对 11 个角色都是 ALLOW（契约 §3.2：能看见就能跟单），行级可见性
+        // 由服务层按需求行再判一次；merge_duplicate 的 DENY 集由种子显式给出。
+        rules.add(rule("POST", "^/requirements/\\d+/follow$",
+                action("req.pool", "req.action.follow")));
+        rules.add(rule("DELETE", "^/requirements/\\d+/follow$",
+                action("req.pool", "req.action.follow")));
+        rules.add(rule("POST", "^/requirements/\\d+/merge$",
+                action("req.pool", "req.action.merge_duplicate")));
         rules.add(rule("POST", "^/requirements$", action("req.pool", "req.action.submit")));
         rules.add(rule("PUT", "^/requirements/\\d+$", page("req.pool")));
         rules.add(rule("PATCH", "^/requirements/\\d+$", page("req.pool")));

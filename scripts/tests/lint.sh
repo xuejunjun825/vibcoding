@@ -223,11 +223,17 @@ platform_routes_preserve_demo() {
 #                                            遍历，请求里没有 TenantContext。所有直连语句显式
 #                                            `tenant_id = ?` 绑定；业务数据读取仍经 ScopedJdbc +
 #                                            AutomationScopes.withScope（规则作用域线程绑定）。
+#   requirement/RequirementFollowQuery.java   r47「我也需要」：ScopedJdbc 只有读入口，而跟单必须
+#                                            `INSERT ... ON DUPLICATE KEY` 幂等写 + `DELETE` 取消 + 合并时
+#                                            「迁跟单」与需求关闭在同一事务；所有语句显式带 tenant_id。
+#   requirement/RequirementMergeService.java  r47 合并重复需求：必须在同一事务里「锁源与目标行 →
+#                                            校验六条前置（终态/已合并/环/父子）→ 关源 + 迁跟单 + reparent
+#                                            子需求 + 写审计」，ScopedJdbc 无写入口；语句同样显式 tenant_id。
 scoped_jdbc_single_source() {
     # r39：automation/ 整体登记。理由（TECHNICAL §12.4）：outbox/run/tag 需要在同一事务里读改写 +
     # 用唯一键抢占，而 ScopedJdbc 只有读入口；worker 与定时任务按 tenant 遍历，请求里没有
     # TenantContext，所以必须直连，且每条语句都显式绑定 tenant_id = ?。这批直连正是 L21 要盯的对象。
-    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/|integration/|collab/|flow/|review/|executor/|testplan/TestPlanService\.java|analytics/AnalyticsDirectory\.java|automation/'
+    local allow_re='requirement/RequirementService\.java|openapi/ApiClientStore\.java|openapi/ApiClientAdminController\.java|gate/GateController\.java|quality/|integration/|collab/|flow/|review/|executor/|testplan/TestPlanService\.java|analytics/AnalyticsDirectory\.java|automation/|requirement/RequirementFollowQuery\.java|requirement/RequirementMergeService\.java'
     local hits
     hits="$(grep -rl 'JdbcTemplate' "$ROOT/req-service/src/main/java" "$ROOT/deliver-service/src/main/java" 2>/dev/null \
         | grep -v '/seed/' | grep -Ev "$allow_re" || true)"
@@ -646,8 +652,11 @@ requirement_view_carries_tags() {
         grep -nE '^\s*public View\(' "$views" || true
         bad=1
     fi
-    if ! grep -qE 'DecomposeGate decomposeGate, List<TagView> tags\)' "$views"; then
-        echo "View 的规范构造器不再要求 List<TagView> tags（标签必须是无默认值的必填参数）"
+    # r47：View 追加了 followCount/closeReason/mergedIntoId 等字段，tags 移到参数表末尾（仍是必填、
+    # 无默认值）。判据从「紧跟在 decomposeGate 后」放宽为「必须以必填的 List<TagView> tags 收尾」，
+    # 语义不变：tags 一旦被默认成 List.of() 或改成可选，这里立刻红。
+    if ! grep -qE 'List<TagView> tags\) \{' "$views"; then
+        echo "View 的规范构造器不再以必填的 List<TagView> tags 收尾（标签必须是无默认值的必填参数）"
         bad=1
     fi
 

@@ -12,6 +12,7 @@ import type {
   EstimateBlock,
   RequirementDetail,
   RequirementDetailResponse,
+  RequirementMergeResult,
 } from '@/api/types'
 import type { ChangeType } from '@/api/req'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -50,6 +51,7 @@ import {
   reasonText,
 } from '@/views/req/editability'
 import DecomposeDialog from '@/views/req/DecomposeDialog.vue'
+import MergeRequirementDialog from '@/views/req/MergeRequirementDialog.vue'
 import {
   ACTION_IMPACT,
   DANGER_ACTIONS,
@@ -57,6 +59,7 @@ import {
   metaOf,
   normalizeRequirementDetail,
   normalizeTimeline,
+  requirementPath,
   typeLabel,
   usePlatformDict,
 } from '@/views/req/platform'
@@ -208,6 +211,33 @@ const approvalTimeline = computed(() => normalizeTimeline(approval.value?.timeli
 // 动作行口径「渲染看权限、禁用看门」：受门动作在门未过（或无权限）时**仍渲染**但 disabled，
 // 并给出一句原因；有权限且门已过、只是当前状态不允许时保持既有行为（隐藏，不编文案）。
 const { canAction } = usePermission()
+
+// —— r47 合并重复需求 ——
+/** 权限走动作码（无权限时按钮不渲染）；终态/已并入时按钮禁用并说明原因 */
+const canMerge = computed(() => canAction('req.action.merge_duplicate'))
+const mergeOpen = ref(false)
+const mergedIntoId = computed(() => detail.value?.mergedIntoId ?? null)
+const mergeBlocked = computed(() => {
+  const current = detail.value
+  if (!current) return true
+  if (current.mergedIntoId != null) return true
+  return ['CLOSED', 'ACCEPTED_CLOSED', 'DONE'].includes(String(current.status ?? '').toUpperCase())
+})
+const mergeBlockedReason = computed(() => {
+  if (mergedIntoId.value != null) return `已并入 #${mergedIntoId.value}，无需再次合并`
+  return '需求已关闭，不能再合并'
+})
+
+/** 合并成功：弹层已 toast 迁移明细，这里只把用户送到主需求 */
+async function onMerged(result: RequirementMergeResult): Promise<void> {
+  mergeOpen.value = false
+  await router.push(requirementPath(result.targetId))
+}
+
+function openMergedTarget(): void {
+  const target = mergedIntoId.value
+  if (target != null) void router.push(requirementPath(target))
+}
 const estimate = computed<EstimateBlock | null>(() => detail.value?.estimate ?? null)
 const estimateStatus = computed(() => estimateStatusOf(estimate.value))
 const gateOpen = computed(() => estimateStatus.value === 'APPROVED')
@@ -617,6 +647,17 @@ onMounted(async () => {
             <span class="detail__code mono">{{ detail.code }}</span>
             <h1 class="detail__title">{{ detail.title }}</h1>
             <StatusPill kind="requirement" :value="detail.status" />
+            <!-- r47：合并后源需求显示「已并入 #N」，点一下直达主需求 -->
+            <button
+              v-if="mergedIntoId != null"
+              type="button"
+              class="detail__merged"
+              data-test="merged-badge"
+              title="该需求已合并，点击查看主需求"
+              @click="openMergedTarget"
+            >
+              已并入 #{{ mergedIntoId }}
+            </button>
             <PriorityDot :value="detail.priority" />
             <ScopeChip
               v-if="auth.scope?.label"
@@ -657,6 +698,21 @@ onMounted(async () => {
             >
               编辑
             </el-button>
+            <!-- r47：合并重复需求（无权限不渲染；终态/已并入时禁用并给原因） -->
+            <el-button
+              v-if="canMerge"
+              class="btn--disabled-reason"
+              size="small"
+              data-test="merge-duplicate"
+              :disabled="mergeBlocked"
+              :title="mergeBlocked ? mergeBlockedReason : '把当前需求并入主需求，本需求关闭'"
+              @click="mergeOpen = true"
+            >
+              合并重复需求
+            </el-button>
+            <span v-if="canMerge && mergeBlocked" class="detail__gate-hint" data-test="merge-disabled-hint">
+              {{ mergeBlockedReason }}
+            </span>
             <!-- 只变灰的按钮等于让用户自己猜；禁用时必须紧邻一句原因（DESIGN §3.1） -->
             <span
               v-if="!editAllowed"
@@ -752,7 +808,9 @@ onMounted(async () => {
           @open-approval="openEstimateApproval"
           @submitted="refreshAll"
           @request-change="onFieldRequestChange"
+          @refresh="refreshAll"
         />
+        <ChildrenTab
         <ChildrenTab v-else-if="activeTab === 'children'" :detail="detail" @decompose="decomposeOpen = true" />
         <PdrReviewTab v-else-if="activeTab === 'pdr'" :detail="detail" @refresh="refreshAll" />
         <TasksTab
@@ -875,6 +933,8 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
+    <MergeRequirementDialog v-model="mergeOpen" :requirement="detail" @merged="onMerged" />
+
     <AssignVendorDialog
       v-model="assignOpen"
       :requirement-id="id"
@@ -932,6 +992,23 @@ onMounted(async () => {
   border: 1px solid var(--border);
   border-radius: var(--r-cell);
   padding: 1px 6px;
+}
+.detail__merged {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--color-info-bg);
+  color: var(--info-ink);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.detail__merged:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 .detail__title {
   margin: 0;

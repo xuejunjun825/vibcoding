@@ -79,7 +79,12 @@ public class RbacSeeder {
                     "task.action.update", "task.action.close",
                     "sprint.action.create", "sprint.action.close",
                     "test.action.case_edit",
-                    "req.action.change_request", "req.action.change_apply"));
+                    "req.action.change_request", "req.action.change_apply"),
+            // r47 重复合并：req:review 的 ALLOW 集是 PLATFORM_ADMIN / PMO / PRODUCT /
+            // SUB_BUSINESS_LEADER，而契约 §3.3 的准入只有前三个。域负责人持有 req:review 是为了
+            // 评审，不该因此获得「把别人的需求合掉」的权限，所以逐动作显式 DENY（推导仍是唯一
+            // 默认规则，覆盖只有这一格，测试里当作声明式白名单校验）。
+            "SUB_BUSINESS_LEADER", Set.of("req.action.merge_duplicate"));
 
     private final SysDb db;
 

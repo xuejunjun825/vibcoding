@@ -207,3 +207,16 @@
 | 权限 | 功能码 60→**61**（新增 `req:review`）、页 37→**38**（`pdr.review`）、动作 75→**81**（`pdr_review_start`/`opinion_submit`/`conclude`/`close`/`opinion_to_task`/`vendor_change`）、`sys_role_permission` 1903→**1980**、每角色 **180** 格 |
 | 门禁 | `make pdr-verify` = `scripts/pdr-flow-verify.sh` **66 条**（S1 前置 / S2 评审 / S3 顺序门 / S4 换厂商 / S5 附件 / S6 统计与多条意见转任务），`scripts/tests/pdr/_lib.sh` 共享原语，teardown 残留 0 |
 | 执行方式 | **离线 Agent Teams 执行**（TeamFlow 宿主的 `subagents` 注册表为空，`teamflow_start` 恒报 noProvider）：后端/QA 门禁/前端/门禁修复分别由子代理完成，Lead 复验并提交 |
+
+## 18. 需求池运营：相似 / 我也需要 / 合并重复（r47）
+
+| 维度 | 事实 |
+|---|---|
+| 数据 | `V22__requirement_follow.sql`（`requirement_follow` 唯一键 `(tenant_id, requirement_id, user_id)`）、`V23__requirement_merge.sql`（`requirement.merged_into_id` / `close_reason` + 索引）；Flyway 最高成功版本 **23** |
+| 相似检索 | 2-gram 打分：同标题 3.0 + 同类型 0.5 + 同域 1.0（参照域=`domainId` 参数）+ 细粒度重合 +0.5；`GET /requirements/similar?title&domainId&limit` 与 `GET /requirements/{id}/similar`；只回 ACTIVE 且未合并 |
+| 我也需要 | `POST /requirements/{id}/follow {note?}`（201 幂等）、`DELETE .../follow`（204）、`GET .../followers?page&size`（含 orgs 聚合）；热度 `followCount/followedByMe` 由 `RequirementFollowQuery` 单点批量查，列表与详情同源 |
+| 合并重复 | `POST /requirements/{id}/merge {targetId, reason}`：6 条前置 + 单事务（源 CLOSED+`close_reason=MERGED`+`merged_into_id`、跟单迁移去重、子需求 reparent、审计 `REQUIREMENT_MERGED`）；重复合并 409 `ALREADY_MERGED`、目标已合并 `TARGET_MERGED`、成环 `MERGE_CYCLE`、终态 `REQUIREMENT_CLOSED` |
+| 权限 | 动作 81→**83**（`req.action.follow` 挂 `notification:read`、`req.action.merge_duplicate` 挂 `req:review`，未复用被状态机占用的 `req.action.merge`）、`sys_role_permission` 1980→**2002**、每角色 **182**；`s2` 覆盖例外 11→**12**（域负责人对 `merge_duplicate` DENY） |
+| 前端 | 提报相似提示（400ms 防抖）、详情「需求热度」卡 + 跟单人抽屉、合并弹层（搜索/相似选目标/原因/错误码）、列表「已并入 #N」与「N 人需要」徽标 |
+| 门禁 | `make pool-ops-verify` = `scripts/pool-ops-verify.sh` **33 条**（P1 相似 7 / P2 跟单 9 / P3 合并 9 / P4 回归 8），`scripts/tests/pool/_lib.sh` 共享原语，teardown 双口径残留 0 |
+| 演示数据 | 需求 12→**13**（新增 `DEMO-R-13`）、账号 14→**15**（新增 `biz2`）、`DEMO-R-02` 预置 6 条跟单 |

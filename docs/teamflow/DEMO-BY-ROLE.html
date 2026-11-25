@@ -35,7 +35,42 @@ h1.title{display:none}
 .page{max-width:1560px;margin:0 auto;padding:28px 32px}
 img{max-width:100%;height:auto}
 </style></head><body><div class="page">
-
+<div class="toc"><div class="toc-title">目录</div>
+<ul>
+<li><a href="#平台功能总览与角色演示手册"
+id="toc-平台功能总览与角色演示手册">平台功能总览与角色演示手册</a>
+<ul>
+<li><a href="#1-演示环境与账号" id="toc-1-演示环境与账号">1.
+演示环境与账号</a></li>
+<li><a href="#2-已交付能力地图按域均为页面实测可打开"
+id="toc-2-已交付能力地图按域均为页面实测可打开">2.
+已交付能力地图（按域，均为页面实测可打开）</a></li>
+<li><a
+href="#3-角色--页面可用性矩阵r24-起--10-账号--14-页r39-新增-automationrules"
+id="toc-3-角色--页面可用性矩阵r24-起--10-账号--14-页r39-新增-automationrules">3.
+角色 × 页面可用性矩阵（r24 起 · 10 账号 × 14 页，r39 新增
+<code>/automation/rules</code>）</a></li>
+<li><a href="#4-各角色演示脚本" id="toc-4-各角色演示脚本">4.
+各角色演示脚本</a></li>
+<li><a href="#5-端到端演示剧本15-分钟"
+id="toc-5-端到端演示剧本15-分钟">5. 端到端演示剧本（15 分钟）</a></li>
+<li><a href="#6-本轮修复的两条-p0已修复含验证命令"
+id="toc-6-本轮修复的两条-p0已修复含验证命令">6. 本轮修复的两条
+P0（已修复，含验证命令）</a></li>
+<li><a href="#7-截图与复现" id="toc-7-截图与复现">7. 截图与复现</a></li>
+<li><a href="#8-建议的下一步" id="toc-8-建议的下一步">8.
+建议的下一步</a></li>
+<li><a href="#9-自动化规则引擎r39--三步脚本--3-张截图"
+id="toc-9-自动化规则引擎r39--三步脚本--3-张截图">9. 自动化规则引擎（r39
+· 三步脚本 + 3 张截图）</a></li>
+<li><a href="#412-需求池运营相似提示--我也需要--合并重复r47-新增"
+id="toc-412-需求池运营相似提示--我也需要--合并重复r47-新增">4.12
+需求池运营：相似提示 / 我也需要 / 合并重复（r47 新增）</a></li>
+<li><a href="#411-产品需求评审--厂商工时评估r46-新增评审中心"
+id="toc-411-产品需求评审--厂商工时评估r46-新增评审中心">4.11
+产品需求评审 + 厂商工时评估（r46 新增，评审中心）</a></li>
+</ul></li>
+</ul></div>
 <h1 id="平台功能总览与角色演示手册">平台功能总览与角色演示手册</h1>
 <blockquote>
 <p>生成时间：2026-11-10（r7 角色准入修复轮） · 代码基线
@@ -1191,6 +1226,46 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="
 <code>/automation/runs</code>），1440×900，落
 <code>docs/teamflow/demo-shots/</code>。该目录必须可提交：<code>git check-ignore -v docs/teamflow/demo-shots/r39-automation-r1-success.png</code>
 无输出（未被忽略）。</p>
+<h2 id="412-需求池运营相似提示--我也需要--合并重复r47-新增">4.12
+需求池运营：相似提示 / 我也需要 / 合并重复（r47 新增）</h2>
+<p><strong>角色与入口</strong>：<code>pm</code>/<code>biz1</code>/<code>biz2</code>/二级企业
+→ 「需求池」<code>/requirements</code>、提报
+<code>/requirements/new</code>、详情
+<code>/requirements/{id}</code>。</p>
+<p><strong>数据</strong>：演示基线 13 条需求（新增
+<code>DEMO-R-13</code> 采购订单移动审批（二期），与
+<code>DEMO-R-02</code> 相似度 4.5）；<code>DEMO-R-02</code> 预置 6
+条跟单（biz1/biz2/po1/suite1/vendor1 等），账号
+<code>biz2</code>（陈业务2，业务部门）为 r47 新增的第 15
+个种子账号。</p>
+<p><strong>三步脚本（约 3 分钟）</strong></p>
+<ol type="1">
+<li>「提报需求」→ 标题填「采购订单移动审批」→ 400ms 后出现「发现 6
+条相似需求」列表（编号/标题/状态/「N
+人需要」），点任一条可直达详情；相似提示不阻断提报。</li>
+<li>打开 <code>DEMO-R-02</code> → 右侧「需求热度」卡显示「6
+人需要」，点「我也需要」立即
++1（重复点不叠加，靠唯一键幂等）；「查看全部 6
+人」开抽屉按组织聚合。</li>
+<li>同页「合并重复需求」→ 弹层选目标（编号精确匹配或从相似列表选）+
+填原因 → 确认后源需求关闭、跟单与子需求迁到目标、审计记
+<code>REQUIREMENT_MERGED</code>；列表卡片显示「已并入 #N」徽标。</li>
+</ol>
+<p><strong>可现场验证的边界</strong></p>
+<ul>
+<li>终态（CLOSED/ACCEPTED_CLOSED/DONE/已合并）不能「我也需要」→
+按钮禁用并给原因；接口 409 <code>REQUIREMENT_CLOSED</code>。</li>
+<li>合并前置 6
+条：源/目标不能同一、源不能已合并、目标不能是源的后代（环）、源目标同租户同域、源不能是终态；违反给
+400/409 具体错误码。</li>
+<li>相似检索只回 <code>ACTIVE</code> 且未合并的需求，<code>CLOSED</code>
+与已合并的都不出现；同域 +1 分（参照域取请求的
+<code>domainId</code>）。</li>
+</ul>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> platform-up <span class="kw">&amp;&amp;</span> <span class="fu">make</span> platform-seed <span class="kw">&amp;&amp;</span> <span class="fu">make</span> platform-demo-reset</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> pool-ops-verify   <span class="co"># 33 条：P1 相似 7 / P2 跟单 9 / P3 合并 9 / P4 回归 8</span></span></code></pre></div>
+<p><strong>截图</strong>：<code>docs/teamflow/demo-shots/pool-1-similar-hint.png</code>、<code>pool-2-follow-card.png</code>、<code>pool-3-merge-dialog.png</code>。</p>
 <h2 id="411-产品需求评审--厂商工时评估r46-新增评审中心">4.11
 产品需求评审 + 厂商工时评估（r46 新增，评审中心）</h2>
 <p><strong>角色与入口</strong>：产品经理/项目域负责人/评审人 →
@@ -1228,8 +1303,8 @@ chip（通过/需修改/待评）、按人分组的意见（每条带分类徽�
 已进 <code>IN_DEV</code> 再换厂商 → 409
 <code>VENDOR_LOCKED</code>（detail 带阻塞子需求 id）。</li>
 </ul>
-<div class="sourceCode" id="cb8"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> pdr-verify                                 <span class="co"># 6 段 66 条：顺序门/评审/换厂商/附件/统计/多条意见转任务</span></span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/pdr-flow-verify.sh <span class="at">--dry-run</span>       <span class="co"># 免栈只打印断言清单</span></span></code></pre></div>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> pdr-verify                                 <span class="co"># 6 段 66 条：顺序门/评审/换厂商/附件/统计/多条意见转任务</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/pdr-flow-verify.sh <span class="at">--dry-run</span>       <span class="co"># 免栈只打印断言清单</span></span></code></pre></div>
 <p>截图：<code>docs/teamflow/demo-shots/pdr-1-review-center.png</code>、<code>pdr-2-review-detail.png</code>、<code>pdr-3-requirement-tab.png</code>。</p>
 </div></body></html>

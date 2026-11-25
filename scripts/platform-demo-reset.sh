@@ -217,7 +217,7 @@ check_count() {
         || fail "${label}: 实际 ${got:-<缺失>}，期望 ${want}" "核对 DemoFixture 的期望常量与插入条数"
 }
 
-check_count requirements   12 "需求 12 条（小链路）"
+check_count requirements   13 "需求 13 条（小链路，r47 新增 DEMO-R-13）"
 check_count releases        1 "版本 1 个"
 check_count milestones      1 "里程碑 1 个（甘特版本视图）"
 check_count sprints         1 "迭代 1 个"
@@ -226,7 +226,7 @@ check_count testCases      12 "用例 12 条"
 check_count testPlans       1 "测试计划 1 个"
 check_count planCases      10 "计划-用例 10 条（≥10 才可执行）"
 check_count defects         3 "缺陷 3 条"
-check_count po1Visible      8 "隔离基线 po1 可见需求 = 8"
+check_count po1Visible      9 "隔离基线 po1 可见需求 = 9"
 check_count vendorAVisible  3 "隔离基线 vendor1（VEN-A）可见需求 = 3"
 check_count vendorBVisible  0 "隔离基线 vendor2（VEN-B）可见需求 = 0"
 check_count fixtureTraces   0 "夹具痕迹（s1-/s5-/s7-/neg-sm-）= 0"
@@ -252,9 +252,9 @@ check_count gateResidue    0 "门禁 RUN_TAG 残留（wf_definition/test_module/
 
 # r26：工时评估单（第五类审批单据）必须开箱即通——11 条非 BUS 需求各一张已通过的单、在途 0。
 # 演示不能卡在新门上：没有这三项，「概览卡片全是未评估 / 动作行全禁用」这种回退只能靠人眼发现。
-check_count estimateApproved     11 "已通过工时评估单 = 11（4 PDR + 7 RD）"
+check_count estimateApproved     12 "已通过工时评估单 = 12（5 PDR + 7 RD）"
 check_count estimatePending       0 "在途工时评估单 = 0（演示里的门全部放行）"
-check_count estimateRequirements 11 "有生效评估单的需求 = 11（不重复建单）"
+check_count estimateRequirements 12 "有生效评估单的需求 = 12（不重复建单）"
 
 # r32：演示链要跑到 PUBLISHED，夹具必须把「已交付的待测 RD + 已两级会签通过的 BUS」造出来。
 # 只查库不查接口：这四件事都是落库结果（wf_instance 的章、requirement 的字段、计划用例行），
@@ -321,11 +321,11 @@ section 2
 # ---------------------------------------------------------------- 库内复核（db_q 口径）
 
 DEMO_REQS="$(db_count requirement "tenant_id = ${TENANT_ID} AND code LIKE 'DEMO-R-%'")"
-[[ "${DEMO_REQS}" == "12" ]] \
-    && pass "库内 DEMO-R-* 需求 12 行" \
-    || fail "库内 DEMO-R-* 需求 ${DEMO_REQS} 行，期望 12" "重置未把所有固定行插入（看服务日志）"
+[[ "${DEMO_REQS}" == "13" ]] \
+    && pass "库内 DEMO-R-* 需求 13 行" \
+    || fail "库内 DEMO-R-* 需求 ${DEMO_REQS} 行，期望 13" "重置未把所有固定行插入（看服务日志）"
 
-# r34：干净基线不只是「12 条演示需求齐」，还得「没有别的东西」。三个写 t1 的门禁
+# r34：干净基线不只是「13 条演示需求齐」，还得「没有别的东西」。三个写 t1 的门禁
 # （release-flow-verify / platform-verify / platform-test-negative）过去把夹具挂在种子需求上，
 # 复位又不保证成功，于是「谁先跑」决定了后一个门禁看到的数据。非夹具需求恒 0 是顺序无关的前提：
 # 任何门禁的自建夹具都必须只在本次 GATE_TAG 下、并在退出时被复位掉。
@@ -336,9 +336,9 @@ NON_FIXTURE_REQS="$(db_count requirement "tenant_id = ${TENANT_ID} AND code NOT 
             "残留来自某个门禁的夹具：它必须自建 GATE_TAG 并靠 gate-fixture 的退出复位清掉，不能挂在种子上"
 
 SUPPLY_REQS="$(db_count requirement "tenant_id = ${TENANT_ID} AND origin_org_id IN (SELECT id FROM sys_org WHERE tenant_id = ${TENANT_ID} AND code = 'SUPPLY')")"
-[[ "${SUPPLY_REQS}" == "8" ]] \
-    && pass "库内 po1 组织（SUPPLY）提报需求 8 行" \
-    || fail "库内 SUPPLY 提报需求 ${SUPPLY_REQS} 行，期望 8" "8/3/1 的分布是隔离基线的前提，改数据要同步改断言"
+[[ "${SUPPLY_REQS}" == "9" ]] \
+    && pass "库内 po1 组织（SUPPLY）提报需求 9 行" \
+    || fail "库内 SUPPLY 提报需求 ${SUPPLY_REQS} 行，期望 9" "9/3/1 的分布是隔离基线的前提，改数据要同步改断言"
 
 # 账号断言的是「种子账号仍然存在」，不是「tenant 内用户总数恰好 N」：权限/账号类门禁
 # 会在同一个 t1 租户里加人（如 T1 devcheck），用总数会把别人的账号算成种子缺陷。
@@ -621,7 +621,7 @@ check_visible() { # check_visible <user> <expected>
                 "隔离口径：po1=biz1/suite1 按 origin 组织子树，vendor 按 owner/assignee 厂商"
 }
 
-check_visible po1 8
+check_visible po1 9
 check_visible vendor1 3
 check_visible vendor2 0
 # r24：vpm1 与 vendor1 同厂商不同角色 —— 隔离按厂商，所以需求可见数与 vendor1 相同（3）。
@@ -677,7 +677,7 @@ check_vendor_release_chain() {
     codes="$(printf '%s' "${HTTP_BODY}" | jq -r '[.items[]?.code] | join(",")' 2>/dev/null || echo '')"
     rr="$(db_count release_requirement "tenant_id = ${TENANT_ID} AND release_id IN (SELECT id FROM \`release\` WHERE tenant_id = ${TENANT_ID} AND code = 'DEMO-REL-1')")"
     if [[ "${total:-}" =~ ^[0-9]+$ ]] && [[ "${total}" -ge 1 ]] \
-        && [[ "${codes}" == *DEMO-REL-1* ]] && [[ "${rr}" == "11" ]]; then
+        && [[ "${codes}" == *DEMO-REL-1* ]] && [[ "${rr}" == "12" ]]; then
         pass "vpm1 版本列表 ${total} 个且含 DEMO-REL-1（该版本 ${rr} 条需求，含 VEN-A 承接链）"
     else
         fail "vpm1 版本链异常：total=${total:-<缺失>} codes=${codes:-<缺失>} release_requirement=${rr:-<缺失>}" \
@@ -706,14 +706,14 @@ check_count_any() {
         || fail "${label}（期望 ${want}，实际 ${got:-<缺 ${k1}/${k2} 键>}）" \
             "重置计数由 DemoResetService 返回，缺键说明 r18 段还没接进 reset 响应"
 }
-check_count_any rolePermission role_permission 1980 "授权行 role_permission = 1980（11 角色 × 180）"
+check_count_any rolePermission role_permission 2002 "授权行 role_permission = 2002（11 角色 × 182）"
 check_count_any customRoles custom_roles 0 "自定义角色 = 0（重置只留内置 11 个）"
 
 RBAC_TENANT_ROWS="$(db_count sys_role_permission "tenant_id = ${TENANT_ID}")"
-[[ "${RBAC_TENANT_ROWS}" == "1980" ]] \
+[[ "${RBAC_TENANT_ROWS}" == "2002" ]] \
     && pass "库内授权行 ${RBAC_TENANT_ROWS} 行（服务端计数之外的独立复核）" \
     || fail "库内授权行 ${RBAC_TENANT_ROWS:-<空>} 行，期望 1980" \
-            "计数表自报与服务端同源；这条独立查库，两处都说 1980 才算数"
+            "计数表自报与服务端同源；这条独立查库，两处都说 2002 才算数"
 
 # r24：第 11 个内置角色在演示账号上必须有落脚点 —— 角色与厂商必须成对出现，
 # 少一个就是「列表看得见、写什么都 403」的空壳账号（PRD AC-12）。
@@ -729,20 +729,20 @@ VPM_ROLE_VENDOR="$(db_q "SELECT CONCAT(r.code, '/', COALESCE(v.code, 'NULL'))
             "SeedService 的 userDefs 必须给 vpm1 同时写角色码与厂商码"
 
 VPM_ROWS="$(db_count sys_role_permission "tenant_id = ${TENANT_ID} AND role_id = (SELECT id FROM sys_role WHERE tenant_id = ${TENANT_ID} AND code = 'VENDOR_PM')")"
-[[ "${VPM_ROWS}" == "180" ]] \
-    && pass "VENDOR_PM 授权 ${VPM_ROWS} 行（11 个角色各 180 格）" \
-    || fail "VENDOR_PM 授权 ${VPM_ROWS:-<空>} 行，期望 180" \
-            "RbacSeeder 必须给第 11 个内置角色落满 180 格，V13 只保证角色存在"
+[[ "${VPM_ROWS}" == "182" ]] \
+    && pass "VENDOR_PM 授权 ${VPM_ROWS} 行（11 个角色各 182 格）" \
+    || fail "VENDOR_PM 授权 ${VPM_ROWS:-<空>} 行，期望 182" \
+            "RbacSeeder 必须给第 11 个内置角色落满 182 格，V13 只保证角色存在"
 
 BAD_ROLE_ROWS="$(db_q "SELECT COUNT(*) FROM (
         SELECT r.id FROM sys_role r
          WHERE r.tenant_id = ${TENANT_ID} AND r.builtin = 1
            AND (SELECT COUNT(*) FROM sys_role_permission p
-                 WHERE p.tenant_id = r.tenant_id AND p.role_id = r.id) <> 180) x")"
+                 WHERE p.tenant_id = r.tenant_id AND p.role_id = r.id) <> 182) x")"
 [[ "${BAD_ROLE_ROWS}" == "0" ]] \
-    && pass "11 个内置角色每个恰好 180 行授权" \
-    || fail "有 ${BAD_ROLE_ROWS:-?} 个内置角色的授权行数不等于 180" \
-            "1980 = 11 × 180：缺格说明预设没覆盖到新角色，多格说明有重复 upsert"
+    && pass "11 个内置角色每个恰好 182 行授权" \
+    || fail "有 ${BAD_ROLE_ROWS:-?} 个内置角色的授权行数不等于 182" \
+            "2002 = 11 × 182：缺格说明预设没覆盖到新角色，多格说明有重复 upsert"
 
 roleperm_audit_view() {
     db_q "SELECT p.access
@@ -768,7 +768,7 @@ else
     [[ "${DIRTIED}" == "DENY" && "${RESTORED}" == "${PRESET_ACCESS}" ]] \
         && pass "被改过的授权格回到预设（audit:view ${DIRTIED} → ${RESTORED}）" \
         || fail "授权格未回预设：污染后 ${DIRTIED:-<空>}，重置后 ${RESTORED:-<空>}，预设 ${PRESET_ACCESS}" \
-                "重置必须用 RbacSeeder 的推导覆盖内置角色的 1980 行（upsert），不能只删自定义角色的行"
+                "重置必须用 RbacSeeder 的推导覆盖内置角色的 2002 行（upsert），不能只删自定义角色的行"
 fi
 
 CUSTOM_ROLES_DB="$(db_count sys_role "tenant_id = ${TENANT_ID} AND builtin = 0")"

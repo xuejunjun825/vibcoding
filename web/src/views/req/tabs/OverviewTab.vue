@@ -1,18 +1,27 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { submitEstimate, tagsOf } from '@/api/req'
+import {
+  followRequirement,
+  listRequirementFollowers,
+  unfollowRequirement,
+} from '@/api/poolOps'
+import { ApiError } from '@/api/client'
 import type {
   ApprovalInstanceDetail,
   ApprovalTimelineEvent,
   EstimateBlock,
   RequirementDetail,
+  RequirementFollower,
+  RequirementOrgCount,
 } from '@/api/types'
 import ApprovalTimeline from '@/components/ApprovalTimeline.vue'
 import FieldFlag from '@/views/req/FieldFlag.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import TagChips from '@/components/TagChips.vue'
 import { usePermission } from '@/composables/usePermission'
+import { useDictStore } from '@/stores/dict'
 import { formatDate, formatDateTime, formatDays } from '@/utils/format'
 import { changePermissionsOf } from '@/views/req/change'
 import { ruleOf } from '@/views/req/editability'
@@ -53,13 +62,164 @@ const emit = defineEmits<{
   (event: 'submitted'): void
   /** r43 · 字段级「发起变更」：字段名交给详情页预填抽屉（AC-11） */
   (event: 'requestChange', field: string): void
+  /** r47 · 跟单撞上 409 时请父级重取详情（状态可能已被他人关闭/合并） */
+  (event: 'refresh'): void
 }>()
 
 const { domainName, vendorName, userName } = usePlatformDict()
-const { can } = usePermission()
+const { can, canAction } = usePermission()
+const dict = useDictStore()
 
 /** 字段级 CTA 的权限 = 服务端 `permissions.changeRequest`（未下发按允许，见 change.ts 注释） */
 const canChange = computed(() => changePermissionsOf(props.detail).changeRequest)
+
+// —— r47 「我也需要」跟单卡 ——
+/**
+ * 跟单人数与「我是否跟单」以服务端字段为初值；本地状态只在 follow/unfollow
+ * 响应上更新，随后用 followers 接口对账。父级 refreshAll 换 detail 时再同步。
+ */
+const FOLLOW_TERMINAL_STATUS = ['CLOSED', 'ACCEPTED_CLOSED', 'DONE']
+const DRAWER_SIZE = 10
+const followCount = ref(props.detail.followCount ?? 0)
+const followedByMe = ref(props.detail.followedByMe ?? false)
+const followNote = ref('')
+const followBusy = ref(false)
+const followers = ref<RequirementFollower[]>([])
+const followerTotal = ref(0)
+const followerOrgs = ref<RequirementOrgCount[]>([])
+const followLoading = ref(false)
+const followDrawer = ref(false)
+const drawerPage = ref(1)
+const drawerTotal = ref(0)
+const drawerItems = ref<RequirementFollower[]>([])
+const drawerLoading = ref(false)
+
+/** 终态（关闭/已验收关闭/已完成/已并入主需求）：按钮禁用并说明原因，不假装能跟单 */
+const followBlocked = computed(() => {
+  if (props.detail.mergedIntoId != null) return true
+  return FOLLOW_TERMINAL_STATUS.includes(String(props.detail.status ?? '').toUpperCase())
+})
+const followBlockedReason = computed(() => {
+  const target = props.detail.mergedIntoId
+  if (target != null) return `该需求已并入 #${target}，请到主需求下跟单`
+  const label = dict.label('requirement', props.detail.status) || '已关闭'
+  return `需求已关闭（${label}），不能再跟单`
+})
+const canFollow = computed(() => canAction('req.action.follow'))
+const followButtonHint = computed(() => {
+  if (followBlocked.value) return followBlockedReason.value
+  return followedByMe.value ? '取消跟单（跟单人数 -1）' : '标记我也需要，跟单人数 +1'
+})
+
+function orgLabel(org: RequirementOrgCount): string {
+  return org.orgName || (org.orgId != null ? `组织 #${org.orgId}` : '未归属组织')
+}
+
+async function loadFollowers(): Promise<void> {
+  const requirementId = props.detail.id
+  followLoading.value = true
+  try {
+    const page = await listRequirementFollowers(requirementId, 1, 5)
+    if (requirementId !== props.detail.id) return
+    followers.value = page.items ?? []
+    followerTotal.value = page.total ?? 0
+    followerOrgs.value = page.orgs ?? []
+    followedByMe.value = page.mine
+    if (props.detail.followCount == null) followCount.value = page.total ?? 0
+  } catch {
+    // 跟单人明细是附加信息：读不到不阻断详情，也不清掉人数
+    if (requirementId === props.detail.id) followers.value = []
+  } finally {
+    if (requirementId === props.detail.id) followLoading.value = false
+  }
+}
+
+async function toggleFollow(): Promise<void> {
+  if (followBlocked.value || followBusy.value) return
+  followBusy.value = true
+  try {
+    if (followedByMe.value) {
+      await unfollowRequirement(props.detail.id)
+      followedByMe.value = false
+      followCount.value = Math.max(0, followCount.value - 1)
+      ElMessage.success('已取消跟单')
+    } else {
+      const result = await followRequirement(props.detail.id, followNote.value)
+      followedByMe.value = result.followedByMe
+      followCount.value = result.followCount
+      followNote.value = ''
+      ElMessage.success(result.created ? '已加入跟单' : '你已经在跟单列表中')
+    }
+    await loadFollowers()
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'REQUIREMENT_CLOSED') {
+      // 本地 status 可能已过期：409 说明服务端已终态，不拿旧状态拼文案
+      ElMessage.warning('该需求已关闭（或已并入主需求），无法再跟单')
+      emit('refresh')
+    } else if (error instanceof ApiError && error.isForbidden) {
+      ElMessage.warning('没有跟单权限，请联系需求管理员授权')
+    } else if (error instanceof ApiError && error.status === 404 && followedByMe.value) {
+      // 并发下已被取消：以服务端为准，静默对账
+      followedByMe.value = false
+      await loadFollowers()
+    } else {
+      ElMessage.error(messageOf(error))
+    }
+  } finally {
+    followBusy.value = false
+  }
+}
+
+async function loadDrawer(): Promise<void> {
+  drawerLoading.value = true
+  try {
+    const page = await listRequirementFollowers(props.detail.id, drawerPage.value, DRAWER_SIZE)
+    drawerItems.value = page.items ?? []
+    drawerTotal.value = page.total ?? 0
+  } catch {
+    drawerItems.value = []
+  } finally {
+    drawerLoading.value = false
+  }
+}
+
+function openFollowDrawer(): void {
+  followDrawer.value = true
+  drawerPage.value = 1
+  void loadDrawer()
+}
+
+function onDrawerPage(page: number): void {
+  drawerPage.value = page
+  void loadDrawer()
+}
+
+/** 父级刷新（合并/关闭后）会换 detail：人数与「我的状态」以新 detail 为准 */
+watch(
+  () => [props.detail.followCount, props.detail.followedByMe],
+  () => {
+    followCount.value = props.detail.followCount ?? followCount.value
+    followedByMe.value = props.detail.followedByMe ?? followedByMe.value
+  },
+)
+
+/** 同页切换需求：备注/抽屉等本地态必须清，否则会带到下一条需求 */
+watch(
+  () => props.detail.id,
+  () => {
+    followNote.value = ''
+    followDrawer.value = false
+    drawerPage.value = 1
+    drawerItems.value = []
+    followCount.value = props.detail.followCount ?? 0
+    followedByMe.value = props.detail.followedByMe ?? false
+    void loadFollowers()
+  },
+)
+
+onMounted(() => {
+  void loadFollowers()
+})
 
 /**
  * 业务域支持多值（r43 新增只读投影 `domainIds`）；旧响应回退单值。
@@ -452,6 +612,62 @@ async function submitForm(): Promise<void> {
       </section>
 
       <aside class="overview__side">
+        <!-- r47 「我也需要」：人数/组织聚合/前 5 位跟单人；终态禁用并说明原因 -->
+        <section class="surface surface--pad follow" data-test="follow-card">
+          <header class="overview__card-head">
+            <h3 class="overview__title">需求热度</h3>
+            <span class="follow__count">{{ followCount }} 人需要</span>
+          </header>
+          <div class="follow__actions">
+            <el-button
+              v-if="canFollow"
+              class="btn--disabled-reason"
+              size="small"
+              :type="followedByMe ? 'default' : 'primary'"
+              :loading="followBusy"
+              :disabled="followBlocked || followBusy"
+              :title="followButtonHint"
+              @click="toggleFollow"
+            >
+              {{ followedByMe ? '取消跟单' : '我也需要' }}
+            </el-button>
+            <span v-if="followBlocked" class="follow__hint">{{ followBlockedReason }}</span>
+          </div>
+          <el-input
+            v-if="canFollow && !followedByMe && !followBlocked"
+            v-model="followNote"
+            class="follow__note"
+            size="small"
+            maxlength="80"
+            placeholder="备注（可选）：为什么需要"
+          />
+          <div class="follow__orgs" v-if="followerOrgs.length">
+            <span v-for="org in followerOrgs.slice(0, 5)" :key="`${org.orgId ?? org.orgName}`" class="follow__org">
+              {{ orgLabel(org) }} {{ org.count }}
+            </span>
+          </div>
+          <div class="follow__list">
+            <div v-if="followLoading" class="overview__muted">正在加载跟单人…</div>
+            <template v-else-if="followers.length">
+              <ul class="follow__items">
+                <li v-for="follower in followers" :key="follower.userId" class="follow__item">
+                  <span class="follow__name">{{ follower.userName || `用户 #${follower.userId}` }}</span>
+                  <span class="follow__org-name">{{ follower.orgName || '未归属组织' }}</span>
+                </li>
+              </ul>
+              <button
+                v-if="followerTotal > followers.length"
+                type="button"
+                class="overview__link"
+                @click="openFollowDrawer"
+              >
+                查看全部 {{ followerTotal }} 人 →
+              </button>
+            </template>
+            <p v-else class="overview__muted">还没有人跟单，点「我也需要」让团队看到热度。</p>
+          </div>
+        </section>
+
         <section class="surface surface--pad">
           <header class="overview__card-head">
             <h3 class="overview__title">审批进度</h3>
@@ -540,6 +756,41 @@ async function submitForm(): Promise<void> {
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- r47 跟单明细抽屉：前 5 条之外的完整名单，按页取，不在前端拼全量 -->
+    <el-drawer v-model="followDrawer" title="跟单明细" size="420px" append-to-body>
+      <div class="follow-drawer">
+        <p class="follow-drawer__summary">
+          共 {{ drawerTotal }} 人跟单<span v-if="followerOrgs.length"> · {{ followerOrgs.length }} 个组织</span>
+        </p>
+        <div v-if="followerOrgs.length" class="follow__orgs follow-drawer__orgs">
+          <span v-for="org in followerOrgs" :key="`drawer-${org.orgId ?? org.orgName}`" class="follow__org">
+            {{ orgLabel(org) }} {{ org.count }}
+          </span>
+        </div>
+        <div v-if="drawerLoading" class="overview__muted">正在加载…</div>
+        <template v-else>
+          <ul v-if="drawerItems.length" class="follow__items">
+            <li v-for="follower in drawerItems" :key="follower.userId" class="follow__item">
+              <span class="follow__name">{{ follower.userName || `用户 #${follower.userId}` }}</span>
+              <span class="follow__org-name">{{ follower.orgName || '未归属组织' }}</span>
+              <span v-if="follower.note" class="follow-drawer__note">{{ follower.note }}</span>
+            </li>
+          </ul>
+          <p v-else class="overview__muted">暂无跟单</p>
+        </template>
+        <div v-if="drawerTotal > DRAWER_SIZE" class="follow-drawer__pager">
+          <el-pagination
+            background
+            layout="prev, pager, next"
+            :total="drawerTotal"
+            :page-size="DRAWER_SIZE"
+            :current-page="drawerPage"
+            @current-change="onDrawerPage"
+          />
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -879,6 +1130,93 @@ async function submitForm(): Promise<void> {
   font-size: 12px;
   color: var(--text-muted-aa);
   line-height: 1.6;
+}
+/* r47 跟单卡：白底方角、1px 边框；组织聚合用 20px 浅底 pill */
+.follow__count {
+  font-size: 12px;
+  color: var(--text-muted-aa);
+  font-variant-numeric: tabular-nums;
+}
+.follow__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.follow__hint {
+  font-size: 12px;
+  color: var(--text-muted-aa);
+  line-height: 1.5;
+}
+.follow__note {
+  margin-top: 8px;
+}
+.follow__orgs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.follow__org {
+  padding: 0 6px;
+  height: 20px;
+  line-height: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--bg-page);
+  font-size: 12px;
+  color: var(--text-body);
+  white-space: nowrap;
+}
+.follow__list {
+  margin-top: 8px;
+}
+.follow__items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.follow__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-body);
+}
+.follow__name {
+  color: var(--text-title);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.follow__org-name {
+  color: var(--text-muted-aa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.follow-drawer__summary {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+}
+.follow-drawer__note {
+  color: var(--text-muted-aa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.follow-drawer__orgs {
+  margin: 0 0 10px;
+}
+.follow-drawer__pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 @media (max-width: 1100px) {
   .overview__grid {

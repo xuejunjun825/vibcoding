@@ -352,6 +352,31 @@ bash scripts/automation-verify.sh --static-only # 免栈的静态部分
 
 截图按 §7.4 的 CDP 流程现截（路由换 `/automation/rules` 与 `/automation/runs`），1440×900，落 `docs/teamflow/demo-shots/`。该目录必须可提交：`git check-ignore -v docs/teamflow/demo-shots/r39-automation-r1-success.png` 无输出（未被忽略）。
 
+## 4.12 需求池运营：相似提示 / 我也需要 / 合并重复（r47 新增）
+
+**角色与入口**：`pm`/`biz1`/`biz2`/二级企业 → 「需求池」`/requirements`、提报 `/requirements/new`、详情 `/requirements/{id}`。
+
+**数据**：演示基线 13 条需求（新增 `DEMO-R-13` 采购订单移动审批（二期），与 `DEMO-R-02` 相似度 4.5）；`DEMO-R-02` 预置 6 条跟单（biz1/biz2/po1/suite1/vendor1 等），账号 `biz2`（陈业务2，业务部门）为 r47 新增的第 15 个种子账号。
+
+**三步脚本（约 3 分钟）**
+
+1. 「提报需求」→ 标题填「采购订单移动审批」→ 400ms 后出现「发现 6 条相似需求」列表（编号/标题/状态/「N 人需要」），点任一条可直达详情；相似提示不阻断提报。
+2. 打开 `DEMO-R-02` → 右侧「需求热度」卡显示「6 人需要」，点「我也需要」立即 +1（重复点不叠加，靠唯一键幂等）；「查看全部 6 人」开抽屉按组织聚合。
+3. 同页「合并重复需求」→ 弹层选目标（编号精确匹配或从相似列表选）+ 填原因 → 确认后源需求关闭、跟单与子需求迁到目标、审计记 `REQUIREMENT_MERGED`；列表卡片显示「已并入 #N」徽标。
+
+**可现场验证的边界**
+
+- 终态（CLOSED/ACCEPTED_CLOSED/DONE/已合并）不能「我也需要」→ 按钮禁用并给原因；接口 409 `REQUIREMENT_CLOSED`。
+- 合并前置 6 条：源/目标不能同一、源不能已合并、目标不能是源的后代（环）、源目标同租户同域、源不能是终态；违反给 400/409 具体错误码。
+- 相似检索只回 `ACTIVE` 且未合并的需求，`CLOSED` 与已合并的都不出现；同域 +1 分（参照域取请求的 `domainId`）。
+
+```bash
+make platform-up && make platform-seed && make platform-demo-reset
+make pool-ops-verify   # 33 条：P1 相似 7 / P2 跟单 9 / P3 合并 9 / P4 回归 8
+```
+
+**截图**：`docs/teamflow/demo-shots/pool-1-similar-hint.png`、`pool-2-follow-card.png`、`pool-3-merge-dialog.png`。
+
 ## 4.11 产品需求评审 + 厂商工时评估（r46 新增，评审中心）
 
 **角色与入口**：产品经理/项目域负责人/评审人 → 左侧「需求域 · 评审中心」（`/pdr-reviews`，页面码 `pdr.review`）。

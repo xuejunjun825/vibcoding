@@ -83,9 +83,21 @@ class RbacSeedEquivalenceTest {
             assertEquals(Access.DENY, RbacSeeder.actionAccessFor("VENDOR_PM", action),
                     code + " must be DENY for VENDOR_PM");
         }
-        // Nobody else carries overrides: the 10 pre-existing rows keep the pure max derivation.
+        // r47：SUB_BUSINESS_LEADER 是第二个带 override 的角色。它的 req:review 派生是 ALLOW，
+        // 若只靠派生，二级企业业务负责人就能合并需求——契约 §3.3/§4 要求合并只给 ADMIN/PMO/PRODUCT，
+        // 所以这里必须显式 DENY 且只 DENY 这一个动作。
+        assertEquals(Set.of("req.action.merge_duplicate"),
+                RbacSeeder.actionDenyOverrides("SUB_BUSINESS_LEADER"));
+        ActionRegistry.ActionDef mergeDuplicate = ActionRegistry.actions().stream()
+                .filter(candidate -> candidate.code().equals("req.action.merge_duplicate"))
+                .findFirst().orElseThrow();
+        assertEquals(Access.ALLOW, max("SUB_BUSINESS_LEADER", mergeDuplicate.functionCodes()),
+                "req:review derives ALLOW for SUB_BUSINESS_LEADER, so the override is not a no-op");
+        assertEquals(Access.DENY, RbacSeeder.actionAccessFor("SUB_BUSINESS_LEADER", mergeDuplicate));
+
+        // Nobody else carries overrides: the 9 pre-existing rows keep the pure max derivation.
         for (String role : PermissionMatrix.roles()) {
-            if ("VENDOR_PM".equals(role)) {
+            if ("VENDOR_PM".equals(role) || "SUB_BUSINESS_LEADER".equals(role)) {
                 continue;
             }
             for (ActionRegistry.ActionDef action : ActionRegistry.actions()) {
@@ -97,8 +109,8 @@ class RbacSeedEquivalenceTest {
         long allowed = ActionRegistry.actions().stream()
                 .filter(action -> RbacSeeder.actionAccessFor("VENDOR_PM", action) == Access.ALLOW)
                 .count();
-        assertEquals(8L, allowed,
-                "VENDOR_PM keeps 8 actions (81 − 13 overrides − 60 derived DENY)");
+        assertEquals(9L, allowed,
+                "VENDOR_PM keeps 9 actions (83 − 13 overrides − 61 derived DENY; r47 adds follow)");
     }
 
     /** A page that binds no function code is not narrowed by the function layer. */
@@ -125,9 +137,9 @@ class RbacSeedEquivalenceTest {
     }
 
     @Test
-    void totalRowsAreNineteenHundredEighty() {
-        assertEquals(1980L, rowCount(),
-                "11 roles × (61 functions + 38 pages + 81 actions) seeded rows per tenant");
+    void totalRowsAreTwoThousandAndTwo() {
+        assertEquals(2002L, rowCount(),
+                "11 roles × (61 functions + 38 pages + 83 actions) seeded rows per tenant");
     }
 
     private static long rowCount() {

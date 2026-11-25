@@ -13,7 +13,7 @@ import java.util.Map;
  * 改数据集不动回滚/不变量逻辑；改删除顺序只改 {@link #DELETE_ORDER} 一处——顺序散落在两处
  * 时，外键拓扑一变必漏一处，而 MySQL 的这些表没有 FK 约束，漏删只会静默留下孤儿行。</p>
  *
- * <p>规模由 PRD AC-13 钉死：需求 12 条（8 条 po1 组织 / 3 条 VEN-A / 1 条 VEN-C）、版本 1、
+ * <p>规模由 PRD AC-13 钉死：需求 13 条（9 条 po1 组织 / 3 条 VEN-A / 1 条 VEN-C；r47 追加 1 条相似 PDR）、版本 1、
  * 迭代 1、用例 12、缺陷 3、测试计划 1（挂 10 条用例）、任务 8、通知 4。请求的隔离口径
  * （{@code po1=8}、{@code vendor1=3}、{@code vendor2=0}）由 {@link DemoResetService} 按真实的
  * 数据范围规则自检，不在数据里写死结论。</p>
@@ -26,7 +26,7 @@ public final class DemoFixture {
     private DemoFixture() {
     }
 
-    /** 演示租户：与 {@link SeedService} 同一套种子（12 账号 / 7 域 / 3 厂商）。 */
+    /** 演示租户：与 {@link SeedService} 同一套种子（15 账号 / 7 域 / 3 厂商）。 */
     public static final String TENANT_CODE = "t1";
 
     public static final String REQUIREMENT_CODE_PREFIX = "DEMO-R-";
@@ -49,7 +49,7 @@ public final class DemoFixture {
     public static final BigDecimal ACTUAL_DAYS = new BigDecimal("2.0");
 
     /** 期望计数（AC-13）：服务自检与脚本渲染计数表共用同一组数字。 */
-    public static final long REQUIREMENT_COUNT = 12;
+    public static final long REQUIREMENT_COUNT = 13;
     public static final long RELEASE_COUNT = 1;
     public static final long SPRINT_COUNT = 1;
     public static final long TASK_COUNT = 8;
@@ -77,20 +77,27 @@ public final class DemoFixture {
     public static final long PDR_OPINION_COUNT = 6;
     public static final long PDR_ATTACHMENT_COUNT = 2;
     public static final long PROJECT_MEMBER_COUNT = 5;
-    public static final long PO1_VISIBLE = 8;
+    public static final long PO1_VISIBLE = 9;
     public static final long VENDOR_A_VISIBLE = 3;
     public static final long VENDOR_B_VISIBLE = 0;
+    /**
+     * r47 演示跟单：DEMO-R-02 上 6 个人「我也需要」（契约 §7）。
+     *
+     * <p>6 条里 2 条带备注、4 条不带——热度的 {@code followCount} 与「等的人说了什么」在演示里
+     * 都要有样本；跟单人跨业务/二级企业/产品/厂商，刚好覆盖 {@code followers.orgs} 的分组展示。</p>
+     */
+    public static final long FOLLOW_COUNT = 6;
     /**
      * r26：演示夹具给 11 条非 BUS 需求（4 PDR + 7 RD）各建一张 APPROVED 工时评估单。
      *
      * <p>演示必须能「直接排期 / 直接开始开发」，所以评估门在演示数据里是已放行的；
      * 没有这 11 张单，概览卡片全是「未评估」、动作行全是禁用，演示反而卡死。</p>
      */
-    public static final long ESTIMATE_APPROVED_COUNT = 11;
+    public static final long ESTIMATE_APPROVED_COUNT = 12;
     /** 评估单必须全部收口：在途 0 张，否则演示里的门停在「待审核」。 */
     public static final long ESTIMATE_PENDING_COUNT = 0;
-    /** 有生效评估单的需求数 = 11（与 {@link #ESTIMATE_APPROVED_COUNT} 一致，防重复建单）。 */
-    public static final long ESTIMATE_REQUIREMENT_COUNT = 11;
+    /** 有生效评估单的需求数 = 12（与 {@link #ESTIMATE_APPROVED_COUNT} 一致，防重复建单）。 */
+    public static final long ESTIMATE_REQUIREMENT_COUNT = 12;
 
     /**
      * 保留行的基线状态：{@code keepFilter} 只保证「行还在」，不保证「值还是种子值」。
@@ -136,12 +143,12 @@ public final class DemoFixture {
      * <p>为什么这会影响交付：r30 的分级链是<b>按角色</b>解析会签人（AC-1 明确 PMO/ALL），
      * 61 个 PMO 成员意味着 n2 一次生成 61 条待办，三级链在演示环境永远走不完，AC-18 的端到端
      * 演示与 {@code release-flow-verify} 的 S2/S3 都不可重复。重置必须把「可演示的账号基线」
-     * 也还原：只改 status（行保留、历史审计的用户名仍可解析），不动种子 14 个账号。
+     * 也还原：只改 status（行保留、历史审计的用户名仍可解析），不动种子 15 个账号。
      */
     public static final String DISABLE_GATE_TEMP_USERS =
             "UPDATE sys_user SET status = 'DISABLED' WHERE tenant_id = ? AND status = 'ACTIVE'"
-                    + " AND username NOT IN ('admin','pm','tl1','po1','biz1','suite1','dev1','dev2',"
-                    + "'qa1','qa2','vendor1','vendor2','mgr1','vpm1')"
+                    + " AND username NOT IN ('admin','pm','tl1','po1','biz1','biz2','suite1','dev1',"
+                    + "'dev2','qa1','qa2','vendor1','vendor2','mgr1','vpm1')"
                     + " AND username REGEXP '^(s[0-9]+[a-z]*u|t[0-9]+[a-z]*|probe)[0-9]*$'";
 
     /**
@@ -282,6 +289,8 @@ public final class DemoFixture {
             TableReset.purge("automation_run"),
             TableReset.purge("automation_event"),
             TableReset.purge("automation_rule"),
+            // r47：跟单行指向需求，必须排在 requirement 之前。
+            TableReset.purge("requirement_follow"),
             TableReset.purge("requirement_tag"),
             TableReset.purge("requirement_domain_rel"),
             TableReset.purge("requirement"),
@@ -468,6 +477,10 @@ public final class DemoFixture {
                     "供应商对账提醒", "P3", "IN_DEV", "2", "-2", "12", "1"},
             {"DEMO-R-12", "RD", "DEMO-R-09", "MDM", "itOrg", "pm", "", "VEN-C",
                     "主数据清洗脚本（VEN-C 承接）", "P3", "TODO", "2", "1", "14", "0"},
+            // r47：与 DEMO-R-02「采购订单移动审批」高度相似的 PDR，供相似检索演示/门禁使用
+            // （同域 + 同类型 + 2-gram 标题几乎全命中，契约 §7 要求相似度 ≥0.6）。
+            {"DEMO-R-13", "PDR", "DEMO-R-01", "ORD", "supplyOrg", "pm", "po1", "",
+                    "采购订单移动审批（二期）", "P2", "PENDING_ANALYSIS", "4", "-1", "6", "1"},
     };
 
     /**
@@ -500,6 +513,38 @@ public final class DemoFixture {
                     today.plusDays(Integer.parseInt(spec[12])),
                     today.plusDays(Integer.parseInt(spec[13])),
                     "1".equals(spec[14])});
+        }
+        return rows;
+    }
+
+    /** 跟单夹具：需求 code, 账号, 备注（空串 = 不写备注）。 */
+    private static final String[][] FOLLOWS = {
+            {"DEMO-R-02", "biz1", "门店盘点也要在手机上批，拜托优先"},
+            {"DEMO-R-02", "biz2", ""},
+            {"DEMO-R-02", "suite1", "二级企业的审批人经常不在工位"},
+            {"DEMO-R-02", "po1", ""},
+            {"DEMO-R-02", "vendor1", ""},
+            {"DEMO-R-02", "vpm1", ""},
+    };
+
+    /**
+     * 跟单行：[tenantId, requirementId, userId, orgId, note]。
+     *
+     * <p>requirementId 由 {@link DemoResetService} 插入需求时收集的 code→id 表提供；orgId 取账号的
+     * 组织（全部演示账号都在供应链部），这样 {@code followers.orgs} 能在演示里分组。</p>
+     */
+    public static List<Object[]> followRows(long tenantId, Map<String, Long> requirementIds,
+                                            Map<String, Long> refs) {
+        List<Object[]> rows = new ArrayList<>(FOLLOWS.length);
+        for (String[] spec : FOLLOWS) {
+            Long requirementId = requirementIds.get(spec[0]);
+            Long userId = ref(refs, "user:" + spec[1]);
+            if (requirementId == null || userId == null) {
+                throw new IllegalStateException("跟单夹具引用了不存在的需求/账号："
+                        + spec[0] + "/" + spec[1]);
+            }
+            rows.add(new Object[]{tenantId, requirementId, userId, ref(refs, "supplyOrg"),
+                    spec[2].isEmpty() ? null : spec[2]});
         }
         return rows;
     }

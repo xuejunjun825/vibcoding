@@ -18,7 +18,7 @@
 #   # 不需要手动 end：EXIT trap 会复位并断言；调试时可 GATE_FIXTURE_SKIP_TEARDOWN=1 跳过（不算通过）
 #
 # 导出：GATE_TAG / GATE_FIXTURE_TENANT_CODE / GATE_FIXTURE_SKIP_TEARDOWN / GATE_FIXTURE_USERS
-# 常量：GATE_FIXTURE_REQUIRED_REQUIREMENTS=12 / GATE_FIXTURE_R02_DAYS=5.00
+# 常量：GATE_FIXTURE_REQUIRED_REQUIREMENTS=13 / GATE_FIXTURE_R02_DAYS=5.00
 #
 # 依赖方向是单向的：lib.sh（HTTP/DB/登录）→ 本模块 → 三个门禁 → gate-order-verify.sh。
 # platform-demo-reset.sh 不依赖本模块（否则循环），它只被本模块调用。
@@ -53,7 +53,7 @@ GATE_FIXTURE_USER_PASS="${GATE_FIXTURE_USER_PASS:-Passw0rd!}"
 
 # 干净基线的两个跨门禁不变量：演示需求 12 条、DEMO-R-02 汇总人天 5.00
 # （5.00 = 子 RD 的 3 + 2；任何门禁挂到 DEMO-R-02 下都会把它推高并让评估单 STALE）。
-readonly GATE_FIXTURE_REQUIRED_REQUIREMENTS=12
+readonly GATE_FIXTURE_REQUIRED_REQUIREMENTS=13
 readonly GATE_FIXTURE_R02_DAYS=5.00
 
 GATE_TAG="${GATE_TAG:-}"

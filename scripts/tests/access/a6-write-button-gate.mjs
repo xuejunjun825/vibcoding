@@ -379,11 +379,13 @@ export function auditForbiddenDegrade(src) {
     }
   }
   // r40 变更单/编辑抽屉也要选父需求（parentId 变更），复用同一搜索入口；
-  // 这里不再是「只有一个调用点」，而是「调用点封闭在已知的三处」——新增调用点必须显式登记。
+  // 这里不再是「只有一个调用点」，而是「调用点封闭在已知四处」——新增调用点必须显式登记。
+  // r47 合并弹层也要按编号/标题搜目标需求，复用同一搜索入口 → 显式登记为第四处。
   const SEARCH_CALLERS = [
     FILES.defect,
     'web/src/components/req/ChangeCreateDrawer.vue',
     'web/src/components/req/RequirementEditDrawer.vue',
+    'web/src/views/req/MergeRequirementDialog.vue',
   ]
   const unexpectedSite = sites.find((site) => !SEARCH_CALLERS.some((p) => site.startsWith(p)))
   push(
