@@ -129,6 +129,18 @@ export const NAV_GROUPS: NavGroup[] = [
         functionCode: 'task:manage',
         pageCode: 'req.iteration',
       },
+      {
+        // r49：评审中心（PDR 评审 + 厂商工时评估前置）。
+        // 页面码与 `MenuRegistry` 的 `new MenuPage("pdr.review", "需求域", "PDR 评审", "pdr-reviews", …)` 同源（a3 R10）；
+        // 功能码写 AUTHENTICATED：菜单能否看见由页面码把关（评审人可能是 DEV/QA，没有 req:review 功能码），
+        // 而 ActionRegistry 里的 `req.action.pdr_review_*` 才是页内动作的判定（见 PdrReviewPanel）。
+        label: '评审中心',
+        to: '/pdr-reviews',
+        icon: 'audit',
+        routeName: 'pdr-reviews',
+        functionCode: AUTHENTICATED,
+        pageCode: 'pdr.review',
+      },
     ],
   },
   {

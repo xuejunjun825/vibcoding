@@ -81,6 +81,8 @@ public final class AnalyticsLabels {
     private static final String QUALITY = "quality";
     private static final String REQUIREMENT = "requirement";
     private static final String STATUS = "status";
+    /** PDR 意见分类字段：文案来自 {@link com.example.platform.contract.PdrCategoryCatalog}。 */
+    private static final String CATEGORY = "category";
     /** 未登记告警去重：同一个 code 反复出图时不刷屏（上限 200 条，剩下的静默）。 */
     private static final Set<String> WARNED = ConcurrentHashMap.newKeySet();
     private static final int WARN_LIMIT = 200;
@@ -125,6 +127,12 @@ public final class AnalyticsLabels {
         }
         if (STATUS.equals(fieldKey)) {
             return INDEX.get(key(REQUIREMENT, STATUS, code));
+        }
+        // r41：PDR 意见分类的文案唯一来源是 platform-contract 的九类码表（req 统计与 deliver
+        // 交叉表共用），这里不再复制一份字符串数组；未登记时仍返回 null 走「未知状态」兜底。
+        if (CATEGORY.equals(fieldKey)
+                && com.example.platform.contract.PdrCategoryCatalog.knows(code)) {
+            return com.example.platform.contract.PdrCategoryCatalog.label(code);
         }
         return null;
     }

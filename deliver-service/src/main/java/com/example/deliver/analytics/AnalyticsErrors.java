@@ -26,6 +26,7 @@ public final class AnalyticsErrors {
     public static final String GROUP_LIMIT = "REPORT_GROUP_LIMIT";
     public static final String EXPORT_LIMIT = "REPORT_EXPORT_LIMIT";
     public static final String NAME_DUPLICATED = "REPORT_NAME_DUPLICATED";
+    public static final String SAVE_REJECTED = "REPORT_SAVE_REJECTED";
     public static final String NOT_FOUND = "REPORT_NOT_FOUND";
     public static final String SCOPE_FORBIDDEN = "REPORT_SCOPE_FORBIDDEN";
     public static final String CARD_LIMIT = "PORTAL_CARD_LIMIT";
@@ -135,6 +136,23 @@ public final class AnalyticsErrors {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("id", id);
         return new ApiException(404, NOT_FOUND, "报表不存在或无权访问：" + id, detail);
+    }
+
+    /**
+     * 保存被数据库约束拒绝，但<b>不是</b>唯一键冲突（本仓当前的实例是 MySQL 1406：字段超长）。
+     *
+     * <p>为什么单独一个码：以前 {@code save()} 把
+     * {@code DataIntegrityViolationException} 一律翻译成 409 {@code REPORT_NAME_DUPLICATED}，于是
+     * 「数据集码比列宽长」这类结构问题被伪装成「名字重复」，前端让用户改名永远改不好
+     * （r41 的 C3-2 就卡在这里）。重名只由唯一键 uk_report_name 判定，其余完整性错误走这里。</p>
+     */
+    public static ApiException saveRejected(String dataset, String reason) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("dataset", dataset);
+        detail.put("field", "dataset");
+        detail.put("reason", reason);
+        return new ApiException(400, SAVE_REJECTED,
+                "报表定义被存储约束拒绝（不是名称重复）：" + reason, detail);
     }
 
     public static ApiException scopeForbidden(String action) {

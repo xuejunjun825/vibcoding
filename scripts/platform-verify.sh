@@ -169,6 +169,34 @@ if [[ -n "$T2_ID" && "$T2_ID" != "null" ]]; then
     API_TENANT="$SAVED_TENANT"
 fi
 
+# r41 厂商门：评估提交前需求必须已指派承接厂商，否则 409 VENDOR_NOT_ASSIGNED。
+# 这是 r41 新增的顺序门（权限 → 表单 → 重复 → PDR 评审 → 厂商），夹具不先指派，
+# 后面的评估/排期/开发链会整条 409——所以每个要提交评估的需求在 estimate 之前先指派。
+# 指派动作只有 PLATFORM_ADMIN/PMO 是 ALLOW（PRODUCT 只是 RESTRICTED），这里固定用 admin，
+# 结束后把调用者的 token 还原，不影响后续按角色口径的断言。
+assign_vendor_for_estimate() { # req_id [vendor_code]
+    local rid="$1" code="${2:-VEN-A}" saved_token="$API_TOKEN" saved_tenant="$API_TENANT"
+    local vid=""
+    vid="$(db_q "SELECT id FROM sys_vendor WHERE tenant_id=$(tenant_id) AND code='${code}'")"
+    if [[ -z "$vid" ]]; then
+        fail "指派厂商前置：租户 $(tenant_id) 没有厂商 ${code}" "种子厂商必须有 VEN-A/VEN-B（评估前置）"
+        return 1
+    fi
+    api_call POST /api/req/auth/login \
+        "{\"tenantCode\":\"${T1_TENANT}\",\"username\":\"admin\",\"password\":\"Admin@12345\"}"
+    if [[ "$HTTP_CODE" != "200" ]]; then
+        warn "指派厂商前置：admin 登录失败（HTTP ${HTTP_CODE}）"
+        return 1
+    fi
+    API_TOKEN="$(jget "$HTTP_BODY" '.token')"
+    api_call POST "/api/req/requirements/${rid}/assign-vendor" \
+        "$(jq -cn --argjson v "$vid" '{vendorId:$v,reason:"平台验证：评估前置（r41 厂商门）"}')"
+    [[ "$HTTP_CODE" == "200" ]] \
+        || warn "指派厂商失败（需求 ${rid}，HTTP ${HTTP_CODE}）：评估提交会 409 VENDOR_NOT_ASSIGNED"
+    API_TOKEN="$saved_token"
+    API_TENANT="$saved_tenant"
+}
+
 # =====================================================================
 section "AC-2 三类需求创建、父子规则与人天汇总"
 create_req() { # type title parent_id estimate -> HTTP_CODE/HTTP_BODY
@@ -253,6 +281,70 @@ approve_pending_estimate() { # req_id
     fi
 }
 
+# r46 PDR 评审门：schedule 与工时评估提交之前必须先有一张 APPROVED 的评审单，否则 409
+# PDR_REVIEW_REQUIRED（本轮 47 条红就是从这里级联出去的：评审没走，后面每一条都撞 409/400）。
+# 走真实接口三步，不写库、不代批：
+#   POST /api/req/requirements/{id}/pdr-review      {reviewerIds,mode:"MODE_ALL",note}
+#   POST /api/req/pdr-reviews/{rid}/opinions        {decision:"PASS",category:"RANGE",comment}
+#   POST /api/req/pdr-reviews/{rid}/conclude
+# 评审人只用持有 req.action.pdr_review_opinion 的内部账号（pm/tl1/dev1/dev2）：QA 在该 action
+# 上是 DENY、po1（SUB_BUSINESS_LEADER 且 domainIds=[]）会被 DataScope 判成 BIZ 档看不到域内
+# 需求 —— 这两条是后端 RBAC/DataScope 的真实缺口，不拿它们当夹具，也不为过门禁去改权限。
+pdr_review_pass() { # req_id
+    local rid="$1" saved_token="$API_TOKEN" saved_tenant="$API_TENANT"
+    local u="" uid="" ids="[]" review="" ok=0
+    for u in pm tl1 dev1 dev2; do
+        api_call POST /api/req/auth/login \
+            "{\"tenantCode\":\"${T1_TENANT}\",\"username\":\"${u}\",\"password\":\"Passw0rd!\"}"
+        if [[ "$HTTP_CODE" != "200" ]]; then
+            fail "PDR 评审门：评审人 ${u} 登录失败" "种子账号 ${u}/Passw0rd! 必须可登录（评审夹具前置）"
+            API_TOKEN="$saved_token"; API_TENANT="$saved_tenant"; return 1
+        fi
+        API_TOKEN="$(jget "$HTTP_BODY" '.token')"
+        api_call GET /api/req/auth/me
+        uid="$(jget "$HTTP_BODY" '.user.id // .id // .userId')"
+        if [[ -z "$uid" || "$uid" == "null" ]]; then
+            fail "PDR 评审门：${u} 的 userId 取不到" "GET /auth/me 必须回 id，评审人列表靠它拼"
+            API_TOKEN="$saved_token"; API_TENANT="$saved_tenant"; return 1
+        fi
+        ids="$(jq -cn --argjson a "$ids" --argjson b "$uid" '$a + [$b]')"
+    done
+    # 发起人固定 pm：评审单的 initiator 决定后面谁关单/转任务（与生产口径一致）
+    api_call POST /api/req/auth/login \
+        "{\"tenantCode\":\"${T1_TENANT}\",\"username\":\"pm\",\"password\":\"Passw0rd!\"}"
+    API_TOKEN="$(jget "$HTTP_BODY" '.token')"
+    api_call POST "/api/req/requirements/${rid}/pdr-review" \
+        "$(jq -cn --argjson r "$ids" --arg n "平台验证 PDR 评审 ${RUN_TAG}" \
+            '{reviewerIds:$r,mode:"MODE_ALL",note:$n}')"
+    expect "发起 PDR 评审（需求 ${rid}，MODE_ALL×4 位评审人）201" 201
+    review="$(jget "$HTTP_BODY" '.reviewId // .id // .review.id')"
+    if [[ -z "$review" || "$review" == "null" ]]; then
+        fail "PDR 评审单 id 缺失（需求 ${rid}）" "POST /requirements/{id}/pdr-review 必须回 reviewId"
+        API_TOKEN="$saved_token"; API_TENANT="$saved_tenant"; return 1
+    fi
+    for u in pm tl1 dev1 dev2; do
+        api_call POST /api/req/auth/login \
+            "{\"tenantCode\":\"${T1_TENANT}\",\"username\":\"${u}\",\"password\":\"Passw0rd!\"}"
+        API_TOKEN="$(jget "$HTTP_BODY" '.token')"
+        api_call POST "/api/req/pdr-reviews/${review}/opinions" \
+            "$(jq -cn --arg c "平台验证评审意见 ${RUN_TAG}" '{decision:"PASS",category:"RANGE",comment:$c}')"
+        [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "201" ]] && ok=$((ok + 1))
+    done
+    expect_num "评审人 PASS 意见落库 4/4（评审单 ${review}）" "$ok" eq 4 \
+        "4 位评审人必须各能提交一条 PASS：权限/项目成员/评审人身份任一不符就会 403"
+    # 回到发起人再出结论：MODE_ALL 全员 PASS → APPROVED（4/4 也可能已自动收口，conclude 幂等容忍）
+    api_call POST /api/req/auth/login \
+        "{\"tenantCode\":\"${T1_TENANT}\",\"username\":\"pm\",\"password\":\"Passw0rd!\"}"
+    API_TOKEN="$(jget "$HTTP_BODY" '.token')"
+    api_call POST "/api/req/pdr-reviews/${review}/conclude"
+    [[ "$HTTP_CODE" == "200" ]] || warn "conclude 未返回 200（HTTP ${HTTP_CODE}）：若 4/4 PASS 已自动收口属正常"
+    api_call GET "/api/req/requirements/${rid}/pdr-review"
+    expect_jq "评审单结论 APPROVED（需求 ${rid}）" '.status // .review.status' "APPROVED" \
+        "全员 PASS 后评审单必须 APPROVED，否则 schedule/评估提交一直被 409 PDR_REVIEW_REQUIRED 拦住"
+    API_TOKEN="$saved_token"
+    API_TENANT="$saved_tenant"
+}
+
 create_req BUS "验证-业务需求-${RUN_TAG}" ""
 expect "创建 BUS 需求 201" 201
 BUS_ID="$(jget "$HTTP_BODY" '.id')"
@@ -267,8 +359,24 @@ gate_pool_bus "$BUS_ID" "verify 父链 BUS" \
 create_req PDR "验证-产品需求-${RUN_TAG}" "$BUS_ID"
 expect "创建 PDR（父=BUS[POOLED]）201" 201
 PDR_ID="$(jget "$HTTP_BODY" '.id')"
+# r46 PDR 评审门：未评审时 detail 下发的动作里剔掉 schedule，评审 APPROVED 之后才回来。
+api_call GET "/api/req/requirements/${PDR_ID}"
+expect_jq "评审前 PDR 评审单为空（未发起）→ 严格门生效" \
+    '(.view.pdrReview.review.status // "NONE")' "NONE" \
+    "r46：PDR 从未发起评审时 pdrReview 摘要必须是空/NONE，schedule 因此被严格门剔除"
+expect_jq "评审前 allowedActions 不含 schedule（评审门生效）" \
+    '[.view.allowedActions[] | select(. == "schedule")] | length' "0" \
+    "r46 门：评审未通过时 allowedActions 必须剔除 schedule（与 409 PDR_REVIEW_REQUIRED 同源）"
+pdr_review_pass "$PDR_ID" || warn "PDR 评审未通过：后续 schedule/评估提交会被 409 PDR_REVIEW_REQUIRED 拦住"
+# 评审门放行后还要过 r26 工时评估门，schedule 才会回到 allowedActions——
+# 所以正向断言放在评估 APPROVED 之后（两道门都开），单独拿评审后一刻断言会把评估门误判成评审门。
 # r26：排期前先通过工时评估（新门），否则 schedule 恒 409 ESTIMATE_NOT_APPROVED。
+assign_vendor_for_estimate "$PDR_ID" || warn "PDR 未指派厂商：评估会 409 VENDOR_NOT_ASSIGNED"
 approve_estimate "$PDR_ID" 2 || warn "PDR 工时评估未就绪：后续 schedule 会被评估门拦住"
+api_call GET "/api/req/requirements/${PDR_ID}"
+expect_jq "评审 APPROVED + 评估 APPROVED 后 allowedActions 含 schedule" \
+    '[.view.allowedActions[] | select(. == "schedule")] | length' "1" \
+    "两道门都放行后 schedule 必须回到 allowedActions，前端据此显示排期按钮"
 api_call POST "/api/req/requirements/${PDR_ID}/actions" '{"action":"schedule"}'
 [[ "$HTTP_CODE" == "200" ]] || warn "PDR 排期失败（HTTP ${HTTP_CODE}）：后续 RD 创建会 409 PARENT_NOT_SCHEDULED，先看 approve_estimate 的失败行"
 
@@ -314,6 +422,7 @@ fi
 section "AC-3 状态机：合法流转 2xx、跳步 409、status 不可写、审计留痕"
 AUDIT_BEFORE="$(db_count audit_log "biz_type='requirement' AND biz_id=${RD_A} AND action='STATE_CHANGE'")"
 # r26：RD 开始开发前同样需要 APPROVED 评估单。
+assign_vendor_for_estimate "$RD_A" || warn "RD A 未指派厂商：评估会 409 VENDOR_NOT_ASSIGNED"
 approve_estimate "$RD_A" 1.5 || warn "RD A 工时评估未就绪：start_dev 会被评估门拦住"
 api_call POST "/api/req/requirements/${RD_A}/actions" '{"action":"start_dev"}'
 expect "RD TODO --start_dev--> IN_DEV" 200
@@ -338,6 +447,7 @@ section "AC-5 唯一性与撤回回落（r26 D-02/D-03）：撤回不遮蔽旧�
 create_req RD "验证-评估唯一性-${RUN_TAG}" "$PDR_ID" 2
 expect "创建评估唯一性 RD 201" 201
 UNIQ_RD="$(jget "$HTTP_BODY" '.id')"
+assign_vendor_for_estimate "$UNIQ_RD" || warn "唯一性夹具未指派厂商：评估会 409 VENDOR_NOT_ASSIGNED"
 approve_estimate "$UNIQ_RD" 2 || warn "唯一性夹具评估未通过"
 OLD_INST="$(db_q "SELECT id FROM wf_instance WHERE tenant_id=$(tenant_id)
                      AND biz_type='WBS_ESTIMATE' AND biz_id=${UNIQ_RD} AND status='APPROVED'
@@ -969,8 +1079,11 @@ API_TENANT="${SAVED_TENANT:-$API_TENANT}"
 create_req PDR "验证-准入正向PDR-${RUN_TAG}" "$D9_BUS" ""
 expect "准入正向链 PDR 201" 201
 D9_PDR="$(jget "$HTTP_BODY" '.id')"
+# r46 评审门同样挡在准入链的 PDR 前面：先走真实评审三步，再排期。
+pdr_review_pass "$D9_PDR" || warn "准入正向 PDR 评审未通过：后续 schedule 会被 409 PDR_REVIEW_REQUIRED 拦住"
 # r23 前置门：RD 只能挂在 SCHEDULED/IN_DEV 的 PDR 下，新 PDR 先排期（失败只 warn，断言数不变）。
 # r26：排期前先过工时评估门。
+assign_vendor_for_estimate "$D9_PDR" || warn "准入正向 PDR 未指派厂商：评估会 409 VENDOR_NOT_ASSIGNED"
 approve_estimate "$D9_PDR" 2 || warn "准入正向 PDR 工时评估未就绪：schedule 会被评估门拦住"
 api_call POST "/api/req/requirements/${D9_PDR}/actions" '{"action":"schedule"}'
 [[ "$HTTP_CODE" == "200" ]] || warn "准入正向 PDR 排期失败（HTTP ${HTTP_CODE}）：后续 RD 会 409 PARENT_NOT_SCHEDULED"
@@ -999,6 +1112,7 @@ api_call POST "/api/deliver/test-plans/${D9_PLAN}/start" '{}'
 api_call POST "/api/deliver/test-plans/${D9_PLAN}/execute" "$(jq -cn --argjson c "$D9_CASE" '{caseId:$c,result:"PASS",note:"准入正向"}')"
 expect "准入正向执行 PASS 201" 201
 # r26：开始开发前通过工时评估（人天与 deliver 登记的 2 一致，不触发 STALE）。
+assign_vendor_for_estimate "$D9_RD" || warn "准入正向 RD 未指派厂商：评估会 409 VENDOR_NOT_ASSIGNED"
 approve_estimate "$D9_RD" 2 || warn "准入正向 RD 工时评估未就绪：start_dev 会被评估门拦住"
 api_call POST "/api/req/requirements/${D9_RD}/actions" '{"action":"start_dev"}'
 api_call POST "/api/req/requirements/${D9_RD}/actions" '{"action":"submit_test"}'
@@ -1131,11 +1245,11 @@ VPM_ROLE_ROW="$(db_q "SELECT CONCAT(code, '/', builtin) FROM sys_role WHERE tena
 if [[ "$VPM_ROLE_ROW" == "VENDOR_PM/1" ]]; then
     pass "VENDOR_PM 是内置角色（builtin=1，不可删除）"
 else
-    fail "VENDOR_PM 角色行异常：${VPM_ROLE_ROW:-<缺失>}" "V13 迁移必须幂等补角色行，RbacSeeder 必须预置 173 格授权"
+    fail "VENDOR_PM 角色行异常：${VPM_ROLE_ROW:-<缺失>}" "V13 迁移必须幂等补角色行，RbacSeeder 必须预置 180 格授权"
 fi
-expect_num "VENDOR_PM 的授权格 = 173（61 FUNCTION + 37 MENU + 75 ACTION）" \
+expect_num "VENDOR_PM 的授权格 = 180（61 FUNCTION + 38 MENU + 81 ACTION）" \
     "$(db_q "SELECT COUNT(*) FROM sys_role_permission p JOIN sys_role r ON r.id=p.role_id AND r.tenant_id=p.tenant_id WHERE p.tenant_id=$(tenant_id) AND r.code='VENDOR_PM'")" \
-    eq 173 "RbacSeeder 的 preset(roleCode) 必须对这个角色落满 173 行"
+    eq 180 "RbacSeeder 的 preset(roleCode) 必须对这个角色落满 180 行"
 VPM_ACCOUNT="$(db_q "SELECT CONCAT(r.code,'/',v.code) FROM sys_user u
                       JOIN sys_user_role ur ON ur.user_id=u.id AND ur.tenant_id=u.tenant_id
                       JOIN sys_role r ON r.id=ur.role_id AND r.tenant_id=u.tenant_id

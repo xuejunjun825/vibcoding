@@ -312,20 +312,20 @@ static_checks() {
         "交付台账缺 r40" "台账是验收的对照物：模块/接口/表/脚本/门禁都要能对上"
 
     local counts_bad=()
-    grep -q 'sys_action = 75' "${ROOT}/scripts/tests/rbac/s0-schema-migration.sh" || counts_bad+=("s0 动作 75")
-    grep -q '1903' "${ROOT}/scripts/tests/rbac/s0-schema-migration.sh" || counts_bad+=("s0 1903")
-    grep -q '825' "${ROOT}/scripts/tests/rbac/s2-seed-equivalence.sh" || counts_bad+=("s2 825")
-    grep -q '173' "${ROOT}/scripts/tests/rbac/s7-negative-nine.sh" || counts_bad+=("s7 173")
+    grep -q 'sys_action = 81' "${ROOT}/scripts/tests/rbac/s0-schema-migration.sh" || counts_bad+=("s0 动作 81")
+    grep -q '1980' "${ROOT}/scripts/tests/rbac/s0-schema-migration.sh" || counts_bad+=("s0 1980")
+    grep -q '891' "${ROOT}/scripts/tests/rbac/s2-seed-equivalence.sh" || counts_bad+=("s2 891")
+    grep -q '180' "${ROOT}/scripts/tests/rbac/s7-negative-nine.sh" || counts_bad+=("s7 180")
     if (( ${#counts_bad[@]} == 0 )); then
-        sck 1 "RBAC 计数迁移到 75/173/1903/825（s0/s2/s7 均已同步）" "" ""
+        sck 1 "RBAC 计数迁移到 81/180/1980/891（s0/s2/s7 均已同步）" "" ""
     else
         sck 0 "" "计数迁移缺项：$(printf '%s ' "${counts_bad[@]}")" \
-            "两个动作码使 73→75、171→173、1881→1903、803→825；四处必须同源"
+            "r41 的 1 页 + 6 个动作码使 75→81、173→180、1903→1980、825→891；四处必须同源"
     fi
 
-    sck "$(grep -q 'Flyway 最新成功版本 = 16' "${ROOT}/scripts/tests/rbac/s0-schema-migration.sh" && echo 1 || echo 0)" \
-        "s0 的 Flyway 版本断言已到 16（V16 是本轮唯一新迁移）" \
-        "s0 仍断言 15" "V16__requirement_change.sql 落地后，最高成功版本必须是 16"
+    sck "$(grep -q 'Flyway 最新成功版本 = 21' "${ROOT}/scripts/tests/rbac/s0-schema-migration.sh" && echo 1 || echo 0)" \
+        "s0 的 Flyway 版本断言已到 21（V21 是本轮最高新迁移）" \
+        "s0 仍断言 16" "V17–V21 落地后，最高成功版本必须是 21"
 
     sck "$(grep -qE '>>?[^&|]*docs/teamflow' "$self" 2>/dev/null && echo 0 || echo 1)" \
         "脚本不往 docs/teamflow 写文件（门禁只读产品文档，只做存在性/内容断言）" \
@@ -448,12 +448,20 @@ run_main() {
 
     F_DAYS_PDR="$(create_req PDR "r40-人天PDR-${RTAG}" "$F_DAYS_BUS")"
     [[ -n "$F_DAYS_PDR" ]] || die "创建人天夹具 PDR 失败：${HTTP_BODY:0:200}"
+    # r46 顺序门：PDR 先过评审、再指派承接厂商，estimate/schedule 才不会 409；失败显式 die。
+    gate_pdr_review_pass "$F_DAYS_PDR" "变更门禁人天 PDR" \
+        || die "夹具 PDR ${F_DAYS_PDR} 的 PDR 评审未到 APPROVED（r46 顺序门）"
+    gate_assign_vendor "$F_DAYS_PDR" "变更门禁人天 PDR" \
+        || die "夹具 PDR ${F_DAYS_PDR} 未指派承接厂商（r46 顺序门）"
     approve_estimate "$F_DAYS_PDR" 10 || die "夹具 PDR ${F_DAYS_PDR} 的 10.00 评估未到 APPROVED"
     act "$F_DAYS_PDR" schedule
     [[ "$(req_status "$F_DAYS_PDR")" == "SCHEDULED" ]] || die "人天夹具 PDR 未到 SCHEDULED（实际 $(req_status "$F_DAYS_PDR")）"
 
     F_DAYS="$(create_req RD "r40-人天RD-${RTAG}" "$F_DAYS_PDR")"
     [[ -n "$F_DAYS" ]] || die "创建夹具 RD 失败：${HTTP_BODY:0:200}"
+    # RD 不自动继承父 PDR 的承接厂商，必须单独指派后才能提交工时评估。
+    gate_assign_vendor "$F_DAYS" "变更门禁人天 RD" \
+        || die "夹具 RD ${F_DAYS} 未指派承接厂商（r46 顺序门）"
     approve_estimate "$F_DAYS" 10 || die "夹具 RD ${F_DAYS} 的 10.00 评估未到 APPROVED：WBS 评估审批链缺失"
 
     local before_title n0 pv_before_keys pv_after_keys pv_impact_keys pv_fields n1

@@ -193,3 +193,17 @@
 | 门禁 | `make change-verify` = `scripts/change-verify.sh`（S1 迁移与结构 5 / S2 申请与影响 8 / S3 审批映射 6 / S4 应用正负 8 / S5 人天与锁 7 / S6 收口与审计查询 6 = **40 条**；`--static-only` 12 条免栈、`--twice` 连跑两次比对）；`make test` 在 `platform-verify` 之后接一步 |
 | 计数迁移 | 动作 73→**75**、每角色 171→**173**、`sys_role_permission` 1881→**1903**、ACTION 格 803→**825**（FUNCTION 671 / MENU 407 不变）；`s0/s1/s2/s5/s7/s8/_lib/rbac-verify/platform-verify/platform-demo-reset` 同批更新，Flyway 断言 15→**16** |
 | 本轮不做 | 变更回滚（再开一张单，`before` 冻结成当前值形成审计链）、跨类型合并单、批量应用、变更单评论/附件 |
+
+## 17. 产品需求评审 + 厂商工时评估（r46，第 38 页 `pdr.review`）
+
+| 维度 | 事实 |
+|---|---|
+| 数据 | `V17__project.sql`（`project` / `project_member`）、`V18__pdr_review.sql`、`V19__pdr_review_opinion.sql`、`V20__pdr_review_opinion_version.sql`、`V21__report_definition_dataset_width.sql`；Flyway 最高成功版本 **21** |
+| 顺序门 | PDR 必须**先评审 → 再指派厂商 → 再厂商评估 → 才能排期/拆 RD**：`409 PDR_REVIEW_REQUIRED` / `VENDOR_NOT_ASSIGNED` / `ESTIMATE_NOT_APPROVED`；换厂商作废原评估（`STALE`），子 RD 进 `IN_DEV` 后换厂商 `409 VENDOR_LOCKED` |
+| 评审单 | 项目组成员多选（项目组为空回退 产品经理 + 域负责人，`fallback:true`）、`MODE_ALL` 全员通过、可驳回/催办/撤销；**同一人可提多条意见**，每条独立分类（9 类字典）、结论、附件、状态（OPEN/TASKED/RESOLVED） |
+| 意见转任务 | `POST /pdr-reviews/{id}/opinions/{opinionId}/to-task` 复用交付域任务表，回写 `task_id` + `status=TASKED` + 审计 `PDR_OPINION_TO_TASK`；重复转 409、非评审人 403、跨服务失败 503 回滚 |
+| 附件 | 复用 `/attachments`，新增 `bizType=PDR_REVIEW`；仅本次评审的评审人/发起人可上传、评审中可上传、结束后只读；跨厂商/非成员下载 **404** |
+| 统计 | `GET /pdr-reviews/stats?groupBy=CATEGORY|REVIEWER|DECISION`；分析域注册 `pdr_review`、`pdr_review_opinion` 两个数据集，报表/看板/导出同源（`PdrReviewDatasetParityTest` 钉住交叉表 == stats） |
+| 权限 | 功能码 60→**61**（新增 `req:review`）、页 37→**38**（`pdr.review`）、动作 75→**81**（`pdr_review_start`/`opinion_submit`/`conclude`/`close`/`opinion_to_task`/`vendor_change`）、`sys_role_permission` 1903→**1980**、每角色 **180** 格 |
+| 门禁 | `make pdr-verify` = `scripts/pdr-flow-verify.sh` **66 条**（S1 前置 / S2 评审 / S3 顺序门 / S4 换厂商 / S5 附件 / S6 统计与多条意见转任务），`scripts/tests/pdr/_lib.sh` 共享原语，teardown 残留 0 |
+| 执行方式 | **离线 Agent Teams 执行**（TeamFlow 宿主的 `subagents` 注册表为空，`teamflow_start` 恒报 noProvider）：后端/QA 门禁/前端/门禁修复分别由子代理完成，Lead 复验并提交 |

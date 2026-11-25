@@ -25,9 +25,11 @@ const WEB = path.join(ROOT, 'web/src')
 
 // ---------------------------------------------------------------- 基线
 // R1 的条目数基线：r13（分析域四页）落盘后侧栏 33 → 36；r18 增「角色与权限」
-// （admin.roles 页面）→ 37；r39 增「自动化规则」（automation.rules 页面）→ 38，顶栏 8 不变。
-// 新增入口时只改这一处数字，规则本身不放松。
-const SIDEBAR_BASELINE = 38
+// （admin.roles 页面）→ 37；r39 增「自动化规则」（automation.rules 页面）→ 38；r49 增
+// 「评审中心」（pdr.review 页面）→ 39，顶栏 8 不变。
+// 新增入口时只改这一处数字，规则本身不放松：入口的 pageCode 必须在 MenuRegistry 里登记
+// （R2/R3/R10 会逐条核对），数字只是让「悄悄多一条入口」必须先被看见一次。
+const SIDEBAR_BASELINE = 39
 const TOP_BASELINE = 8
 
 // ---------------------------------------------------------------- 通用解析
@@ -88,7 +90,7 @@ function blockBetween(src, fromMarker, toMarker) {
   return src.slice(start, end < 0 ? src.length : end)
 }
 
-/** 解析 nav.ts：NAV_GROUPS 的 37 条侧栏项（r13 起）+ TOP_NAV 的 8 条顶栏项 */
+/** 解析 nav.ts：NAV_GROUPS 的 38 条侧栏项（r13 起，含「通知中心」空码）+ TOP_NAV 的 8 条顶栏项 */
 export function parseNav() {
   const src = readFileSync(path.join(WEB, 'layouts/nav.ts'), 'utf8')
   const sidebar = []
@@ -188,7 +190,7 @@ export function parseMatrixCodes() {
   return new Set([...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]))
 }
 
-/** 解析 platform-contract 的 MenuRegistry：页面码全集（授权主体，37 个） */
+/** 解析 platform-contract 的 MenuRegistry：页面码全集（授权主体，38 个） */
 export function parseMenuPages() {
   const src = readFileSync(
     path.join(ROOT, 'platform-contract/src/main/java/com/example/platform/contract/MenuRegistry.java'),
@@ -233,7 +235,7 @@ export function runAudit({ quiet = false } = {}) {
   const matrix = parseMatrixCodes()
   const all = [...sidebar, ...top]
 
-  // R1：37 + 8 每条都显式声明 functionCode（必填字段，漏写即红）
+  // R1：38 + 8 每条都显式声明 functionCode（必填字段，漏写即红）
   const missing = all.filter((it) => !it.codes || it.codes.length === 0).map((it) => it.label)
   if (sidebar.length === SIDEBAR_BASELINE && top.length === TOP_BASELINE && missing.length === 0) {
     ok('R1', `${SIDEBAR_BASELINE} 条侧栏 + ${TOP_BASELINE} 条顶栏均声明 functionCode（实际 ${sidebar.length}+${top.length}）`)
@@ -393,7 +395,7 @@ export function runAudit({ quiet = false } = {}) {
       '给该调用传 { silentForbidden: true }（见 api/admin.ts 的 listApiClients 第二参）；否则 403 会全局跳 /403')
   }
 
-  // R10（r18）：nav 的 pageCode 集合 == MenuRegistry 的 37 个页面码，逐字一致。
+  // R10（r18）：nav 的 pageCode 集合 == MenuRegistry 的 38 个页面码，逐字一致。
   // 页面码是服务端授权的授权主体，nav 若少一个就永远点不到、多一个就点了 403；
   // 唯一允许的空码是通知中心（它不是页面，只是登录即可访问的入口）。
   {
@@ -406,11 +408,11 @@ export function runAudit({ quiet = false } = {}) {
     const extraInNav = [...declared].filter((c) => !menuSet.has(c))
     const dupes = [...declared].filter((c) => navPageCodes.filter((x) => x === c).length > 1)
     const blankBad = blank.filter((it) => !it.label.includes('通知'))
-    if (menuPages.length !== 37) {
-      bad('R10', `MenuRegistry 应有 37 个页面码，实际 ${menuPages.length}`,
+    if (menuPages.length !== 38) {
+      bad('R10', `MenuRegistry 应有 38 个页面码，实际 ${menuPages.length}`,
         '页面码是授权主体（TECHNICAL §10.1）：增删页面必须同步 seed 与 s1 三向比对')
     } else if (missingInNav.length === 0 && extraInNav.length === 0 && dupes.length === 0 && blankBad.length === 0) {
-      ok('R10', `nav 的 37 个 pageCode 与 MenuRegistry 逐字一致（空码仅「通知中心」${blank.length} 条）`)
+      ok('R10', `nav 的 38 个 pageCode 与 MenuRegistry 逐字一致（空码仅「通知中心」${blank.length} 条）`)
     } else {
       bad('R10',
         `页面码漂移：未进 nav=[${missingInNav.join(',')}] nav 多出=[${extraInNav.join(',')}] 重复=[${dupes.join(',')}] 意外空码=[${blankBad.map((it) => it.label).join(',')}]`,

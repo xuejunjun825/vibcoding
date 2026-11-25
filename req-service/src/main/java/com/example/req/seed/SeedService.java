@@ -251,7 +251,17 @@ public class SeedService {
                 {"priority", "P0", "紧急", "1"}, {"priority", "P1", "高", "2"},
                 {"priority", "P2", "中", "3"}, {"priority", "P3", "低", "4"},
                 {"req_status", "POOLED", "已入池", "1"}, {"req_status", "IN_DEV", "开发中", "2"},
-                {"req_status", "PENDING_TEST", "待测试", "3"}, {"req_status", "TEST_PASSED", "测试通过", "4"}};
+                {"req_status", "PENDING_TEST", "待测试", "3"}, {"req_status", "TEST_PASSED", "测试通过", "4"},
+                // r41：PDR 评审意见九分类（前端下拉与统计分桶的唯一来源）
+                {"review_opinion_category", "RANGE", "范围/需求理解", "1"},
+                {"review_opinion_category", "TECH", "技术可行性", "2"},
+                {"review_opinion_category", "SCHEDULE", "工期/排期", "3"},
+                {"review_opinion_category", "RISK", "风险/依赖", "4"},
+                {"review_opinion_category", "ACCEPTANCE", "验收标准", "5"},
+                {"review_opinion_category", "UI", "界面/交互", "6"},
+                {"review_opinion_category", "DATA", "数据/兼容", "7"},
+                {"review_opinion_category", "COMPLIANCE", "合规/安全", "8"},
+                {"review_opinion_category", "OTHER", "其他", "9"}};
         for (String[] d : dicts) {
             link("sys_dict", row("tenant_id", tenantId, "type", d[0], "code", d[1], "label", d[2], "sort_no", d[3]));
         }

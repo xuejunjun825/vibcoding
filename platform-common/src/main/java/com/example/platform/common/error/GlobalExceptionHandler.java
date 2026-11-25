@@ -15,6 +15,7 @@ import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -38,6 +39,16 @@ public class GlobalExceptionHandler {
         }
         return ResponseEntity.status(ex.status())
                 .body(ApiError.of(ex.status(), ex.code(), ex.message(), ex.detail()));
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiError> handleUploadTooLarge(MaxUploadSizeExceededException ex) {
+        // 容器层（spring.servlet.multipart.*）拒绝的超限请求：语义与业务层 20MB 校验一致，
+        // 必须是 413 FILE_TOO_LARGE 而不是 Boot 默认的 500/400。
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("maxBytes", ex.getMaxUploadSize());
+        return ResponseEntity.status(413)
+                .body(ApiError.of(413, "FILE_TOO_LARGE", "文件超过大小限制", detail));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

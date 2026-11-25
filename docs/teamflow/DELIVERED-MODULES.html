@@ -32,6 +32,8 @@ blockquote p{margin:4px 0}
 .toc>ul{margin-left:0}
 .toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
 h1.title{display:none}
+.page{max-width:1560px;margin:0 auto;padding:28px 32px}
+img{max-width:100%;height:auto}
 </style></head><body><div class="page">
 <div class="toc"><div class="toc-title">目录</div>
 <ul>
@@ -78,15 +80,25 @@ id="toc-14-流程管控强化r23r26r27">14.
 <li><a href="#16-门禁自身的可信度r28r31r33r38"
 id="toc-16-门禁自身的可信度r28r31r33r38">16.
 门禁自身的可信度（r28、r31、r33–r38）</a></li>
+<li><a href="#17-需求变更单r402026-11-23"
+id="toc-17-需求变更单r402026-11-23">17.
+需求变更单（r40，2026-11-23）</a></li>
+<li><a href="#17-产品需求评审--厂商工时评估r46第-38-页-pdrreview"
+id="toc-17-产品需求评审--厂商工时评估r46第-38-页-pdrreview">17.
+产品需求评审 + 厂商工时评估（r46，第 38 页
+<code>pdr.review</code>）</a></li>
 </ul></li>
 </ul></div>
 <h1 id="已交付功能模块清单">已交付功能模块清单</h1>
 <blockquote>
-<p>生成时间：2026-11-09，<strong>最后更新 2026-11-23</strong>（r38
-合回后）· 口径：<strong>已验收并合入 <code>main</code></strong>
-的能力；任务夹路径见各轮目录 <code>docs/teamflow/20261*-r*</code>。 分支
-<code>main</code> 当前 = <code>d99530d</code>；每轮证据见对应任务夹的
-<code>ACCEPTANCE.md</code>，门禁基线见 <code>memory.md:36</code>。</p>
+<p>生成时间：2026-11-09，<strong>最后更新 2026-11-24</strong>（r45
+台账补行）· 口径：<strong>已验收并合入 <code>main</code></strong>
+的能力（r39 起含已在分支内交付、尚未合 <code>main</code>
+的轮次）；任务夹路径见各轮目录 <code>docs/teamflow/20261*-r*</code>。
+分支 <code>main</code> 当前 =
+<code>d99530d</code>；每轮证据见对应任务夹的
+<code>ACCEPTANCE.md</code>，门禁基线以 <a href="memory.md">memory.md</a>
+的「门禁基线以实测为准」条为唯一口径（行号会随轮次漂移，只按条目标题引用）。</p>
 </blockquote>
 <h2 id="0-版本台账">0. 版本台账</h2>
 <table>
@@ -318,6 +330,41 @@ DISABLED）、<code>legacy-probe-purge.sh</code>、<code>gate-order</code>
 <td>20/20 · 孤儿 role/domain 0</td>
 <td><code>d99530d</code></td>
 </tr>
+<tr>
+<td>r39</td>
+<td>自动化规则引擎</td>
+<td><code>automation_rule</code>/<code>automation_event</code>/<code>automation_run</code>/<code>requirement_tag</code>
+四表（V15）、outbox 事件、幂等抢占、<code>automation-verify</code> 6 段
+40 条</td>
+<td>6/6 AC · <code>automation</code> 40/40</td>
+<td>分支内（未合 main）</td>
+</tr>
+<tr>
+<td>r40</td>
+<td>需求变更单</td>
+<td><code>req_change</code>/<code>req_change_item</code>（V16）、第 6 类
+<code>REQ_CHANGE</code> 两级审批、显式
+apply、<code>CHANGE_REQUIRED</code> 收口、第 10 个 Tab + 720 四步抽屉 +
+深链、<code>change-verify</code> 6 段 42 条</td>
+<td>20/21 AC（另 1 条文档 P1）· <code>change-verify</code> 42/42</td>
+<td>分支内（未合 main）</td>
+</tr>
+<tr>
+<td>r45</td>
+<td>详情页审批探测静默</td>
+<td>审批实例 / 我的待办 /
+工时评估审批降为<strong>页内可选探测</strong>：<code>getApprovalInstance(id, extra?)</code>
+/ <code>listApprovalMine(params, extra?)</code> 透传
+<code>silentForbidden</code>（默认
+undefined，审批中心/变更详情不变）、详情页 403 收敛为
+<code>approvalForbidden</code>/<code>estimateForbidden</code>
+布尔、<code>FORBIDDEN_HINT</code>
+单点文案（<code>ApprovalTab.vue</code>），<strong>服务端零
+diff</strong>；新增 <code>lint</code> L23（24→25）与 <code>access</code>
+a8 段 13 条（206→219，九段）</td>
+<td>15 AC · <code>access</code> 219/219 · <code>lint</code> 25/25</td>
+<td>分支内（<code>feat/detail-approval-silent</code>，未合 main）</td>
+</tr>
 </tbody>
 </table>
 <blockquote>
@@ -328,19 +375,27 @@ href="20261109-r6-ccode-cteam-ctest-p0/">docs/teamflow/20261109-r6-ccode-cteam-c
 <p><strong>规模（2026-11-23 实测，排除
 <code>src/test</code>）</strong>：Java <strong>495</strong> 个类（另测试
 69）、Vue <strong>140</strong> 个页面/组件、TS <strong>51</strong>
-个、REST 映射 <strong>371</strong> 处、Flyway 迁移 <strong>14</strong>
-个（V1–V14）、顶层运维/自测脚本 <strong>31</strong>
-个（<code>scripts/tests/</code> 下另有 45 个）。门禁（r38
-实测）：<code>platform-verify</code>
+个、REST 映射 <strong>371</strong> 处、Flyway 迁移 <strong>16</strong>
+个（V1–V16）、顶层运维/自测脚本 <strong>31</strong>
+个（<code>scripts/tests/</code> 下另有 45 个）。门禁（r40 实测快照；r45
+起 <code>access-verify</code> <strong>219</strong>（九段，a8 13
+条）、<code>lint</code> <strong>25</strong>（含
+L23），<code>change-verify</code> <strong>46</strong>（r44
+起）；条数口径以 <a
+href="memory.md">memory.md</a>「门禁基线以实测为准」条为准，本行只做同源引用、不另立数字）：<code>platform-verify</code>
 <strong>194</strong>、<code>platform-test-negative</code>
 <strong>130</strong>、<code>access-verify</code>
-<strong>206</strong>、<code>rbac-verify</code>
+<strong>219</strong>、<code>rbac-verify</code>
 <strong>113</strong>、<code>platform-demo-reset</code>
-<strong>76</strong>、<code>release-flow-verify</code>
+<strong>80</strong>、<code>release-flow-verify</code>
 <strong>44</strong>、<code>gate-order-verify</code>
-<strong>20</strong>、<code>wbs-backfill-verify</code>
-<strong>18</strong>、<code>unit</code>
-<strong>392</strong>、<code>lint</code> 22、<code>verify</code> 14。</p>
+<strong>21</strong>（r41 起：20 条 + 第 21
+条判据不许退回硬编码的静态自证）、<code>wbs-backfill-verify</code>
+<strong>18</strong>、<code>change-verify</code>
+<strong>46</strong>、<code>automation-verify</code>
+<strong>40</strong>、<code>unit</code>
+<strong>475</strong>、<code>lint</code>
+<strong>25</strong>、<code>verify</code> 14。</p>
 <h2 id="1-平台基座r1">1. 平台基座（r1）</h2>
 <ul>
 <li><strong>注册与配置</strong>：Nacos 3.3
@@ -538,7 +593,10 @@ Webhook（订阅/投递日志/签名）。</li>
 <li><strong>迁移</strong>：<code>V1__platform_schema.sql</code>（39
 表）→ <code>V2</code> 列类型/<code>V3</code> 角色目录/<code>V4</code>
 追溯索引/<code>V5__quality_management.sql</code>（14 表 + 5 表增列 + 5
-指标）/<code>V6</code> 状态宽度/<code>V7</code> 环境字典。</li>
+指标）/<code>V6</code> 状态宽度/<code>V7</code>
+环境字典/<code>V8</code>–<code>V12</code>
+集成·协同·分析域/<code>V13__vendor_pm_role.sql</code>/<code>V14__release_flow_chain.sql</code>/<code>V15__automation_rule.sql</code>（自动化四表）/<code>V16__requirement_change.sql</code>（需求变更单两表）；共
+<strong>16</strong> 个，历史迁移校验和不许变。</li>
 <li><strong>架构单点</strong>（每条只有一份实现，验收时逐项核对）：<code>StateTables</code>、<code>ScopeSql</code>、<code>PermissionMatrix/RouteTable</code>、<code>MetricFormulas</code>、<code>GateEvaluator</code>、<code>QualityAggregator</code>、<code>AuditService</code>、<code>JwtCodec</code>、<code>HmacSigner</code>。</li>
 <li><strong>测试套件</strong>：<code>make verify</code> 14 ·
 <code>platform-verify</code> 167 · <code>platform-test-negative</code>
@@ -679,4 +737,173 @@ warn</strong>（避免门禁静默缩水）。</li>
 128/130、权限码 56、<code>gate-order</code> 15/19），现在由 PRD 的
 AC-9/AC-10 强制核对。</li>
 </ul>
+<h2 id="17-需求变更单r402026-11-23">17.
+需求变更单（r40，2026-11-23）</h2>
+<p><strong>定位</strong>：变更单是<strong>留痕单据</strong>，不是编辑表单——冻结
+<code>before/after</code> 与影响快照、同事务起第 6 类审批、显式
+<code>apply</code> 才写字段、应用后逐字段留证据。任务夹 <a
+href="20261123-r40-req-change-order/">20261123-r40-req-change-order/</a>，流程见
+<a href="CHANGE-REQUEST-FLOW.md">CHANGE-REQUEST-FLOW.md</a>。</p>
+<table>
+<thead>
+<tr>
+<th>面</th>
+<th>交付物</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>表</td>
+<td><code>req_change</code>（状态/原因/两份 JSON
+快照/impact/审批实例/apply 元数据，<strong>无
+FK</strong>）、<code>req_change_item</code>（复合主键
+<code>(change_id, field)</code>，主键即幂等约束）；<code>V16__requirement_change.sql</code>，V1–V15
+不动、<strong>items 只在 apply 落库</strong></td>
+</tr>
+<tr>
+<td>端点</td>
+<td><code>POST /requirements/{id}/changes</code>（201）、<code>POST .../changes/preview</code>（200，不落库）、<code>GET .../changes?status=&amp;page=&amp;size=</code>、<code>GET /changes/{id}</code>、<code>POST /changes/{id}/apply</code>（200，<code>APPLIED</code>）</td>
+</tr>
+<tr>
+<td>领域单点</td>
+<td><code>RequirementChangeFields</code>（白名单/7
+键快照/归一/差异/早期态表
+<code>editableFields</code>）、<code>RequirementChangeImpactAssessor</code>（8
+键 impact）、<code>RequirementChangeValidator</code>（创建即拦 + apply
+复验）、<code>RequirementChangeGuard</code>（PUT 收口）</td>
+</tr>
+<tr>
+<td>事务</td>
+<td><code>RequirementChangeService</code>（创建：校验+快照+impact+同事务起审批+审计）、<code>RequirementChangeApplyService</code>（12
+步单事务：状态闸→需求行锁→before 比对→复验→条件更新→RELEASE
+双写→写字段→items→1 条审计→锁审计）</td>
+</tr>
+<tr>
+<td>审批</td>
+<td><code>WorkflowVersion.BIZ_REQ_CHANGE</code> 第 6 类，默认
+<code>PRODUCT → DOMAIN_OWNER</code>
+两级；<code>RequirementChangeCallback</code> 只做
+<code>PENDING→APPROVED/REJECTED/WITHDRAWN</code>，<strong>绝不写需求字段</strong>；<code>RequirementChangeSummaryProvider</code>
+供审批中心「需求变更」摘要与深链</td>
+</tr>
+<tr>
+<td>权限</td>
+<td>动作码 <code>req.action.change_request</code> /
+<code>req.action.change_apply</code>（73→<strong>75</strong>）、<code>PermissionRouteTable</code>
+5 条路由规则、<code>VENDOR_PM</code> 显式 DENY
+两条；<strong>不进</strong> 16 条状态迁移矩阵，零新菜单码</td>
+</tr>
+<tr>
+<td>前端</td>
+<td>第 10 个 Tab「变更」+ 720 四步抽屉（第 ④ 步必须真 preview）+ 560
+编辑抽屉（按 <code>editableFields</code> 锁定）+ 深链
+<code>/requirements/:id/changes/:changeId</code> +
+<code>409 CHANGE_REQUIRED</code> banner；<code>APPROVED</code>
+文案「已通过 · 待应用」与 <code>APPLIED</code> 彻底分开</td>
+</tr>
+<tr>
+<td>事件</td>
+<td>apply 只写 1 条 <code>REQUIREMENT_CHANGE_APPLIED</code>
+审计，<code>AutomationEventMapper</code> 派生每字段 1 条
+<code>FIELD_CHANGE</code>；规则字段词表扩到 8 个（7 可变更 +
+<code>owner_user_id</code>），title-only 规则可保存</td>
+</tr>
+<tr>
+<td>门禁</td>
+<td><code>make change-verify</code> =
+<code>scripts/change-verify.sh</code>（S1 迁移与结构 5 / S2 申请与影响 8
+/ S3 审批映射 6 / S4 应用正负 8 / S5 人天与锁 7 / S6 收口与审计查询 6 =
+<strong>40 条</strong>；<code>--static-only</code> 12
+条免栈、<code>--twice</code> 连跑两次比对）；<code>make test</code> 在
+<code>platform-verify</code> 之后接一步</td>
+</tr>
+<tr>
+<td>计数迁移</td>
+<td>动作 73→<strong>75</strong>、每角色
+171→<strong>173</strong>、<code>sys_role_permission</code>
+1881→<strong>1903</strong>、ACTION 格 803→<strong>825</strong>（FUNCTION
+671 / MENU 407
+不变）；<code>s0/s1/s2/s5/s7/s8/_lib/rbac-verify/platform-verify/platform-demo-reset</code>
+同批更新，Flyway 断言 15→<strong>16</strong></td>
+</tr>
+<tr>
+<td>本轮不做</td>
+<td>变更回滚（再开一张单，<code>before</code>
+冻结成当前值形成审计链）、跨类型合并单、批量应用、变更单评论/附件</td>
+</tr>
+</tbody>
+</table>
+<h2 id="17-产品需求评审--厂商工时评估r46第-38-页-pdrreview">17.
+产品需求评审 + 厂商工时评估（r46，第 38 页
+<code>pdr.review</code>）</h2>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>事实</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数据</td>
+<td><code>V17__project.sql</code>（<code>project</code> /
+<code>project_member</code>）、<code>V18__pdr_review.sql</code>、<code>V19__pdr_review_opinion.sql</code>、<code>V20__pdr_review_opinion_version.sql</code>、<code>V21__report_definition_dataset_width.sql</code>；Flyway
+最高成功版本 <strong>21</strong></td>
+</tr>
+<tr>
+<td>顺序门</td>
+<td>PDR 必须<strong>先评审 → 再指派厂商 → 再厂商评估 → 才能排期/拆
+RD</strong>：<code>409 PDR_REVIEW_REQUIRED</code> /
+<code>VENDOR_NOT_ASSIGNED</code> /
+<code>ESTIMATE_NOT_APPROVED</code>；换厂商作废原评估（<code>STALE</code>），子
+RD 进 <code>IN_DEV</code> 后换厂商 <code>409 VENDOR_LOCKED</code></td>
+</tr>
+<tr>
+<td>评审单</td>
+<td>项目组成员多选（项目组为空回退 产品经理 +
+域负责人，<code>fallback:true</code>）、<code>MODE_ALL</code>
+全员通过、可驳回/催办/撤销；<strong>同一人可提多条意见</strong>，每条独立分类（9
+类字典）、结论、附件、状态（OPEN/TASKED/RESOLVED）</td>
+</tr>
+<tr>
+<td>意见转任务</td>
+<td><code>POST /pdr-reviews/{id}/opinions/{opinionId}/to-task</code>
+复用交付域任务表，回写 <code>task_id</code> + <code>status=TASKED</code>
++ 审计 <code>PDR_OPINION_TO_TASK</code>；重复转 409、非评审人
+403、跨服务失败 503 回滚</td>
+</tr>
+<tr>
+<td>附件</td>
+<td>复用 <code>/attachments</code>，新增
+<code>bizType=PDR_REVIEW</code>；仅本次评审的评审人/发起人可上传、评审中可上传、结束后只读；跨厂商/非成员下载
+<strong>404</strong></td>
+</tr>
+<tr>
+<td>统计</td>
+<td>`GET /pdr-reviews/stats?groupBy=CATEGORY</td>
+</tr>
+<tr>
+<td>权限</td>
+<td>功能码 60→<strong>61</strong>（新增 <code>req:review</code>）、页
+37→<strong>38</strong>（<code>pdr.review</code>）、动作
+75→<strong>81</strong>（<code>pdr_review_start</code>/<code>opinion_submit</code>/<code>conclude</code>/<code>close</code>/<code>opinion_to_task</code>/<code>vendor_change</code>）、<code>sys_role_permission</code>
+1903→<strong>1980</strong>、每角色 <strong>180</strong> 格</td>
+</tr>
+<tr>
+<td>门禁</td>
+<td><code>make pdr-verify</code> =
+<code>scripts/pdr-flow-verify.sh</code> <strong>66 条</strong>（S1 前置
+/ S2 评审 / S3 顺序门 / S4 换厂商 / S5 附件 / S6
+统计与多条意见转任务），<code>scripts/tests/pdr/_lib.sh</code>
+共享原语，teardown 残留 0</td>
+</tr>
+<tr>
+<td>执行方式</td>
+<td><strong>离线 Agent Teams 执行</strong>（TeamFlow 宿主的
+<code>subagents</code> 注册表为空，<code>teamflow_start</code> 恒报
+noProvider）：后端/QA 门禁/前端/门禁修复分别由子代理完成，Lead
+复验并提交</td>
+</tr>
+</tbody>
+</table>
 </div></body></html>

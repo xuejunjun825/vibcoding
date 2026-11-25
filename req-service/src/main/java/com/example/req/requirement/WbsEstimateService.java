@@ -5,7 +5,9 @@ import com.example.platform.common.error.ApiException;
 import com.example.platform.common.tenant.TenantContext;
 import com.example.platform.contract.ActionPermissionResolver;
 import com.example.platform.contract.DataScope;
+import com.example.platform.contract.PermissionMatrix;
 import com.example.platform.contract.RequirementActionMatrix;
+import com.example.req.pdr.PdrReviewService;
 import com.example.req.approval.ApprovalEngine;
 import com.example.req.approval.ApprovalHistory;
 import com.example.req.approval.ApprovalInstance;
@@ -66,6 +68,11 @@ public class WbsEstimateService {
     private final ActionPermissionResolver actionPermissions;
     private final WorkflowJson json;
     private final RequirementStateMachine stateMachine;
+    /**
+     * PDR 顺序门（r41）。setter 注入而不是构造器参数：既有单测都按十参构造本类，加一个参数会让
+     * 十几个测试同时编不过；未注入时门直接放行（那些单测只验评估语义，不验评审门）。
+     */
+    private PdrReviewService pdrGate;
 
     public WbsEstimateService(RequirementService requirements,
                               ObjectProvider<ApprovalEngine> engine,
@@ -83,6 +90,11 @@ public class WbsEstimateService {
         this.actionPermissions = actionPermissions;
         this.json = json;
         this.stateMachine = stateMachine;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setPdrGate(PdrReviewService pdrGate) {
+        this.pdrGate = pdrGate;
     }
 
     // ------------------------------------------------------------------ 提交
@@ -119,7 +131,7 @@ public class WbsEstimateService {
         }
 
         ApprovalInstance approved = latest(requirementId, ApprovalInstance.STATUS_APPROVED);
-        if (approved != null) {
+        if (approved != null && !voidedByVendorChange(approved, entity)) {
             BigDecimal approvedDays = EstimateSnapshot.days(
                     EstimateSnapshot.document(store, json, approved.getId()));
             BigDecimal deviation = deviation(estimateDays, approvedDays);
@@ -128,6 +140,14 @@ public class WbsEstimateService {
                 throw RequirementErrors.estimateAlreadyApproved(requirementId, approved.getId());
             }
         }
+
+        // r41 顺序：权限（403）→ 表单/状态校验（400：类型、终态、人天、说明）→ 与既有单据的重复
+        // （409 ESTIMATE_ALREADY_APPROVED）→ PDR 评审门（409 PDR_REVIEW_REQUIRED）→ 厂商门
+        // （409 VENDOR_NOT_ASSIGNED / 403 OUT_OF_SCOPE）。把两个新门放在「表单对不对」之后，
+        // 是为了不改变 r26 已定的 400 优先级：人天填错仍报 400，而不是先报「还没评审」。
+        // 两个新门之间评审优先于厂商归属——「评都没评」比「给了谁」更根本。
+        requirePdrPassed(entity);
+        requireAssignedVendor(entity, scope);
 
         supersedeActive(requirementId, -1L, scope.userId());
         long instanceId = start(requirementId, entity, estimateDays, trimmedNote);
@@ -152,6 +172,10 @@ public class WbsEstimateService {
             attributes.put("note", note);
         }
         attributes.put("source", "UI");
+        // r41：评估单自己记住「提交时承接厂商是谁」。换厂商后单据不被改写（它记录的是历史事实），
+        // 失效由「单据厂商 ≠ 当前承接厂商」派生，因此不需要在换厂商时批量改流水。
+        attributes.put("vendorId", entity.getAssigneeVendorId());
+        attributes.put("participantKind", entity.getAssigneeVendorId() == null ? "INTERNAL" : "VENDOR");
         return approvalEngine.start(new StartApproval(BIZ_TYPE, requirementId, entity.getType(),
                 entity.getDomainId(), attributes, null, null)).id();
     }
@@ -177,15 +201,23 @@ public class WbsEstimateService {
         BigDecimal proposedDays = EstimateSnapshot.days(document);
         BigDecimal approvedDays = ApprovalInstance.STATUS_APPROVED.equals(instance.getStatus())
                 ? proposedDays : null;
-        String reason = reasonOf(instance, status, entity, approvedDays);
+        // 单据上的厂商是「提交时是谁」，需求上的厂商是「现在是谁」。两者不一致即 STALE（r41）：
+        // 不改单据、不批量刷流水，避免历史被改写。
+        Long documentVendorId = EstimateSnapshot.vendorId(document);
+        String reason = reasonOf(instance, status, entity, approvedDays, documentVendorId);
+        String reasonText = reasonTextOf(instance, status, entity, approvedDays, documentVendorId,
+                reason);
+        Long vendorId = documentVendorId != null ? documentVendorId : entity.getAssigneeVendorId();
         return new WbsEstimateViews.EstimateView(status, instance.getId(), instance.getStatus(),
-                proposedDays, approvedDays, EstimateSnapshot.note(document), reason,
+                proposedDays, approvedDays, EstimateSnapshot.note(document), reason, reasonText,
                 approverOf(instance.getId()), instance.getStartedAt(), instance.getEndedAt(),
+                vendorId, vendorId == null ? null : requirements.vendorNameOf(vendorId),
                 WbsEstimateViews.EstimateView.REQUIRED);
     }
 
     /** 批量派生的入参（r27）：一页需求 id + 类型 + 当前人天，不含需求实体本身。 */
-    public record GateSubject(long requirementId, String type, BigDecimal estimateDays) {
+    public record GateSubject(long requirementId, String type, BigDecimal estimateDays,
+                              Long vendorId) {
     }
 
     /** 六态之一：NONE|PENDING|APPROVED|REJECTED|SUPERSEDED|STALE。 */
@@ -194,10 +226,14 @@ public class WbsEstimateService {
             return STATUS_NONE;
         }
         if (activeInstance(entity).isPresent()) {
-            return decide(true, null, entity.getEstimateDays(), null);
+            return decide(true, null, entity.getEstimateDays(), null, null, null);
         }
         ApprovalInstance last = effectiveInstance(entity);
-        return decide(false, last, entity.getEstimateDays(), approvedDaysOf(last));
+        Long documentVendorId = last == null || !isApproved(last)
+                ? null
+                : EstimateSnapshot.vendorId(EstimateSnapshot.document(store, json, last.getId()));
+        return decide(false, last, entity.getEstimateDays(), approvedDaysOf(last),
+                documentVendorId, entity.getAssigneeVendorId());
     }
 
     /**
@@ -255,12 +291,12 @@ public class WbsEstimateService {
         Map<Long, String> result = new LinkedHashMap<>();
         wanted.forEach((requirementId, subject) -> {
             ApprovalInstance effective = effectiveOfRow.get(requirementId);
-            BigDecimal approvedDays = isApproved(effective)
-                    ? EstimateSnapshot.days(EstimateSnapshot.document(
-                            histories.get(effective.getId()), json))
-                    : null;
+            Map<String, Object> document = isApproved(effective)
+                    ? EstimateSnapshot.document(histories.get(effective.getId()), json)
+                    : Map.of();
             result.put(requirementId, decide(activeOfRow.get(requirementId), effective,
-                    subject.estimateDays(), approvedDays));
+                    subject.estimateDays(), EstimateSnapshot.days(document),
+                    EstimateSnapshot.vendorId(document), subject.vendorId()));
         });
         return result;
     }
@@ -272,7 +308,8 @@ public class WbsEstimateService {
      * 正是列表与详情不一致（列表恒给 {@code schedule}）的根因。</p>
      */
     private static String decide(boolean active, ApprovalInstance effective,
-                                 BigDecimal estimateDays, BigDecimal approvedDays) {
+                                 BigDecimal estimateDays, BigDecimal approvedDays,
+                                 Long documentVendorId, Long currentVendorId) {
         if (active) {
             return STATUS_PENDING;
         }
@@ -281,6 +318,12 @@ public class WbsEstimateService {
         }
         String status = effective.getStatus();
         if (ApprovalInstance.STATUS_APPROVED.equals(status)) {
+            // r41：换过承接厂商的旧评估单直接失效（设计 R3）。比人天偏差优先——厂商都不对了，
+            // 人天再准也没法用。
+            if (documentVendorId != null && currentVendorId != null
+                    && !documentVendorId.equals(currentVendorId)) {
+                return STATUS_STALE;
+            }
             // 与 impact 的预测共用 wouldBeStale（AC-9：预测=实际），避免两套 20% 阈值。
             if (approvedDays == null || approvedDays.signum() <= 0 || estimateDays == null) {
                 return STATUS_STALE;
@@ -425,23 +468,63 @@ public class WbsEstimateService {
                 .divide(approved, 4, RoundingMode.HALF_UP);
     }
 
+    /** STALE 的失效码（{@code reason} 字段）：门禁与客户端按码判定，不解析中文文案。 */
+    public static final String STALE_VENDOR_CHANGED = "VENDOR_CHANGED";
+    public static final String STALE_DAYS_MISSING = "DAYS_MISSING";
+    public static final String STALE_DAYS_DEVIATION = "DAYS_DEVIATION";
+
+    /**
+     * 结论原因：{@code REJECTED} 是驳回评论（人写的，前端直接展示）；{@code STALE} 给稳定失效码
+     * （{@code VENDOR_CHANGED|DAYS_MISSING|DAYS_DEVIATION}），与 {@link #reasonTextOf} 的人话配对。
+     */
     private String reasonOf(ApprovalInstance instance, String status, RequirementEntity entity,
-                            BigDecimal approvedDays) {
+                            BigDecimal approvedDays, Long documentVendorId) {
         if (STATUS_REJECTED.equals(status)) {
             return lastRejectComment(instance.getId());
         }
         if (!STATUS_STALE.equals(status)) {
             return null;
         }
-        BigDecimal current = entity.getEstimateDays();
-        BigDecimal deviation = deviation(current, approvedDays);
-        if (deviation == null) {
+        if (vendorChanged(entity, documentVendorId)) {
+            return STALE_VENDOR_CHANGED;
+        }
+        return deviation(entity.getEstimateDays(), approvedDays) == null
+                ? STALE_DAYS_MISSING : STALE_DAYS_DEVIATION;
+    }
+
+    /** {@code reason} 的可读版本：STALE 解释「为什么失效、该怎么做」，其余状态与 reason 同值。 */
+    private String reasonTextOf(ApprovalInstance instance, String status, RequirementEntity entity,
+                                BigDecimal approvedDays, Long documentVendorId, String reason) {
+        if (!STATUS_STALE.equals(status)) {
+            return reason;
+        }
+        if (STALE_VENDOR_CHANGED.equals(reason)) {
+            return "承接厂商已从厂商 " + documentVendorId + " 变更为厂商 "
+                    + entity.getAssigneeVendorId() + "，需按新厂商重新提交工时评估";
+        }
+        if (STALE_DAYS_MISSING.equals(reason)) {
             return "评估后需求人天缺失，评估单已失效";
         }
-        return "人天偏差 " + deviation.multiply(new BigDecimal("100"))
+        BigDecimal current = entity.getEstimateDays();
+        BigDecimal deviated = deviation(current, approvedDays);
+        return "人天偏差 " + deviated.multiply(new BigDecimal("100"))
                 .setScale(1, RoundingMode.HALF_UP).toPlainString() + "%（评估 "
                 + approvedDays.stripTrailingZeros().toPlainString() + " 天 → 当前 "
                 + current.stripTrailingZeros().toPlainString() + " 天），超过 20% 阈值";
+    }
+
+    /** 单据提交时的厂商与需求当前承接厂商不一致 ⇒ 这张已通过的单据已作废（R3，STALE 的派生源）。 */
+    private boolean voidedByVendorChange(ApprovalInstance instance, RequirementEntity entity) {
+        if (instance == null || entity == null) {
+            return false;
+        }
+        return vendorChanged(entity,
+                EstimateSnapshot.vendorId(EstimateSnapshot.document(store, json, instance.getId())));
+    }
+
+    private static boolean vendorChanged(RequirementEntity entity, Long documentVendorId) {
+        return documentVendorId != null && entity.getAssigneeVendorId() != null
+                && !documentVendorId.equals(entity.getAssigneeVendorId());
     }
 
     private String lastRejectComment(long instanceId) {
@@ -580,14 +663,113 @@ public class WbsEstimateService {
         store.appendHistory(entry);
     }
 
+    /**
+     * 提交工时评估的写权（设计 §7「权限与动作码」、R4）。
+     *
+     * <p>两类账号、两条口径，缺一不可：</p>
+     * <ul>
+     *   <li><b>内部账号</b>（{@code vendorId == null}）沿用 r26 的 {@code req:deliver} 判定：
+     *       PMO/研发能提，产品经理的 deliver 是 DENY，所以仍然 403（门禁 B2-2 就是这条）；</li>
+     *   <li><b>厂商账号</b>改看动作码 {@code req.action.estimate_submit}：VENDOR_PM 在该码上是
+     *       ALLOW、厂商研发经 {@code task:manage} 也是非 DENY。之前这里只查
+     *       {@code req.action.deliver}，而 VENDOR_PM 的 deliver 是 DENY——「拿着评估权却被交付权
+     *       挡住」，门禁 B2-4 因此 403。</li>
+     * </ul>
+     *
+     * <p>为什么厂商分支是「非 DENY」而不是「== ALLOW」：RESTRICTED 在本平台表示「通过但收窄
+     * 范围」，这里收窄由下一步 {@code requireAssignedVendor}（跨厂商 403 OUT_OF_SCOPE）执行。
+     * 反过来，内部账号绝不能走这条分支：产品经理的 estimate_submit 是 RESTRICTED（继承自
+     * task:manage），一旦让内部账号也看动作码，B2-2 的 403 就会变成 201。</p>
+     */
     private void requireDeliverPermission(RequirementEntity entity, DataScope scope) {
         if (RequirementActionMatrix.can("deliver", entity.getReporterId(), callerOf(scope),
                 actionPermissions)) {
             return;
         }
+        if (scope.vendorId() != null
+                && actionPermissions.decide(RequirementActionMatrix.PAGE,
+                        RequirementActionMatrix.actionCode("estimate_submit"))
+                != PermissionMatrix.Access.DENY) {
+            return;
+        }
         // 沿用发起码的语义：没有交付/发起档位就不能提单（F4）。
         throw new ApiException(403, RequirementErrors.FORBIDDEN, "无权提交工时评估",
-                Map.of("required", "req:deliver"));
+                Map.of("required", "req:estimate_submit"));
+    }
+
+    // ------------------------------------------------------------ r41 顺序门与厂商绑定
+
+    /**
+     * PDR 顺序门（§3.2）：PDR 自己必须先有通过结论；RD 只在父 PDR 已进入过评审时才要求通过。
+     * 未注入（单测）时整体放行——那些测试只验评估语义。
+     */
+    private void requirePdrPassed(RequirementEntity entity) {
+        if (pdrGate == null) {
+            return;
+        }
+        if (RequirementRules.TYPE_PDR.equals(entity.getType())) {
+            pdrGate.gate(entity.getId()).ifPresent(gate -> {
+                throw RequirementErrors.pdrReviewRequired(entity.getId(), gate.reviewId(),
+                        gate.status());
+            });
+            return;
+        }
+        if (entity.getParentId() == null) {
+            return;
+        }
+        RequirementEntity parent = requirements.requireVisible(entity.getParentId());
+        if (!RequirementRules.TYPE_PDR.equals(parent.getType())) {
+            return;
+        }
+        pdrGate.gateIfStarted(parent.getId()).ifPresent(gate -> {
+            throw RequirementErrors.pdrReviewRequired(entity.getId(), gate.reviewId(),
+                    gate.status());
+        });
+    }
+
+    /** 厂商门（A1/A5/R4）：必须先指派厂商；厂商账号只能评承接厂商是自己的需求。 */
+    private void requireAssignedVendor(RequirementEntity entity, DataScope scope) {
+        Long assigned = entity.getAssigneeVendorId();
+        if (assigned == null || assigned <= 0) {
+            throw RequirementErrors.vendorNotAssigned(entity.getId());
+        }
+        Long callerVendor = callerOf(scope).vendorId();
+        if (callerVendor != null && !callerVendor.equals(assigned)) {
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("requirementId", entity.getId());
+            detail.put("vendorId", callerVendor);
+            detail.put("assigneeVendorId", assigned);
+            detail.put("required", "assign_vendor");
+            throw new ApiException(403, RequirementErrors.OUT_OF_SCOPE,
+                    "只能为承接厂商是自己厂商的需求提交工时评估", detail);
+        }
+    }
+
+    /**
+     * 换厂商后把已通过的评估单派生为 STALE（R3）。
+     *
+     * <p>STALE 本身是派生状态（单据厂商 ≠ 当前承接厂商即失效），所以这里不改单据状态，
+     * 只写一条 {@code ESTIMATE_STALE_BY_VENDOR} 审计，让审计页能回答「这张单为什么失效」。</p>
+     */
+    void markStaleByVendor(RequirementEntity entity, Long previousVendorId, Long currentVendorId) {
+        Optional<ApprovalInstance> approved = instances
+                .findAllByTenantIdAndBizTypeAndBizIdOrderByIdDesc(
+                        TenantContext.require().tenantId(), BIZ_TYPE, entity.getId()).stream()
+                .filter(instance -> ApprovalInstance.STATUS_APPROVED.equals(instance.getStatus()))
+                .findFirst();
+        if (approved.isEmpty()) {
+            return;
+        }
+        Long documentVendorId = EstimateSnapshot.vendorId(
+                EstimateSnapshot.document(store, json, approved.get().getId()));
+        if (documentVendorId != null && documentVendorId.equals(currentVendorId)) {
+            return;
+        }
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("instanceId", approved.get().getId());
+        detail.put("previousVendorId", previousVendorId);
+        detail.put("currentVendorId", currentVendorId);
+        auditService.record("ESTIMATE_STALE_BY_VENDOR", BIZ_TYPE, entity.getId(), detail);
     }
 
     private RequirementActionMatrix.Caller callerOf(DataScope scope) {

@@ -15,6 +15,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -502,11 +503,35 @@ public class ReportService {
     private ReportDefinitionEntity save(ReportDefinitionEntity entity, String name) {
         try {
             return reports.saveAndFlush(entity);
-        } catch (DataIntegrityViolationException e) {
+        } catch (DuplicateKeyException e) {
             // the unique key uk_report_name is the last word on duplicates, even under a race
             log.debug("duplicate report name rejected by the unique key: {}", name);
             throw AnalyticsErrors.nameDuplicated(name);
+        } catch (DataIntegrityViolationException e) {
+            // 不是唯一键冲突就不能报「重名」：r41 的 C3-2 被 409 REPORT_NAME_DUPLICATED 挡住，
+            // 真正原因却是 dataset='pdr_review_opinion'（18 字符）比 VARCHAR(16) 长，MySQL 1406。
+            // 这类错误在这里如实报出来（400 REPORT_SAVE_REJECTED + reason），用户才不会去改名字。
+            log.warn("report definition rejected by a storage constraint (name={}, dataset={})",
+                    name, entity.getDataset(), e);
+            throw AnalyticsErrors.saveRejected(entity.getDataset(), integrityReason(e));
         }
+    }
+
+    /** 数据完整性异常的根因（MySQL 1406 之类），只取最内层消息，绝不把整条 SQL 回给前端。 */
+    private static String integrityReason(DataIntegrityViolationException e) {
+        Throwable cause = e;
+        while (cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        String message = cause.getMessage();
+        if (message == null || message.isBlank()) {
+            message = e.getMessage();
+        }
+        if (message == null || message.isBlank()) {
+            return "存储约束拒绝";
+        }
+        String flat = message.replaceAll("\\s+", " ").trim();
+        return flat.length() <= 200 ? flat : flat.substring(0, 200);
     }
 
     /** {@code <name>-副本}, then {@code -副本-2} … {@code -副本-9}, each fitting the 60-char column. */

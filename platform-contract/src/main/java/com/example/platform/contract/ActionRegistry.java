@@ -92,6 +92,28 @@ public final class ActionRegistry {
             action("req.action.change_request", "req.pool", "发起变更", "req:split"),
             action("req.action.change_apply", "req.pool", "应用变更", "req:deliver", "req:split"),
 
+            // ---- PDR 评审 pdr.review（r41）----
+            // 「发起」与「汇总结论」是评审的组织权，沿用 req:review（产品经理/域负责人/PMO 已持有，
+            // 与设计 §7 的三行完全一致）；「认领更换」沿用 req:assign-vendor（指派厂商的那批人）。
+            // 「提交意见」与「意见转任务」的准入主体是「本单评审人 / 发起人」——那是运行时事实，
+            // 矩阵表达不了，所以功能码只负责让这批人看见入口：req:review（产品经理/域负责人/PMO）
+            // 并上 req:deliver（研发），两者任一 ALLOW 即可见；厂商两种都不持有，评审入口对厂商关闭，
+            // 与设计 §7「评审人是项目组成员 + 产品经理」一致。服务层再按意见归属收一次口。
+            action("req.action.pdr_review_start", "pdr.review", "发起 PDR 评审", "req:review"),
+            action("req.action.pdr_review_opinion", "pdr.review", "提交评审意见",
+                    "req:review", "req:deliver"),
+            action("req.action.pdr_review_conclude", "pdr.review", "汇总评审结论", "req:review"),
+            action("req.action.pdr_review_task", "pdr.review", "评审意见转任务",
+                    "req:review", "req:deliver"),
+            action("req.action.assign_vendor_change", "pdr.review", "更换承接厂商", "req:assign-vendor"),
+            // 提交工时评估：设计 §7 要求「厂商账号（VENDOR_PM / 厂商研发）也能提交」。req:deliver
+            // 覆盖内部 PMO/研发，但对 VENDOR_PM 是 DENY；task:manage 是厂商已持有的码（见
+            // PermissionMatrix 的 VENDOR_PM 注释：写口收在 ACTION 层）。any-of 并集因此让三类账号
+            // 都能看见入口，真正的边界仍在服务层：厂商账号必须 assignee_vendor_id == 我的 vendorId
+            // （否则 403 OUT_OF_SCOPE），内部账号沿用 r26 的 req:deliver 判定。
+            action("req.action.estimate_submit", "pdr.review", "提交工时评估",
+                    "req:deliver", "task:manage"),
+
             // ---- 迭代 req.iteration ----
             action("task.action.create", "req.iteration", "新建任务", "task:manage"),
             action("task.action.assign", "req.iteration", "指派任务", "task:manage"),

@@ -21,6 +21,10 @@ public final class AnalyticsDatasets {
     public static final String DELIVERY = "delivery";
     public static final String APPROVAL = "approval";
     public static final String QUALITY = "quality";
+    /** r41：PDR 评审单（跨服务读取 req 的 pdr_review，经 requirement 挂作用域）。 */
+    public static final String PDR_REVIEW = "pdr_review";
+    /** r41：PDR 评审意见；分类码与 req 统计共用 {@code PdrCategoryCatalog}。 */
+    public static final String PDR_REVIEW_OPINION = "pdr_review_opinion";
 
     public static final int MAX_ROWS = 3;
     public static final int MAX_COLS = 2;
@@ -34,7 +38,8 @@ public final class AnalyticsDatasets {
     /** Filter fields that are not dataset dimensions: the request-level scope filter chips. */
     private static final List<String> SPECIAL_FILTERS = List.of("domainId", "vendorId", "releaseId");
 
-    private static final List<String> CODES = List.of(REQUIREMENT, DELIVERY, APPROVAL, QUALITY);
+    private static final List<String> CODES = List.of(REQUIREMENT, DELIVERY, APPROVAL, QUALITY,
+            PDR_REVIEW, PDR_REVIEW_OPINION);
 
     private static final Map<String, AnalyticsViews.Dataset> DATASETS = build();
 
@@ -63,6 +68,8 @@ public final class AnalyticsDatasets {
             case REQUIREMENT -> List.of("req.total", "cycle.avg", "cycle.p90");
             case DELIVERY -> List.of("req.total", "vendor.onTimeRate", "cycle.avg");
             case APPROVAL -> List.of("approval.total", "approval.avgHours", "approval.passRate");
+            case PDR_REVIEW -> List.of("reviewCount");
+            case PDR_REVIEW_OPINION -> List.of("opinionCount");
             default -> List.of("req.total", "quality.passRate", "quality.defectDensity");
         };
     }
@@ -213,6 +220,20 @@ public final class AnalyticsDatasets {
                 measure("quality.defectDensity", "缺陷密度"),
                 measure("quality.releaseSuccess", "发布成功率"),
                 measure("quality.defects", "缺陷数"))));
+
+        // r41：PDR 数据集与 req 的 /pdr-reviews/stats 同源同口径——都按 review/意见行计数，
+        // 且都经 requirement 挂租户 + 域 + 厂商作用域（ScopeSql 不认 pdr_* 表，见 AnalyticsSql）。
+        map.put(PDR_REVIEW, new AnalyticsViews.Dataset(PDR_REVIEW, "PDR 评审", List.of(
+                dim("status", "状态"), dim("conclusion", "结论"),
+                dim("initiatorId", "发起人"),
+                measure("reviewCount", "评审单数"))));
+
+        map.put(PDR_REVIEW_OPINION, new AnalyticsViews.Dataset(PDR_REVIEW_OPINION, "PDR 评审意见",
+                List.of(
+                        dim("category", "意见分类"), dim("decision", "结论"),
+                        dim("reviewerId", "评审人"), dim("reviewId", "评审单"),
+                        time("createdAt", "提交日"),
+                        measure("opinionCount", "意见数"))));
 
         return Map.copyOf(map);
     }

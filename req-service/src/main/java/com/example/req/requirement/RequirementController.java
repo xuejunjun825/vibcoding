@@ -109,7 +109,8 @@ public class RequirementController {
         List<Long> domainIds = domainValidator.requireForCreate(TenantContext.require(), request.domainIds);
         Created created = requirementService.create(new CreateCommand(request.type, request.title,
                 request.description, domainIds, request.priority, request.expectedDeliveryDate,
-                request.parentId, request.ownerUserId, request.estimateDays, request.actualDays));
+                request.parentId, request.ownerUserId, request.estimateDays, request.actualDays,
+                request.projectId));
         return ResponseEntity.status(201).body(created);
     }
 

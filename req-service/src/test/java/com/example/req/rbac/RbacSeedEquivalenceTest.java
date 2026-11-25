@@ -97,8 +97,8 @@ class RbacSeedEquivalenceTest {
         long allowed = ActionRegistry.actions().stream()
                 .filter(action -> RbacSeeder.actionAccessFor("VENDOR_PM", action) == Access.ALLOW)
                 .count();
-        assertEquals(7L, allowed,
-                "VENDOR_PM keeps 7 actions (75 − 13 overrides − 55 derived DENY)");
+        assertEquals(8L, allowed,
+                "VENDOR_PM keeps 8 actions (81 − 13 overrides − 60 derived DENY)");
     }
 
     /** A page that binds no function code is not narrowed by the function layer. */
@@ -125,9 +125,9 @@ class RbacSeedEquivalenceTest {
     }
 
     @Test
-    void totalRowsAreNineteenHundredThree() {
-        assertEquals(1903L, rowCount(),
-                "11 roles × (61 functions + 37 pages + 75 actions) seeded rows per tenant");
+    void totalRowsAreNineteenHundredEighty() {
+        assertEquals(1980L, rowCount(),
+                "11 roles × (61 functions + 38 pages + 81 actions) seeded rows per tenant");
     }
 
     private static long rowCount() {

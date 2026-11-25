@@ -82,7 +82,9 @@ class WbsEstimateStaleTest {
         assertThat(service.applyGate(entity, List.of("schedule"))).doesNotContain("schedule");
         WbsEstimateViews.EstimateView view = service.view(entity);
         assertThat(view.status()).isEqualTo("STALE");
-        assertThat(view.reason()).contains("25.0%").contains("超过 20% 阈值");
+        // reason 是稳定失效码（门禁 B3-2 按码断言），人话在 reasonText（r41）。
+        assertThat(view.reason()).isEqualTo(WbsEstimateService.STALE_DAYS_DEVIATION);
+        assertThat(view.reasonText()).contains("25.0%").contains("超过 20% 阈值");
     }
 
     @Test
@@ -99,7 +101,8 @@ class WbsEstimateStaleTest {
         assertThat(service.statusOf(entity)).isEqualTo("STALE");
         WbsEstimateViews.EstimateView view = service.view(entity);
         assertThat(view.status()).isEqualTo("STALE");
-        assertThat(view.reason()).contains("人天缺失");
+        assertThat(view.reason()).isEqualTo(WbsEstimateService.STALE_DAYS_MISSING);
+        assertThat(view.reasonText()).contains("人天缺失");
     }
 
     @Test

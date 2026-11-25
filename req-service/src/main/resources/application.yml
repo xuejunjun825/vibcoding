@@ -5,6 +5,13 @@ server:
 spring:
   application:
     name: req-service
+  servlet:
+    multipart:
+      # 容器层上限（业务层仍是 AttachmentService 的 20MB）：25MB 让 20–25MB 的请求先到达
+      # 业务校验，再由业务层给出语义一致的 413 FILE_TOO_LARGE；超过 25MB 由容器拒绝，
+      # 同样经 GlobalExceptionHandler 映射成 413 FILE_TOO_LARGE（不是 500）。
+      max-file-size: 25MB
+      max-request-size: 30MB
   datasource:
     url: ${PLATFORM_DB_URL:jdbc:mysql://127.0.0.1:3306/devops_platform?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8}
     username: ${PLATFORM_DB_USER:root}

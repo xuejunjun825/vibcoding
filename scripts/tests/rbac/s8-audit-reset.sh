@@ -47,7 +47,7 @@ cleanup() {
     # 只在本段确实改脏过（ADMIN_MUTATED=1）时补回起跑快照——否则会反过来把「起跑前就脏」的状态
     # 锁死在库里，把一次意外变成永久漂移。没差异时不写库（服务端 no-diff 不记审计）。
     if (( ADMIN_MUTATED )) && [[ -n "${ADMIN_ID}" && -n "${ADMIN_ORIG}" ]] \
-        && [[ "$(printf '%s' "${ADMIN_ORIG}" | jq 'if type=="array" then length else 0 end' 2>/dev/null)" == "173" ]]; then
+        && [[ "$(printf '%s' "${ADMIN_ORIG}" | jq 'if type=="array" then length else 0 end' 2>/dev/null)" == "180" ]]; then
         CUR="$(grants_of "${ADMIN_ID}")"
         if [[ "${CUR}" != "${ADMIN_ORIG}" ]]; then
             RESTORE_CODE="$(put_grants "${ADMIN_ID}" "${ADMIN_ORIG}")"
@@ -111,7 +111,7 @@ if [[ "${G1:-0}" -eq $(( ${G0:-0} + 1 )) && "${HIGH_RISK:-0}" -ge 1 ]]; then
     pass "一次授权保存 = 一条 ROLE_PERMISSION_UPDATE，且 detail_json 带 highRiskGranted"
 else
     fail "授权审计不符合「一次保存一条 + highRiskGranted」：${G0:-0}→${G1:-0}，带字段 ${HIGH_RISK:-0}" \
-        "全量覆盖写 1903 行不能写 1903 条审计；高危新增必须留痕"
+        "全量覆盖写 1980 行不能写 1980 条审计；高危新增必须留痕"
 fi
 
 # ---------------------------------------------------------------- 3. 无变更不写审计
@@ -187,11 +187,11 @@ snapshot() { # 计数快照：两次 reset 必须逐项相等（按演示租户�
 S1="$(snapshot)"
 internal_call POST "$REQ_URL" /internal/demo-reset >/dev/null
 S2="$(snapshot)"
-if [[ "${S1}" == "${S2}" && "${S2}" =~ ^[0-9]+/37/75/11/0$ ]]; then
+if [[ "${S1}" == "${S2}" && "${S2}" =~ ^[0-9]+/38/81/11/0$ ]]; then
     pass "两次 reset 计数逐项相等（role_permission/sys_menu/sys_action/builtin/自定义 = ${S2}）"
 else
     fail "reset 不幂等：${S1:-<空>} vs ${S2:-<空>}" \
-        "AC-4：自定义角色必须清 0、内置 11 行保留、1903 行回到预设"
+        "AC-4：自定义角色必须清 0、内置 11 行保留、1980 行回到预设"
 fi
 
 # ---------------------------------------------------------------- 汇总

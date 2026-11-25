@@ -51,6 +51,17 @@ public class AttachmentService {
 
     public static final String BIZ_TEST_PLAN = "TEST_PLAN";
     public static final String BIZ_WIKI_PAGE = "WIKI_PAGE";
+    /** r41：PDR 评审附件，{@code biz_id = pdr_review.id}（设计 §4.2）。 */
+    public static final String BIZ_PDR_REVIEW = "PDR_REVIEW";
+
+    /**
+     * PDR 评审附件的类型白名单（R7）：pdf/docx/xlsx/png/jpg/zip/csv/md。
+     *
+     * <p>只作用于 {@code PDR_REVIEW}：既有四种 bizType 一直没有白名单，r41 不顺手改掉它们的
+     * 行为（缺陷现场截图、用例附件里 .log/.txt 是常态）；评审附件是「对外材料」，才需要收口。</p>
+     */
+    private static final java.util.Set<String> PDR_EXTENSIONS = java.util.Set.of(
+            "pdf", "docx", "xlsx", "png", "jpg", "zip", "csv", "md");
 
     static final long MAX_BYTES = 20L * 1024 * 1024;
 
@@ -129,6 +140,12 @@ public class AttachmentService {
             throw new ApiException(409, "PLAN_DATA_LOCKED",
                     "测试计划已完成，测试数据与附件只读", Map.of("planId", bizId));
         }
+        if (BIZ_PDR_REVIEW.equals(type)) {
+            // R7：只有评审人/发起人能上传，且只在 IN_REVIEW 期间（结束后只读）。
+            requireReviewOpen(bizId);
+            requireReviewer(bizId, scope.userId(), "上传评审附件");
+            requirePdrExtension(file.getOriginalFilename());
+        }
 
         byte[] bytes;
         try {
@@ -179,6 +196,14 @@ public class AttachmentService {
                 .orElseThrow(() -> new ApiException(404, "ATTACHMENT_NOT_FOUND",
                         "附件不存在或不在你的数据范围内", Map.of("attachmentId", id)));
         guard.requireVisible(entity);
+        if (BIZ_PDR_REVIEW.equalsIgnoreCase(entity.getBizType()) && entity.getBizId() != null) {
+            // R7：评审附件不落公开 URL，下载一律过鉴权。只看附件行自身的 domain/vendor 不够——
+            // 评审单挂在需求上，需求的可见性（含厂商收窄、owner/assignee_vendor_id）才是这条附件
+            // 的真实边界，所以再走一次 reviewMeta 的 /*scope:r*/ 连接；越权一律 404（不泄露
+            // 存在性，门禁 B6-1）。这里**不**调 requireReviewOpen：评审结束后附件只读，但读
+            // 仍然要能读（门禁 B8-2）。
+            reviewMeta(entity.getBizId());
+        }
         Path path = root.resolve(entity.getPath()).normalize();
         if (!path.startsWith(root) || !Files.isRegularFile(path)) {
             throw new ApiException(404, "ATTACHMENT_FILE_MISSING", "附件文件已不存在", null);
@@ -202,6 +227,12 @@ public class AttachmentService {
                 .orElseThrow(() -> new ApiException(404, "ATTACHMENT_NOT_FOUND",
                         "附件不存在或不在你的数据范围内", Map.of("attachmentId", id)));
         guard.requireVisible(entity);
+        if (BIZ_PDR_REVIEW.equalsIgnoreCase(entity.getBizType()) && entity.getBizId() != null) {
+            // R7：评审结束即只读；删除限于上传者本人或评审发起人（发起人恒为产品经理/域负责人）。
+            requireReviewOpen(entity.getBizId());
+            requireReviewer(entity.getBizId(), TenantContext.require().userId(), "删除评审附件",
+                    entity.getUploaderId());
+        }
         if (BIZ_TEST_PLAN.equalsIgnoreCase(entity.getBizType()) && entity.getBizId() != null) {
             Scoped anchor = resolveBiz(BIZ_TEST_PLAN, entity.getBizId());
             if (anchor != null && anchor.locked()) {
@@ -261,6 +292,16 @@ public class AttachmentService {
                       JOIN wiki_space s ON s.id = p.space_id
                      WHERE p.id = :id AND p.status <> 'DELETED' AND /*scope:s*/
                     """, Map.of("id", bizId));
+            // r41：评审单本身没有隔离列，锚点仍是它挂的那条需求（domain/vendor 从需求取），
+            // 所以作用域标记打在 r 上——与 wiki 用 space 作锚点是同一个手法。
+            case BIZ_PDR_REVIEW -> row = jdbc.one("""
+                    SELECT r.domain_id AS domain_id,
+                           COALESCE(r.assignee_vendor_id, r.owner_vendor_id) AS vendor_id,
+                           pr.status AS status
+                      FROM pdr_review pr
+                      JOIN requirement r ON r.id = pr.requirement_id
+                     WHERE pr.id = :id AND /*scope:r*/
+                    """, Map.of("id", bizId));
             default -> row = jdbc.one("""
                     SELECT df.domain_id AS domain_id, df.vendor_id AS vendor_id
                       FROM defect df
@@ -278,7 +319,8 @@ public class AttachmentService {
     private static String normalizeType(String bizType, boolean required) {
         if (bizType == null || bizType.isBlank()) {
             if (required) {
-                throw new ApiException(400, "BIZ_TYPE_REQUIRED", "bizType 必填（REQ / DEFECT / TEST_PLAN / WIKI_PAGE）", null);
+                throw new ApiException(400, "BIZ_TYPE_REQUIRED",
+                        "bizType 必填（REQ / DEFECT / TEST_PLAN / WIKI_PAGE / PDR_REVIEW）", null);
             }
             return null;
         }
@@ -288,9 +330,85 @@ public class AttachmentService {
             case "DEFECT", "BUG" -> "DEFECT";
             case "TEST_PLAN", "TESTPLAN" -> BIZ_TEST_PLAN;
             case "WIKI_PAGE", "WIKIPAGE" -> BIZ_WIKI_PAGE;
+            case "PDR_REVIEW", "PDRREVIEW" -> BIZ_PDR_REVIEW;
             default -> throw new ApiException(400, "BIZ_TYPE_UNSUPPORTED",
-                    "不支持的 bizType：" + bizType + "（仅 REQ / DEFECT / TEST_PLAN / WIKI_PAGE）", null);
+                    "不支持的 bizType：" + bizType
+                            + "（仅 REQ / DEFECT / TEST_PLAN / WIKI_PAGE / PDR_REVIEW）", null);
         };
+    }
+
+    // ------------------------------------------------------- PDR 评审附件（r41）
+
+    /** 评审单元信息：状态 + 评审人 + 发起人。 */
+    private record ReviewMeta(String status, List<Long> reviewerIds, long initiatorId) {
+    }
+
+    private ReviewMeta reviewMeta(long reviewId) {
+        Map<String, Object> row = jdbc.one("""
+                SELECT pr.status AS status, pr.reviewer_ids AS reviewer_ids,
+                       pr.initiator_id AS initiator_id
+                  FROM pdr_review pr
+                  JOIN requirement r ON r.id = pr.requirement_id
+                 WHERE pr.id = :id AND /*scope:r*/
+                """, Map.of("id", reviewId));
+        if (row == null) {
+            throw new ApiException(404, "BIZ_NOT_FOUND", "评审单不存在或不在你的数据范围内",
+                    Map.of("bizType", BIZ_PDR_REVIEW, "bizId", reviewId));
+        }
+        Long initiator = asLong(row.get("initiator_id"));
+        return new ReviewMeta(String.valueOf(row.get("status")), ids(row.get("reviewer_ids")),
+                initiator == null ? 0L : initiator);
+    }
+
+    /** R7：评审结束后附件只读（上传与删除都 409）。 */
+    private void requireReviewOpen(long reviewId) {
+        ReviewMeta meta = reviewMeta(reviewId);
+        if (!"IN_REVIEW".equals(meta.status())) {
+            throw new ApiException(409, "REVIEW_CLOSED", "评审已结束，附件只读",
+                    Map.of("reviewId", reviewId, "status", meta.status()));
+        }
+    }
+
+    /** R7：只有评审人/发起人能写附件（读与下载仍按数据范围放行）。 */
+    private void requireReviewer(long reviewId, long userId, String action) {
+        requireReviewer(reviewId, userId, action, null);
+    }
+
+    private void requireReviewer(long reviewId, long userId, String action, Long alsoAllowed) {
+        ReviewMeta meta = reviewMeta(reviewId);
+        if (meta.initiatorId() == userId
+                || meta.reviewerIds().contains(userId)
+                || (alsoAllowed != null && alsoAllowed == userId)) {
+            return;
+        }
+        throw new ApiException(403, "NOT_REVIEWER", "只有评审人可以" + action,
+                Map.of("reviewId", reviewId, "userId", userId));
+    }
+
+    private static void requirePdrExtension(String name) {
+        String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        int dot = lower.lastIndexOf('.');
+        String ext = dot < 0 ? "" : lower.substring(dot + 1);
+        if (PDR_EXTENSIONS.contains(ext)) {
+            return;
+        }
+        throw new ApiException(415, "UNSUPPORTED_MEDIA_TYPE",
+                "评审附件只支持 pdf/docx/xlsx/png/jpg/zip/csv/md",
+                Map.of("extension", ext, "allowed", PDR_EXTENSIONS));
+    }
+
+    /** reviewer_ids 是手写 JSON 数组（[1,2,3]），只取数字即可，不为此拉一个 ObjectMapper。 */
+    private static List<Long> ids(Object raw) {
+        List<Long> result = new ArrayList<>();
+        if (raw == null) {
+            return result;
+        }
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("\\d+").matcher(String.valueOf(raw));
+        while (matcher.find()) {
+            result.add(Long.valueOf(matcher.group()));
+        }
+        return result;
     }
 
     private static String sanitize(String name) {

@@ -3,6 +3,8 @@
  * 只声明前端实际读取的字段；服务端多返回的字段不影响类型兼容。
  */
 
+import type { PdrReviewDetail } from './types.pdr'
+
 /* ---------------- 通用 ---------------- */
 
 export interface PageResponse<T> {
@@ -275,6 +277,17 @@ export interface RequirementDetail extends RequirementRow {
   domainIds?: number[] | null
   /** 需求级 Sonar 项目键（空表示回落版本默认值），只读展示 */
   sonarProjectKey?: string | null
+  /**
+   * r49：所属项目组（`RequirementViews.View.projectId`）。评审人下拉从项目组成员里选；
+   * 为空表示该需求还没挂项目组，发起评审时会回退「提报人 + 域负责人」。
+   */
+  projectId?: number | null
+  /**
+   * r49：PDR 评审单（`RequirementViews.Detail.pdrReview`，与 `view` **平级**）。
+   * 只有 PDR 类型且发起过才有值；未发起是 `{review: null, opinions: []}`，
+   * 非 PDR 类型为 null/缺失 —— 三种情况在 `PdrReviewPanel` 里分成三种渲染。
+   */
+  pdrReview?: PdrReviewDetail | null
 }
 
 /**
@@ -295,6 +308,10 @@ export interface RequirementDetailResponse {
   lockedFields?: RequirementFieldRule[] | null
   domainIds?: number[] | null
   sonarProjectKey?: string | null
+  /** r49：PDR 评审单（`RequirementViews.Detail.pdrReview`），与 `view` 平级 */
+  pdrReview?: PdrReviewDetail | null
+  /** r49：项目组 id（`view.projectId` 的顶层同名兜底；两条分支都认） */
+  projectId?: number | null
 }
 
 /** 创建/拆解返回 `{id,code,type,status,allowedActions}`（不是详情）。 */

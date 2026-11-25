@@ -33,7 +33,8 @@ public class RequirementPoolQuery {
             r.assignee_vendor_id AS assignee_vendor_id, r.release_id AS release_id,
             r.estimate_days AS estimate_days, r.actual_days AS actual_days, r.mr_url AS mr_url,
             r.expected_delivery_date AS expected_delivery_date, r.plan_start_date AS plan_start_date,
-            r.plan_end_date AS plan_end_date, r.closed_at AS closed_at, r.updated_at AS updated_at
+            r.plan_end_date AS plan_end_date, r.closed_at AS closed_at, r.updated_at AS updated_at,
+            r.project_id AS project_id
             """;
 
     private final ScopedJdbc jdbc;
@@ -151,7 +152,8 @@ public class RequirementPoolQuery {
             }
             batch.add(new RequirementService.ActionRow(id, Rows.str(row, "type"),
                     Rows.str(row, "status"), Rows.toLong(Rows.object(row, "reporter_id")),
-                    Rows.toDecimal(Rows.object(row, "estimate_days"))));
+                    Rows.toDecimal(Rows.object(row, "estimate_days")),
+                    Rows.toLong(Rows.object(row, "assignee_vendor_id"))));
         }
         return batch.isEmpty() ? Map.of() : requirementService.allowedActionsByRow(batch);
     }
@@ -265,6 +267,7 @@ public class RequirementPoolQuery {
                 Rows.toDate(Rows.object(row, "plan_end_date")),
                 Rows.toDateTime(Rows.object(row, "closed_at")),
                 Rows.toDateTime(Rows.object(row, "updated_at")),
-                rollup, allowedActions, Map.of(), null, tags);
+                rollup, allowedActions, Map.of(),
+                Rows.toLong(Rows.object(row, "project_id")), null, tags);
     }
 }

@@ -93,8 +93,10 @@ public class WbsBackfillService {
                 return report(batchId, tenantCode, cmd.dryRun(), List.of());
             }
             Map<Long, String> statuses = estimates.statusesOf(candidates.stream()
+                    // 计划期快照没有承接厂商（扫描 SQL 不取该列）：这里传 null，评估态只按
+                    // 单据自身派生；执行阶段由 WbsBackfillRowWriter 在事务内用实体重读，含厂商。
                     .map(c -> new WbsEstimateService.GateSubject(
-                            c.requirementId(), c.type(), c.estimateDays()))
+                            c.requirementId(), c.type(), c.estimateDays(), null))
                     .toList());
 
             List<WbsBackfillViews.Row> rows = new ArrayList<>(candidates.size());

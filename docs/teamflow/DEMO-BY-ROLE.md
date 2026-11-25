@@ -351,3 +351,30 @@ bash scripts/automation-verify.sh --static-only # 免栈的静态部分
 幂等与防循环各有一条可复述的判据：同一业务动作重放不会产生第 2 次执行（`automation_run` 的 `(tenant, rule, requirement, event)` 唯一键先抢后判）；规则触发的动作**不再**作为新事件进入求值（`origin=RULE` 直接丢弃），人工 `deliver` 后再触发也会在链深 ≥4 时丢弃。
 
 截图按 §7.4 的 CDP 流程现截（路由换 `/automation/rules` 与 `/automation/runs`），1440×900，落 `docs/teamflow/demo-shots/`。该目录必须可提交：`git check-ignore -v docs/teamflow/demo-shots/r39-automation-r1-success.png` 无输出（未被忽略）。
+
+## 4.11 产品需求评审 + 厂商工时评估（r46 新增，评审中心）
+
+**角色与入口**：产品经理/项目域负责人/评审人 → 左侧「需求域 · 评审中心」（`/pdr-reviews`，页面码 `pdr.review`）。
+
+**数据**：演示基线自带 1 张评审单（`DEMO-R-02` 采购订单移动审批）4 名评审人 6 条意见（其中 1 条已转任务）、2 个附件。
+
+**四步脚本（约 3 分钟）**
+
+1. 打开「评审中心」→ 上部看四个 KPI（评审单 1 / 意见 6 / 需修改率 16.7% / 平均评审时长）与「意见分类分布」（九类，RANGE 2、TECH 2、ACCEPTANCE 1、DATA 1），右栏「按评审人 Top5」。
+2. 点任意一条评审单 → 评审单详情：顶部 `3/4 已评`、评审人 chip（通过/需修改/待评）、按人分组的意见（每条带分类徽标、序号、状态徽标「待处理 / 已转任务」、附件 chip）。
+3. 在「待处理」意见上点「转为任务」→ 选择负责人/截止日期 → 创建后该条变「已转任务 #任务号」，任务表多一行、审计记 `PDR_OPINION_TO_TASK`（重复点会 409）。
+4. 回到需求详情 `DEMO-R-02` → 「评审」Tab 能看到同一份评审单与评审状态（概要页右侧也显示「评审状态：评审中 · 3/4 已评」）。
+
+**顺序门（可现场验证，也是这轮的重点）**
+
+- 新建的 PDR 未过评审时：`转派`/`提交评估`/`排期` 全灰，接口 409 `PDR_REVIEW_REQUIRED`（detail 带 `required:"pdr_review"`）。
+- 过了评审但没指派厂商 → `提交评估` 409 `VENDOR_NOT_ASSIGNED`。
+- 指派厂商后由**厂商账号**（vpm1）提交评估 → 201；产品经理提交 → 403（只审不提）。
+- 评估通过后换厂商 → 原评估单转 `STALE`（需重评）；子 RD 已进 `IN_DEV` 再换厂商 → 409 `VENDOR_LOCKED`（detail 带阻塞子需求 id）。
+
+```bash
+make pdr-verify                                 # 6 段 66 条：顺序门/评审/换厂商/附件/统计/多条意见转任务
+bash scripts/pdr-flow-verify.sh --dry-run       # 免栈只打印断言清单
+```
+
+截图：`docs/teamflow/demo-shots/pdr-1-review-center.png`、`pdr-2-review-detail.png`、`pdr-3-requirement-tab.png`。

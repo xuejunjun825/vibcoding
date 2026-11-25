@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # s0-schema.sh — AC-15/AC-16 迁移基座：11 张新表、判空加列、两个索引、回填校验列全 0、
 # 每租户种子（7 阶段 / 5 指标 / 1 空间 / 3 页面 / 4 版本 / 1 策略 / 2 执行器）、
-# 以及权限矩阵 42→56 的编译期事实（新 14 码必须都在册且 PLATFORM_ADMIN 拥有）。
+# 以及权限矩阵 42→61 的编译期事实（新 14 码 + r46 req:review 必须都在册且 PLATFORM_ADMIN 拥有）。
 set -uo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
@@ -96,11 +96,12 @@ expect_db "2 个种子执行器（一台从未上报 / 一台停用；按 code �
     "SELECT COUNT(*) FROM test_executor WHERE tenant_id=${TENANT_ID}
        AND code IN ('STUB-LOCAL','LEGACY-OFF')" eq 2 "执行器台账为空：健康派生无夹具"
 
-section "s0 · 权限矩阵 42→60"
+section "s0 · 权限矩阵 42→61"
 api_call GET "${C_REQ}/admin/permissions"
 expect "GET /admin/permissions 200" 200
-# 60 = 42 基础 + 14 M8 协作/代码/测试码 + 4 M9 分析域码（portal:view/portal:config/report:view/report:share）
-expect_jq "功能码 60 个" '.functions | length' 60
+# 61 = 42 基础 + 14 M8 协作/代码/测试码 + 4 M9 分析域码（portal:view/portal:config/report:view/report:share）
+#      + 1 r46 PDR 评审码（req:review，ActionRegistry 的 pdr.review 使用）
+expect_jq "功能码 61 个" '.functions | length' 61
 # r24：内置角色 10→11（VENDOR_PM 厂商项目经理）。功能码不变，只多一行角色。
 expect_jq "角色 11 个" '.roles | length' 11
 expect_jq "VENDOR_PM 在内置角色里" '.roles | map(select(.code=="VENDOR_PM")) | length' 1

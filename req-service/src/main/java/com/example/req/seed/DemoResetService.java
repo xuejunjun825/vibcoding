@@ -89,6 +89,8 @@ public class DemoResetService {
     private final TransactionTemplate transactions;
     private final boolean enabled;
     private final String tenantCode;
+    /** r41 演示附件要真的落盘，否则 UI 列表有行、点下载 404。 */
+    private final java.nio.file.Path attachmentRoot;
 
     public DemoResetService(SysDb db,
                             NamedParameterJdbcTemplate namedJdbc,
@@ -97,6 +99,8 @@ public class DemoResetService {
                             DemoApprovalFixture approvals,
                             PlatformTransactionManager transactionManager,
                             @Value("${platform.seed.enabled:false}") boolean enabled,
+                            @Value("${platform.attachment.dir:./.run/attachments}")
+                                    String attachmentDir,
                             @Value("${platform.tenant:" + DemoFixture.TENANT_CODE + "}") String tenantCode) {
         this.db = db;
         this.namedJdbc = namedJdbc;
@@ -105,6 +109,7 @@ public class DemoResetService {
         this.approvals = approvals;
         this.transactions = new TransactionTemplate(transactionManager);
         this.enabled = enabled;
+        this.attachmentRoot = java.nio.file.Paths.get(attachmentDir).toAbsolutePath().normalize();
         this.tenantCode = tenantCode == null || tenantCode.isBlank()
                 ? DemoFixture.TENANT_CODE : tenantCode.trim();
     }
@@ -329,6 +334,13 @@ public class DemoResetService {
                 "SELECT COUNT(*) FROM milestone WHERE tenant_id = ?", tenantId));
         counts.put("sprints", db.count("SELECT COUNT(*) FROM sprint WHERE tenant_id = ?", tenantId));
         counts.put("tasks", db.count("SELECT COUNT(*) FROM task WHERE tenant_id = ?", tenantId));
+        // r41：评审夹具纳入计数（漏删就会留下指向已删需求的孤儿单）。
+        counts.put("pdrReviews", db.count(
+                "SELECT COUNT(*) FROM pdr_review WHERE tenant_id = ?", tenantId));
+        counts.put("pdrOpinions", db.count(
+                "SELECT COUNT(*) FROM pdr_review_opinion WHERE tenant_id = ?", tenantId));
+        counts.put("projectMembers", db.count(
+                "SELECT COUNT(*) FROM project_member WHERE tenant_id = ?", tenantId));
         counts.put("testCases", db.count(
                 "SELECT COUNT(*) FROM test_case WHERE tenant_id = ? AND deleted_at IS NULL", tenantId));
         counts.put("testPlans", db.count("SELECT COUNT(*) FROM test_plan WHERE tenant_id = ?", tenantId));
@@ -554,16 +566,18 @@ public class DemoResetService {
         log.info("demo-reset: 插入需求 {} 条", requirementIndex);
 
         // 4) 任务（甘特「任务」视图的数据来源，全部挂演示迭代）
+        List<Long> taskIds = new ArrayList<>();
         int taskIndex = 0;
         for (Object[] row : DemoFixture.taskRows(refs)) {
             String requirementCode = (String) row[0];
             Long requirementId = requirementIds.get(requirementCode);
-            db.insert("INSERT INTO task (tenant_id, requirement_id, sprint_id, title, assignee_id,"
-                            + " estimate_hours, start_date, due_date, status, sort_no, domain_id,"
-                            + " created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            taskIds.add(db.insert("INSERT INTO task (tenant_id, requirement_id, sprint_id, title,"
+                            + " assignee_id, estimate_hours, start_date, due_date, status, sort_no,"
+                            + " domain_id, created_by, updated_by)"
+                            + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     tenantId, requirementId, sprintId, row[1], row[2], row[3],
                     Date.valueOf((LocalDate) row[4]), Date.valueOf((LocalDate) row[5]), row[6],
-                    taskIndex++, requirementDomains.get(requirementCode), pm, pm);
+                    taskIndex++, requirementDomains.get(requirementCode), pm, pm));
         }
 
         // 5) 用例（挂既有测试模块；模块属定义数据，重置不删）
@@ -634,6 +648,123 @@ public class DemoResetService {
                     + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", row);
         }
         log.info("demo-reset: 插入演示报表 {} 张", DemoFixture.REPORT_COUNT);
+
+        // 10) PDR 评审演示夹具（r41 / 设计 §9）：项目组 + 1 张在评单 + 6 条分类意见（含 1 条已转
+        //     任务）+ 2 个附件。挂 DEMO-R-02（PDR，ORD 域），与 DEMO-PROJ-1 同域，评审人选项目组。
+        long projectId = db.insert("INSERT INTO project (tenant_id, code, name, domain_id,"
+                        + " owner_user_id, status, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?)",
+                tenantId, DemoFixture.PROJECT_CODE, DemoFixture.PROJECT_NAME,
+                refs.get("domain:ORD"), pm, "ACTIVE", pm, pm);
+        String[][] projectMembers = {
+                {"po1", "PO"}, {"pm", "PM"}, {"dev1", "DEV"}, {"dev2", "DEV"}, {"qa1", "QA"}};
+        for (String[] member : projectMembers) {
+            Long userId = refs.get("user:" + member[0]);
+            if (userId == null) {
+                continue;
+            }
+            db.update("INSERT INTO project_member (tenant_id, project_id, user_id, role_in_project,"
+                            + " active, joined_at) VALUES (?,?,?,?,?,?)",
+                    tenantId, projectId, userId, member[1], 1,
+                    Timestamp.valueOf(LocalDateTime.now().minusDays(20)));
+        }
+
+        String reviewCode = "DEMO-R-02";
+        Long reviewRequirementId = requirementIds.get(reviewCode);
+        db.update("UPDATE requirement SET project_id = ? WHERE tenant_id = ? AND id = ?",
+                projectId, tenantId, reviewRequirementId);
+        List<Long> reviewerIds = new ArrayList<>();
+        for (String username : List.of("po1", "dev1", "dev2", "qa1")) {
+            Long userId = refs.get("user:" + username);
+            if (userId != null) {
+                reviewerIds.add(userId);
+            }
+        }
+        long reviewId = db.insert("INSERT INTO pdr_review (tenant_id, requirement_id, project_id,"
+                        + " mode, status, initiator_id, reviewer_ids, reviewer_source, note, due_at,"
+                        + " created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                tenantId, reviewRequirementId, projectId, "MODE_ALL", "IN_REVIEW", pm,
+                jsonIds(reviewerIds), "PROJECT",
+                "演示：意见按 9 类归集，任一条可直接转成研发任务",
+                Timestamp.valueOf(LocalDateTime.now().plusDays(3)), pm, pm);
+
+        // 一条 TASKED 的意见指向真实任务（先有任务才有意见），其余 OPEN。
+        Long taskedTaskId = taskIds.isEmpty() ? null : taskIds.get(0);
+        String[][] opinions = {
+                {"po1", "1", "PASS", "RANGE", "评审范围只写了采购单，未覆盖到货签收"},
+                {"po1", "2", "PASS", "RANGE", "与既有订单状态机的衔接需要一张流程图"},
+                {"po1", "3", "PASS", "ACCEPTANCE", "验收标准缺少「审批超时」的判定口径"},
+                {"dev1", "1", "PASS", "TECH", "移动端需要新增一个审批聚合接口"},
+                {"dev1", "2", "PASS", "DATA", "历史订单的审批留痕需要兼容旧表结构"},
+                {"dev2", "1", "NEED_CHANGE", "TECH", "第三方推送通道未定，建议先做站内消息"}};
+        int opinionIndex = 0;
+        for (String[] opinion : opinions) {
+            Long reviewerId = refs.get("user:" + opinion[0]);
+            if (reviewerId == null) {
+                continue;
+            }
+            boolean tasked = opinionIndex == 0 && taskedTaskId != null;
+            db.insert("INSERT INTO pdr_review_opinion (tenant_id, review_id, reviewer_id, seq,"
+                            + " decision, category, comment, status, task_id, created_by, updated_by)"
+                            + " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    tenantId, reviewId, reviewerId, Integer.parseInt(opinion[1]), opinion[2],
+                    opinion[3], opinion[4], tasked ? "TASKED" : "OPEN",
+                    tasked ? taskedTaskId : null, reviewerId, reviewerId);
+            opinionIndex++;
+        }
+
+        // 2 个附件：真的落盘（否则列表有行、下载 404）。
+        Object[][] files = {
+                {"规格说明.pdf", "application/pdf", "%PDF-1.4\n% 演示评审附件：规格说明\n"},
+                {"差异样例.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "demo-xlsx-placeholder"}};
+        for (Object[] file : files) {
+            String fileName = (String) file[0];
+            String content = (String) file[2];
+            String stored = java.util.UUID.randomUUID() + "-" + fileName;
+            writeDemoAttachment(stored, content);
+            db.insert("INSERT INTO attachment (tenant_id, biz_type, biz_id, file_name, path, size,"
+                            + " content_type, sha256, uploader_id, domain_id, vendor_id,"
+                            + " created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    tenantId, "PDR_REVIEW", reviewId, fileName, stored,
+                    (long) content.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+                    file[1], sha256(content), pm, refs.get("domain:ORD"), null, pm, pm);
+        }
+        log.info("demo-reset: 插入 PDR 评审 {} 张 / 意见 {} 条 / 附件 {} 个",
+                DemoFixture.PDR_REVIEW_COUNT, DemoFixture.PDR_OPINION_COUNT,
+                DemoFixture.PDR_ATTACHMENT_COUNT);
+    }
+
+    /** 演示附件落盘（与 AttachmentService 同一个根目录：{@code platform.attachment.dir}）。 */
+    private void writeDemoAttachment(String stored, String content) {
+        try {
+            java.nio.file.Files.createDirectories(attachmentRoot);
+            java.nio.file.Files.writeString(attachmentRoot.resolve(stored), content,
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException ex) {
+            throw new IllegalStateException("演示附件写入失败：" + stored, ex);
+        }
+    }
+
+    private static String sha256(String text) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 不可用", ex);
+        }
+    }
+
+    /** reviewer_ids 是手写 JSON 数字数组；不为此拉 ObjectMapper。 */
+    private static String jsonIds(List<Long> ids) {
+        StringBuilder builder = new StringBuilder("[");
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) {
+                builder.append(',');
+            }
+            builder.append(ids.get(i));
+        }
+        return builder.append(']').toString();
     }
 
     // ------------------------------------------------------------------ 不变量
@@ -658,6 +789,11 @@ public class DemoResetService {
         expect(violations, "版本数", counts.get("releases"), DemoFixture.RELEASE_COUNT);
         expect(violations, "迭代数", counts.get("sprints"), DemoFixture.SPRINT_COUNT);
         expect(violations, "任务数", counts.get("tasks"), DemoFixture.TASK_COUNT);
+        expect(violations, "PDR 评审单数", counts.get("pdrReviews"), DemoFixture.PDR_REVIEW_COUNT);
+        expect(violations, "PDR 评审意见数", counts.get("pdrOpinions"),
+                DemoFixture.PDR_OPINION_COUNT);
+        expect(violations, "项目组成员数", counts.get("projectMembers"),
+                DemoFixture.PROJECT_MEMBER_COUNT);
         expect(violations, "用例数", counts.get("testCases"), DemoFixture.CASE_COUNT);
         expect(violations, "测试计划数", counts.get("testPlans"), DemoFixture.PLAN_COUNT);
         expect(violations, "计划用例数", counts.get("planCases"), DemoFixture.PLAN_CASE_COUNT);

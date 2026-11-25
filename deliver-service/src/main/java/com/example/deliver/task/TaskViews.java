@@ -10,9 +10,15 @@ public final class TaskViews {
     private TaskViews() {
     }
 
+    /**
+     * Task creation. {@code description} 是 r41 追加的：PDR 评审意见转任务时要带上
+     * 「来源：PDR 评审 #id · 分类 · 原文」（设计 §4.5）。空值表示「这条任务不是从意见转来的」，
+     * 与其它客户端不传该字段的旧行为完全一致。
+     */
     public record CreateTask(Long requirementId,
                              Long sprintId,
                              String title,
+                             String description,
                              Long assigneeId,
                              BigDecimal estimateHours,
                              LocalDate startDate,
@@ -37,6 +43,7 @@ public final class TaskViews {
                            long requirementId,
                            Long sprintId,
                            String title,
+                           String description,
                            Long assigneeId,
                            BigDecimal estimateHours,
                            LocalDate startDate,

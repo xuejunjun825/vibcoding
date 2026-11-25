@@ -161,6 +161,33 @@ public final class PermissionRouteTable {
         rules.add(rule("GET", "^/changes/\\d+$", page("req.pool")));
         rules.add(rule("POST", "^/changes/\\d+/apply$",
                 action("req.pool", "req.action.change_apply")));
+        // PDR 评审（r41）：五个 /requirements 侧端点必须排在下面的兜底之前，否则「有需求池页面
+        // 权限」就能发起评审/提交意见（评审人的运行时校验会变成唯一防线）。/pdr-reviews 侧的
+        // 端点不以 /requirements 开头，但仍集中写在这里——同一特性的路由放一处才看得全。
+        rules.add(rule("POST", "^/requirements/\\d+/pdr-review$",
+                action("pdr.review", "req.action.pdr_review_start")));
+        rules.add(rule("GET", "^/requirements/\\d+/pdr-review$", page("req.pool", "pdr.review")));
+        rules.add(rule("GET", "^/requirements/\\d+/pdr-review/opinions$",
+                page("req.pool", "pdr.review")));
+        rules.add(rule("POST", "^/pdr-reviews/\\d+/opinions$",
+                action("pdr.review", "req.action.pdr_review_opinion")));
+        // 意见转任务排在 /opinions 之后无所谓（方法+正则都不同），但保持在 conclude 之前可读。
+        rules.add(rule("POST", "^/pdr-reviews/\\d+/opinions/\\d+/to-task$",
+                action("pdr.review", "req.action.pdr_review_task")));
+        rules.add(rule("POST", "^/pdr-reviews/\\d+/conclude$",
+                action("pdr.review", "req.action.pdr_review_conclude")));
+        rules.add(rule("POST", "^/pdr-reviews/\\d+/close$",
+                action("pdr.review", "req.action.pdr_review_conclude")));
+        // 统计口径是分析能力：能看评审页或报表页的人都该能看（厂商行级收窄在服务层）。
+        rules.add(rule("GET", "^/pdr-reviews/stats$", page("pdr.review", "ana.reports")));
+        rules.add(rule("GET", "^/pdr-reviews/datasets$", page("pdr.review", "ana.reports")));
+        rules.add(rule(null, "^/pdr-reviews.*$", page("pdr.review", "req.pool")));
+        // 项目组：读名单是评审人选人的前置能力（评审页/需求池可见即可），写名册归「发起评审」的
+        // 那批人（产品经理/域负责人/PMO）。设计 §5.1 写的 org:manage 会让产品经理连自己项目的
+        // 成员都加不了，评审人选人随即断链——这里的收口见交付说明的偏差条。
+        rules.add(rule("GET", "^/projects.*$", page("pdr.review", "req.pool")));
+        rules.add(rule(null, "^/projects.*$",
+                action("pdr.review", "req.action.pdr_review_start")));
         rules.add(rule(null, "^/requirements.*$", page("req.pool", "me.tasks")));
 
         // ---------------------------------------------------------------- defects

@@ -42,10 +42,10 @@ DEV_ORIG=""
 BIZ_ORIG=""      # 在 cleanup 之前先声明：set -u 下 trap 可能在赋值前就触发
 
 # 还原被本段改脏的授权格——这半截留在段内（清理原语只管删主体），三套快照各按各的码还原。
-restore_role_grants() { # restore_role_grants <roleCode> <snapshot>：空/非 173 格视为没取到，不写库
+restore_role_grants() { # restore_role_grants <roleCode> <snapshot>：空/非 180 格视为没取到，不写库
     local code="$1" snap="$2" id rc
     [[ -n "${snap}" ]] || return 0
-    [[ "$(printf '%s' "${snap}" | jq 'if type=="array" then length else 0 end' 2>/dev/null)" == "173" ]] || return 0
+    [[ "$(printf '%s' "${snap}" | jq 'if type=="array" then length else 0 end' 2>/dev/null)" == "180" ]] || return 0
     id="$(role_id_of "${code}")"
     [[ -n "${id}" && "${id}" != "null" ]] || { err "s7 cleanup: 找不到角色 ${code}，授权还原不了"; return 1; }
     rc="$(put_grants "${id}" "${snap}")"

@@ -13,6 +13,8 @@ import com.example.platform.contract.GatePort;
 import com.example.platform.contract.RequirementActionMatrix;
 import com.example.platform.contract.RequirementEditability;
 import com.example.req.integration.sonar.SonarProjectKeys;
+import com.example.req.pdr.PdrReviewService;
+import com.example.req.pdr.PdrViews;
 import com.example.req.requirement.RequirementDtos.AssignVendorRequest;
 import com.example.req.requirement.RequirementDtos.CreateCommand;
 import com.example.req.requirement.RequirementDtos.DeliverRequest;
@@ -42,6 +44,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * 需求主服务：三类需求的创建/更新/拆解/流转/转派/交付/快速测试。
@@ -87,6 +90,18 @@ public class RequirementService {
      * 晚期态由变更单 apply 调用。Provider 注入是为了让十参单测构造继续可用。
      */
     private final ObjectProvider<com.example.req.requirement.change.RequirementReleaseMembership> releaseMembership;
+    /**
+     * 项目组（r41）：创建/更新时校验 {@code projectId} 存在、同租户、可写。十参单测构造为 null
+     * （那些测试不挂项目，见 {@link #requireProjectWritable}）。
+     */
+    private final com.example.req.project.ProjectService projectService;
+    /**
+     * PDR 评审门（r41）。setter 注入而不是构造器参数：本类有十参「单测构造」与十三参
+     * 「容器构造」两个入口，再抬一个参数会让既有十几个测试同时编不过；未注入时门整体放行
+     * （那些单测只验需求语义，不验评审门）。
+     */
+    private PdrReviewService pdrReview;
+
 
 
     /** 十参构造：保留给既有单测（不装配评估门与标签端口时门/estimate/tags 均不生效）。 */
@@ -102,7 +117,7 @@ public class RequirementService {
                               ActionPermissionResolver actionPermissions) {
         this(repository, domainRelRepository, stateMachine, codeGenerator, auditService,
                 notificationWriter, gatePort, approvalStarter, jdbcTemplate, actionPermissions,
-                null, null, null);
+                null, null, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -119,7 +134,8 @@ public class RequirementService {
                               ObjectProvider<WbsEstimateService> estimateGate,
                               RequirementTagQuery tagQuery,
                               ObjectProvider<com.example.req.requirement.change.RequirementReleaseMembership>
-                                      releaseMembership) {
+                                      releaseMembership,
+                              com.example.req.project.ProjectService projectService) {
         this.repository = repository;
         this.domainRelRepository = domainRelRepository;
         this.stateMachine = stateMachine;
@@ -133,6 +149,16 @@ public class RequirementService {
         this.estimateGate = estimateGate;
         this.tagQuery = tagQuery;
         this.releaseMembership = releaseMembership;
+        this.projectService = projectService;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setPdrReview(PdrReviewService pdrReview) {
+        this.pdrReview = pdrReview;
+    }
+
+    private PdrReviewService pdrGate() {
+        return pdrReview;
     }
 
     // ---------------------------------------------------------------- create
@@ -154,6 +180,7 @@ public class RequirementService {
         } else {
             applyRule(RequirementRules.checkParentCombination(type, null));
         }
+        requireProjectWritable(cmd.projectId());
 
         RequirementEntity entity = new RequirementEntity();
         entity.setTenantId(scope.tenantId());
@@ -164,6 +191,7 @@ public class RequirementService {
         entity.setPriority(priority);
         entity.setStatus(stateMachine.initialStatus(type));
         entity.setParentId(parent == null ? null : parent.getId());
+        entity.setProjectId(cmd.projectId());
         entity.setDomainId(firstDomain(cmd.domainIds()));
         entity.setOriginOrgId(originOrgId(scope));
         entity.setReporterId(scope.userId());
@@ -209,6 +237,11 @@ public class RequirementService {
         //    不再在入口先抛 400「需求已关闭」——否则 AC-7 的错误码永远走不到。
         RequirementEntity entity = requireVisible(id);
         Long oldParentId = entity.getParentId();
+        // projectId 不在 RequirementEditability 的 11 字段矩阵里（V17 新列、无变更单语义）：
+        // 只作为「挂项目」的独立补丁，不改变既有 409 判定顺序。
+        Long projectToAttach = req.projectId != null
+                && !Objects.equals(req.projectId, entity.getProjectId())
+                ? req.projectId : null;
         // 真正的 before 必须在 applyXxx 之前取：applyDaysChange 会直接写 entity.estimateDays，
         // 放在后面取快照会把「新值」当成旧值，FIELD_CHANGE 就永远不产生。
         Map<String, Object> before = auditSnapshot(entity,
@@ -221,7 +254,7 @@ public class RequirementService {
                 guardBefore, RequirementEditGuard.patch(req, currentDomains));
 
         if (changed.isEmpty()) {
-            if (!RequirementEditGuard.carriesActualDays(req)) {
+            if (!RequirementEditGuard.carriesActualDays(req) && projectToAttach == null) {
                 // 全部同值：200 / 零写库 / 零审计。「保存」按钮重复提交不该刷新 updatedAt。
                 return toView(entity, null);
             }
@@ -253,6 +286,11 @@ public class RequirementService {
         // F2：releaseId 以前在 PUT 里被静默忽略。早期态允许直接改，但必须真正移动关联行，
         // 否则 requirement.release_id 变了、release_requirement 没变，版本侧看不到它。
         applyReleaseChange(entity, req.extra(), scope.userId());
+
+        if (projectToAttach != null) {
+            requireProjectWritable(projectToAttach);
+            entity.setProjectId(projectToAttach);
+        }
 
         entity.setUpdatedBy(scope.userId());
         repository.save(entity);
@@ -422,13 +460,13 @@ public class RequirementService {
                 RequirementEditability.rules(entity.getType(), entity.getStatus());
         List<Long> domainIds = domainsOf(id);
         return new Detail(toView(entity, rollup), childViews,
-                gateFiltered(entity,
-                        allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId())),
+                pdrFiltered(entity, gateFiltered(entity,
+                        allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId()))),
                 changePermissions(entity),
                 project(rules, RequirementEditability.Decision.EDIT),
                 project(rules, RequirementEditability.Decision.CHANGE_REQUIRED),
                 project(rules, RequirementEditability.Decision.LOCKED),
-                domainIds, entity.getSonarProjectKey(), estimateOf(entity));
+                domainIds, entity.getSonarProjectKey(), estimateOf(entity), pdrDetailOf(entity));
     }
 
     /** 详情三数组的唯一投影点：过滤后只留 {@code field + reasonCode}，顺序天然是 contract 的 FIELDS 序。 */
@@ -454,6 +492,141 @@ public class RequirementService {
 
     private WbsEstimateService estimateGate() {
         return estimateGate == null ? null : estimateGate.getIfAvailable();
+    }
+
+    // ------------------------------------------------------------ PDR 评审门（r41）
+
+    /**
+     * 顺序门（设计 §3.2）：PDR 自己必须已有通过结论；RD 只在父 PDR 已经进入过评审时才要求通过。
+     *
+     * <p>父 PDR 用「宽松门」：从没发起过评审的存量 PDR 下挂着 RD，不该在 r41 上线当天被追溯卡死；
+     * 但一旦父 PDR 开始评审，就必须以通过结论为准。返回空 = 放行。</p>
+     */
+    private Optional<PdrReviewService.Gate> pdrGateFor(RequirementEntity entity) {
+        PdrReviewService pdr = pdrGate();
+        if (pdr == null || entity == null) {
+            return Optional.empty();
+        }
+        if (RequirementRules.TYPE_PDR.equals(entity.getType())) {
+            return pdr.gate(entity.getId());
+        }
+        if (entity.getParentId() == null) {
+            return Optional.empty();
+        }
+        RequirementEntity parent = requireVisible(entity.getParentId());
+        if (!RequirementRules.TYPE_PDR.equals(parent.getType())) {
+            return Optional.empty();
+        }
+        return pdr.gateIfStarted(parent.getId());
+    }
+
+    /** 被评审门拦住就抛 409 PDR_REVIEW_REQUIRED（detail 带 reviewId 与 required）。 */
+    private void requirePdrPassed(RequirementEntity entity) {
+        pdrGateFor(entity).ifPresent(gate -> {
+            throw RequirementErrors.pdrReviewRequired(entity.getId(), gate.reviewId(), gate.status());
+        });
+    }
+
+    /** 列表/详情下发的动作里剔除被评审门拦住的那些（当前只有 {@code schedule}）。 */
+    private List<String> pdrFiltered(RequirementEntity entity, List<String> actions) {
+        if (actions == null || actions.isEmpty() || !actions.contains("schedule")) {
+            return actions;
+        }
+        return pdrGateFor(entity).isPresent() ? withoutSchedule(actions) : actions;
+    }
+
+    private static List<String> withoutSchedule(List<String> actions) {
+        if (!actions.contains("schedule")) {
+            return actions;
+        }
+        List<String> next = new ArrayList<>(actions.size());
+        for (String action : actions) {
+            if (!"schedule".equals(action)) {
+                next.add(action);
+            }
+        }
+        return next;
+    }
+
+    /** 详情里的评审块：没有评审单时也返回一个完整对象（review 为 null），前端不必判空。 */
+    private PdrViews.ReviewDetail pdrDetailOf(RequirementEntity entity) {
+        PdrReviewService pdr = pdrGate();
+        return pdr == null ? null : pdr.detailForRequirement(entity.getId());
+    }
+
+    /**
+     * 换厂商窗口（R3）：RD 只在 TODO（尚未开工）可换；PDR 在 PENDING_ANALYSIS/SCHEDULED 可换。
+     * 其它类型沿用「终态以外都可换」的旧行为，避免 r41 顺手改掉别人的语义。
+     */
+    private static boolean vendorChangeWindowOpen(RequirementEntity entity) {
+        String status = entity.getStatus();
+        if (RequirementRules.TYPE_RD.equals(entity.getType())) {
+            return "TODO".equals(status);
+        }
+        if (RequirementRules.TYPE_PDR.equals(entity.getType())) {
+            return "PENDING_ANALYSIS".equals(status) || "SCHEDULED".equals(status);
+        }
+        return true;
+    }
+
+    /**
+     * R3 第二半：PDR 的换厂商窗口还要看它的子 RD——任一子 RD 离开 {@code TODO} 就 409。
+     *
+     * <p>为什么非查子行不可：{@link #vendorChangeWindowOpen} 只读需求自己的状态，而 PDR 的
+     * {@code SCHEDULED} 恰好是允许换厂商的窗口；于是「RD 已经在开发中、PDR 还停在 SCHEDULED」
+     * 这条最常见的真实路径会静默把厂商换掉——旧厂商已经写下去的代码白写，新厂商接手的是一段
+     * 不属于它的进度。子 RD 才是承诺本身：它一开工，换厂商就不再是改一个字段。</p>
+     *
+     * <p>detail 必须点名挡路的是哪一条（{@code blockingChildId} + {@code status}）：只说
+     * 「已锁定」的话，产品经理在 20 条子需求里找不到该先协调谁。</p>
+     */
+    private void requireNoStartedChild(RequirementEntity entity) {
+        if (!RequirementRules.TYPE_PDR.equals(entity.getType())) {
+            return;
+        }
+        List<Map<String, Object>> started = jdbcTemplate.queryForList("""
+                SELECT id, status FROM requirement
+                 WHERE tenant_id = ? AND parent_id = ? AND type = ? AND status <> 'TODO'
+                 ORDER BY id
+                """, TenantContext.require().tenantId(), entity.getId(), RequirementRules.TYPE_RD);
+        if (started.isEmpty()) {
+            return;
+        }
+        Map<String, Object> blocking = started.get(0);
+        throw RequirementErrors.vendorLockedByChild(entity.getId(),
+                String.valueOf(blocking.get("status")), Rows.toLong(blocking.get("id"), 0L));
+    }
+
+    /** 换厂商通知：厂商侧没有「厂商负责人」字段，最小改动就是给该厂商的账号各发一遍。 */
+    private void notifyVendorChanged(RequirementEntity entity, Long fromVendor, Long toVendor,
+                                     String reason) {
+        notifyVendor(entity, fromVendor, "需求已改派其他厂商",
+                "需求 " + entity.getCode() + " 已从贵司改派：" + reason);
+        notifyVendor(entity, toVendor, "需求已改派贵司",
+                "需求 " + entity.getCode() + " 已改派贵司：" + reason);
+    }
+
+    private void notifyVendor(RequirementEntity entity, Long vendorId, String title, String content) {
+        if (vendorId == null || vendorId <= 0) {
+            return;
+        }
+        List<Long> users = jdbcTemplate.queryForList(
+                "SELECT id FROM sys_user WHERE tenant_id = ? AND vendor_id = ? ORDER BY id LIMIT 20",
+                Long.class, TenantContext.require().tenantId(), vendorId);
+        for (Long userId : users) {
+            notificationWriter.send(userId, "VENDOR_CHANGED", title, content, BIZ_TYPE, entity.getId());
+        }
+    }
+
+    /** 厂商名（r41 评估卡展示）：查不到返回 null，前端回退显示 id 或「内部」。 */
+    String vendorNameOf(Long vendorId) {
+        if (vendorId == null || vendorId <= 0) {
+            return null;
+        }
+        List<String> names = jdbcTemplate.queryForList(
+                "SELECT name FROM sys_vendor WHERE tenant_id = ? AND id = ?",
+                String.class, TenantContext.require().tenantId(), vendorId);
+        return names.isEmpty() ? null : names.get(0);
     }
 
     public List<String> allowedActions(long id) {
@@ -540,6 +713,10 @@ public class RequirementService {
                     throw RequirementErrors.gateBlocked(result);
                 }
             }
+        }
+        // r41 顺序门：PDR 未过评审不能排期（与 assign-vendor/提交评估同一条门，§3.2）。
+        if (entity != null && "schedule".equals(action)) {
+            requirePdrPassed(entity);
         }
         // r26 工时评估门：唯一插点。位置固定——403（requireWritable/authorize）→ 409
         // ILLEGAL_TRANSITION（stateMachine.target）→ r23 既有门 → 本门；被拦时不落库、不写
@@ -686,6 +863,17 @@ public class RequirementService {
             throw RequirementErrors.validation("vendorId 必填");
         }
         RequirementEntity entity = requireWritable(id);
+        // r41 顺序门（§3.2）：PDR 未过评审不能指派厂商；换厂商另有窗口限制（R3）。
+        requirePdrPassed(entity);
+        Long previousVendorId = entity.getAssigneeVendorId();
+        boolean changed = previousVendorId != null && !previousVendorId.equals(req.vendorId());
+        if (changed && !vendorChangeWindowOpen(entity)) {
+            throw RequirementErrors.vendorLocked(entity.getId(), entity.getStatus());
+        }
+        if (changed) {
+            // R3：PDR 自己停在可换窗口 ≠ 可以换——子 RD 已经开工的，先撞这条（门禁 B4-2）。
+            requireNoStartedChild(entity);
+        }
         // 用可空 Map（不是 Map.of + 0L 占位）：0 会被事件层当成真实旧值，"0 -> 新厂商" 会凭空
         // 产生一条 owner_vendor_id 变更事件。
         Map<String, Object> before = new LinkedHashMap<>();
@@ -709,6 +897,20 @@ public class RequirementService {
         if (entity.getOwnerUserId() != null) {
             notificationWriter.send(entity.getOwnerUserId(), "VENDOR_TRANSFER", "需求转派",
                     "需求 " + entity.getCode() + " 已转派：" + req.reason(), BIZ_TYPE, entity.getId());
+        }
+        if (changed) {
+            // R3：换厂商的专属审计 + 通知新旧厂商 + 原 APPROVED 评估单派生 STALE。
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("requirementId", entity.getId());
+            detail.put("fromVendorId", previousVendorId);
+            detail.put("toVendorId", req.vendorId());
+            detail.put("reason", req.reason());
+            auditService.record("VENDOR_CHANGED", BIZ_TYPE, entity.getId(), detail);
+            notifyVendorChanged(entity, previousVendorId, req.vendorId(), req.reason());
+            WbsEstimateService gate = estimateGate();
+            if (gate != null) {
+                gate.markStaleByVendor(entity, previousVendorId, req.vendorId());
+            }
         }
         return toView(entity, null);
     }
@@ -868,6 +1070,34 @@ public class RequirementService {
         return entity;
     }
 
+    /**
+     * 项目组可写校验（V17 {@code requirement.project_id}）：项目必须存在、同租户且调用者可见
+     * （{@link com.example.req.project.ProjectService#get} 已按租户 + 域收口 → 404
+     * {@code PROJECT_NOT_FOUND}），调用者还要有「组织 PDR」权限。
+     *
+     * <p>本轮没有独立的「项目写」动作码；项目组存在的唯一用途就是选 PDR 评审人，因此复用
+     * {@code req.action.pdr_review_start}（页面 {@code pdr.review}）作为最小可行判据。
+     * 十参单测构造未注入 ProjectService 时跳过（那些测试不传 projectId，行为与 r40 一致）。</p>
+     */
+    private void requireProjectWritable(Long projectId) {
+        if (projectId == null) {
+            return;
+        }
+        if (projectId <= 0) {
+            throw RequirementErrors.validation("projectId 必须是正整数");
+        }
+        if (projectService == null) {
+            return;
+        }
+        projectService.get(projectId);
+        if (actionPermissions != null
+                && actionPermissions.decide("pdr.review", PdrReviewService.startAction())
+                        == com.example.platform.contract.PermissionMatrix.Access.DENY) {
+            throw new ApiException(403, RequirementErrors.FORBIDDEN,
+                    "无权把需求挂到该项目（需要 PDR 发起权限）", Map.of("projectId", projectId));
+        }
+    }
+
     private boolean vendorVisible(RequirementEntity entity, DataScope scope) {
         Long vendor = entity.getAssigneeVendorId() != null
                 ? entity.getAssigneeVendorId() : entity.getOwnerVendorId();
@@ -994,7 +1224,8 @@ public class RequirementService {
     }
 
     /** 池/导出批量判定的行快照（r27）：动作判定只读这五个字段。 */
-    record ActionRow(long id, String type, String status, Long reporterId, BigDecimal estimateDays) {
+    record ActionRow(long id, String type, String status, Long reporterId, BigDecimal estimateDays,
+                     Long assigneeVendorId) {
     }
 
     /**
@@ -1010,14 +1241,26 @@ public class RequirementService {
         }
         List<WbsEstimateService.GateSubject> subjects = new ArrayList<>(rows.size());
         for (ActionRow row : rows) {
-            subjects.add(new WbsEstimateService.GateSubject(row.id(), row.type(), row.estimateDays()));
+            subjects.add(new WbsEstimateService.GateSubject(row.id(), row.type(), row.estimateDays(),
+                    row.assigneeVendorId()));
         }
         WbsEstimateService gate = estimateGate();
         Map<Long, String> estimateStatuses = gate == null ? Map.of() : gate.statusesOf(subjects);
+        // r41：PDR 行未过评审时不下发 schedule，否则列表给了按钮、点下去 409。
+        PdrReviewService pdr = pdrGate();
+        List<Long> pdrIds = pdr == null ? List.of() : rows.stream()
+                .filter(row -> RequirementRules.TYPE_PDR.equals(row.type()))
+                .map(ActionRow::id).toList();
+        Map<Long, PdrReviewService.Gate> pdrGates =
+                pdrIds.isEmpty() ? Map.of() : pdr.gatesOf(pdrIds, true);
         Map<Long, List<String>> result = new LinkedHashMap<>();
         for (ActionRow row : rows) {
             List<String> actions = allowedActions(row.type(), row.status(), row.reporterId());
-            result.put(row.id(), gateFiltered(row.type(), estimateStatuses.get(row.id()), actions));
+            actions = gateFiltered(row.type(), estimateStatuses.get(row.id()), actions);
+            if (pdrGates.containsKey(row.id())) {
+                actions = withoutSchedule(actions);
+            }
+            result.put(row.id(), actions);
         }
         return result;
     }
@@ -1093,6 +1336,7 @@ public class RequirementService {
                 gateFiltered(entity,
                         allowedActions(entity.getType(), entity.getStatus(), entity.getReporterId())),
                 changePermissions(entity),
+                entity.getProjectId(),
                 RequirementViews.DecomposeGate.from(
                         RequirementRules.decomposeGate(entity.getType(), entity.getStatus()),
                         entity.getStatus()),

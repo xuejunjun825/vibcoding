@@ -344,7 +344,8 @@ public class AnalyticsQueryService {
         Map<String, Object> params = windowParams(resolved);
         sql.append(' ').append(AnalyticsSql.base(dataset))
                 .append(AnalyticsSql.windowClause(dataset))
-                .append(filterClause(dataset, def.filters(), params));
+                .append(filterClause(dataset, def.filters(), params))
+                .append(requestNarrowing(resolved, params));
 
         Map<String, Mail[]> cells = new LinkedHashMap<>();
         Map<String, Mail[]> rowAggs = new LinkedHashMap<>();
@@ -420,7 +421,7 @@ public class AnalyticsQueryService {
         for (String colKey : orderedCols) {
             String shownCol = colDisplays.getOrDefault(colKey, colKey);
             for (int i = 0; i < measureCount; i++) {
-                String label = AnalyticsMetrics.spec(measures.get(i)).label();
+                String label = measureLabel(dataset, measures.get(i));
                 colHeaders.add(def.cols().isEmpty() ? label : shownCol + " · " + label);
                 // 无列维时 colCodes 为空数组（PRD AC-3 特例）；有列维时与 colHeaders 同长同序
                 colCodes.add(def.cols().isEmpty() ? null : colKey);
@@ -507,11 +508,17 @@ public class AnalyticsQueryService {
         sql.append(' ').append(AnalyticsSql.base(dataset))
                 .append(AnalyticsSql.windowClause(dataset))
                 .append(filterClause(dataset, def.filters(), params))
+                .append(requestNarrowing(resolved, params))
                 .append(") g");
         return jdbc.count(sql.toString(), params);
     }
 
     private Double value(String measureKey, Mail mail) {
+        if (!AnalyticsMetrics.keys().contains(measureKey)) {
+            // r41：数据集自带的计数型度量（reviewCount / opinionCount）不进全局指标表，
+            // 每行贡献 1，聚合值就是分子之和；口径与 PdrStatsService 的 reviewCount/opinionCount 一致。
+            return mail.num;
+        }
         return AnalyticsMetrics.compute(measureKey, mail.num, mail.den,
                 mail.samples.isEmpty() ? null : mail.samples).value();
     }
@@ -646,6 +653,30 @@ public class AnalyticsQueryService {
         }
     }
 
+    /**
+     * 请求级芯片（{@code domainId} / {@code vendorId}）→ SQL 谓词。
+     *
+     * <p>r41：这两个值此前只进 {@link AnalyticsRequest#cacheKey}，没进 WHERE——报表页选「本域」
+     * 只换了缓存键，数字仍是全租户口径（pdr-flow C3-2 要求「交叉表与 stats 同口径」时直接暴露）。
+     * 每个 dataset 的 base 都 JOIN 出 requirement 别名 {@code r}，所以统一落在
+     * {@code r.domain_id} / {@code r.assignee_vendor_id}，与定义里同名特殊筛选用的是同一列。</p>
+     */
+    private static String requestNarrowing(AnalyticsRequest req, Map<String, Object> params) {
+        if (req == null) {
+            return "";
+        }
+        StringBuilder sql = new StringBuilder();
+        if (req.domainId() != null) {
+            params.put("reqDomain", req.domainId());
+            sql.append(" AND r.domain_id = :reqDomain");
+        }
+        if (req.vendorId() != null) {
+            params.put("reqVendor", req.vendorId());
+            sql.append(" AND r.assignee_vendor_id = :reqVendor");
+        }
+        return sql.toString();
+    }
+
     private static Map<String, Object> windowParams(AnalyticsRequest req) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("fromTs", req.from().atStartOfDay());
@@ -658,6 +689,17 @@ public class AnalyticsQueryService {
         String tenant = scope == null ? "-" : String.valueOf(scope.tenantId());
         long userId = scope == null ? 0L : scope.userId();
         return "report:" + reportId + '|' + req.cacheKey(tenant, userId);
+    }
+
+    /**
+     * 列头文案：全局指标表里有的走 {@link AnalyticsMetrics}，数据集自带的度量（r41 的
+     * reviewCount / opinionCount）走数据集字段标签。后者不进指标表，避免被
+     * {@code /analytics/metrics} 当成可计算指标去取数。
+     */
+    private static String measureLabel(String dataset, String measure) {
+        return AnalyticsMetrics.keys().contains(measure)
+                ? AnalyticsMetrics.spec(measure).label()
+                : AnalyticsDatasets.field(dataset, measure).label();
     }
 
     private static String signature(AnalyticsViews.ReportDefinition def) {

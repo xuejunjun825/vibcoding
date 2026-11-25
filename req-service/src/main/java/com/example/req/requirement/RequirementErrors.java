@@ -32,6 +32,10 @@ public final class RequirementErrors {
     /** 工时评估前置门（r26）。 */
     public static final String ESTIMATE_NOT_APPROVED = "ESTIMATE_NOT_APPROVED";
     public static final String ESTIMATE_ALREADY_APPROVED = "ESTIMATE_ALREADY_APPROVED";
+    /** PDR 评审前置门与厂商绑定（r41）：见设计 §3.2/§6 R1/R3/R4。 */
+    public static final String PDR_REVIEW_REQUIRED = "PDR_REVIEW_REQUIRED";
+    public static final String VENDOR_NOT_ASSIGNED = "VENDOR_NOT_ASSIGNED";
+    public static final String VENDOR_LOCKED = "VENDOR_LOCKED";
     /** 需求变更单（r40）：字段白名单/收口/审批/应用五类错误码。 */
     public static final String CHANGE_FIELD_NOT_ALLOWED = "CHANGE_FIELD_NOT_ALLOWED";
     public static final String CHANGE_REQUIRED = "CHANGE_REQUIRED";
@@ -132,6 +136,54 @@ public final class RequirementErrors {
 
     public static ApiException forbidden(String message) {
         return new ApiException(403, FORBIDDEN, message, Map.of());
+    }
+
+    // ------------------------------------------------------------ PDR 评审门与厂商绑定（r41）
+
+    /**
+     * 顺序门：PDR 未过评审就指派厂商 / 提交评估 / 排期（设计 §3.2、§6 R1）。
+     *
+     * <p>detail 恰好两键：{@code reviewId}（在评或最近一张单的 id，从未评审时缺省）与
+     * {@code required}（固定 {@code pdr_review}）。前端据此把「去发起评审」按钮点亮。</p>
+     */
+    public static ApiException pdrReviewRequired(long requirementId, Long reviewId, String status) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("requirementId", requirementId);
+        detail.put("reviewId", reviewId);
+        detail.put("status", status == null ? "NONE" : status);
+        detail.put("required", "pdr_review");
+        return new ApiException(409, PDR_REVIEW_REQUIRED,
+                "PDR 必须先通过评审才能指派厂商 / 提交评估 / 排期", detail);
+    }
+
+    /** 未指派承接厂商就提交评估（设计 §3.2、§6 R4）。 */
+    public static ApiException vendorNotAssigned(long requirementId) {
+        return new ApiException(409, VENDOR_NOT_ASSIGNED,
+                "提交工时评估前必须先指派承接厂商",
+                Map.of("requirementId", requirementId, "required", "assign_vendor"));
+    }
+
+    /** 需求已进入 IN_DEV，承接厂商锁定（设计 §3.2、§6 R3、验收 A4）。 */
+    public static ApiException vendorLocked(long requirementId, String status) {
+        return new ApiException(409, VENDOR_LOCKED,
+                "需求已进入开发，承接厂商不可再更换",
+                Map.of("requirementId", requirementId, "status", status));
+    }
+
+    /**
+     * 换厂商被子需求挡住（R3 第二半）：PDR 自己还在可换窗口，但它的子 RD 已经开工。
+     *
+     * <p>detail 点名 {@code blockingChildId}：不点名的话调用方只知道「不能换」，不知道先去协调
+     * 哪一条子需求（门禁 B4-2 断 409 + VENDOR_LOCKED，前端据此高亮那条 RD）。</p>
+     */
+    public static ApiException vendorLockedByChild(long requirementId, String status,
+                                                   long blockingChildId) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("requirementId", requirementId);
+        detail.put("status", status);
+        detail.put("blockingChildId", blockingChildId);
+        return new ApiException(409, VENDOR_LOCKED,
+                "子需求已进入开发，承接厂商不可再更换", detail);
     }
 
     /** 提报时选了调用者无权使用的业务域（403 OUT_OF_SCOPE，detail 带 field 与越权 id）。 */
