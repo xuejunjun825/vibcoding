@@ -46,6 +46,11 @@ public class RequirementPoolQuery {
     private final RequirementService requirementService;
     /** 标签批量读路径（r39）：整页一次 join，避免列表 N+1。 */
     private final RequirementTagQuery tagQuery;
+    /**
+     * 跟单热度（r47）：整页一次分组查询。setter 注入而不是构造器参数——本类的四参构造被既有单测
+     * 直接 new，抬参数会一次改掉一批测试；未注入时列表热度退化为 0/false。
+     */
+    private RequirementFollowQuery followQuery;
 
     public RequirementPoolQuery(ScopedJdbc jdbc, RequirementStateMachine stateMachine,
                                 RequirementService requirementService,
@@ -54,6 +59,11 @@ public class RequirementPoolQuery {
         this.stateMachine = stateMachine;
         this.requirementService = requirementService;
         this.tagQuery = tagQuery;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setFollowQuery(RequirementFollowQuery followQuery) {
+        this.followQuery = followQuery;
     }
 
     public Page<View> page(PoolFilter filter) {
@@ -76,11 +86,13 @@ public class RequirementPoolQuery {
         Map<Long, Rollup> rollups = filter.aggregate() ? rollups(rows) : Map.of();
         Map<Long, List<String>> actions = actionsByRow(rows);
         Map<Long, List<RequirementViews.TagView>> tags = tagsByRow(rows);
+        Map<Long, RequirementFollowQuery.Stats> follows = followsByRow(rows);
         List<View> items = new ArrayList<>(rows.size());
         for (Map<String, Object> row : rows) {
             Long id = Rows.toLong(Rows.object(row, "id"));
             items.add(toView(row, rollups.get(id), actions.getOrDefault(id, List.of()),
-                    tags.getOrDefault(id, List.of())));
+                    tags.getOrDefault(id, List.of()),
+                    follows.getOrDefault(id, RequirementFollowQuery.Stats.EMPTY)));
         }
         return new Page<>(items, total, filter.page(), filter.size());
     }
@@ -127,11 +139,13 @@ public class RequirementPoolQuery {
                 params);
         Map<Long, List<String>> actions = actionsByRow(rows);
         Map<Long, List<RequirementViews.TagView>> tags = tagsByRow(rows);
+        Map<Long, RequirementFollowQuery.Stats> follows = followsByRow(rows);
         List<View> items = new ArrayList<>(rows.size());
         for (Map<String, Object> row : rows) {
             Long id = Rows.toLong(Rows.object(row, "id"));
             items.add(toView(row, null, actions.getOrDefault(id, List.of()),
-                    tags.getOrDefault(id, List.of())));
+                    tags.getOrDefault(id, List.of()),
+                    follows.getOrDefault(id, RequirementFollowQuery.Stats.EMPTY)));
         }
         return items;
     }
@@ -245,8 +259,23 @@ public class RequirementPoolQuery {
         return tagQuery.byRequirementIds(ids);
     }
 
+    /** 整页跟单热度一次分组查询（r47）：与详情共用 {@link RequirementFollowQuery#stats(List)}。 */
+    private Map<Long, RequirementFollowQuery.Stats> followsByRow(List<Map<String, Object>> rows) {
+        if (followQuery == null || rows == null || rows.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Long id = Rows.toLong(Rows.object(row, "id"));
+            if (id != null) {
+                ids.add(id);
+            }
+        }
+        return followQuery.stats(ids);
+    }
+
     View toView(Map<String, Object> row, Rollup rollup, List<String> allowedActions,
-                List<RequirementViews.TagView> tags) {
+                List<RequirementViews.TagView> tags, RequirementFollowQuery.Stats follow) {
         Long id = Rows.toLong(Rows.object(row, "id"));
         String type = Rows.str(row, "type");
         String status = Rows.str(row, "status");
@@ -268,6 +297,9 @@ public class RequirementPoolQuery {
                 Rows.toDateTime(Rows.object(row, "closed_at")),
                 Rows.toDateTime(Rows.object(row, "updated_at")),
                 rollup, allowedActions, Map.of(),
-                Rows.toLong(Rows.object(row, "project_id")), null, tags);
+                Rows.toLong(Rows.object(row, "project_id")), null,
+                follow.followCount(), follow.followedByMe(),
+                Rows.str(row, "close_reason"), Rows.toLong(Rows.object(row, "merged_into_id")),
+                tags);
     }
 }

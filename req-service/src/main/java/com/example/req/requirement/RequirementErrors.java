@@ -47,6 +47,11 @@ public final class RequirementErrors {
      * 但语义是「不可能改」而非「走变更单」——前端据此不给「发起变更」入口。
      */
     public static final String FIELD_LOCKED = "FIELD_LOCKED";
+    /** 需求池运营（r47）：跟单撞终态 / 重复合并的四类稳定错误码。 */
+    public static final String REQUIREMENT_CLOSED = "REQUIREMENT_CLOSED";
+    public static final String ALREADY_MERGED = "ALREADY_MERGED";
+    public static final String TARGET_MERGED = "TARGET_MERGED";
+    public static final String MERGE_CYCLE = "MERGE_CYCLE";
 
     private RequirementErrors() {
     }
@@ -279,5 +284,39 @@ public final class RequirementErrors {
                 Map.of("field", field == null ? "" : field,
                         "expected", expected == null ? "" : expected,
                         "actual", actual == null ? "" : actual));
+    }
+
+    // ------------------------------------------------------------ r47 需求池运营
+
+    /** 终态需求不可再跟单 / 不可作为合并源：409（契约 §3.2/§3.3）。 */
+    public static ApiException requirementClosed(long id, String status) {
+        return new ApiException(409, REQUIREMENT_CLOSED, "需求已关闭，不能再操作",
+                Map.of("id", id, "status", status == null ? "" : status));
+    }
+
+    /** 合并源已经被合并过：409，带上已指向的目标，前端据此提示「已合入 X」。 */
+    public static ApiException alreadyMerged(long sourceId, Long targetId) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("id", sourceId);
+        if (targetId != null) {
+            detail.put("mergedIntoId", targetId);
+        }
+        return new ApiException(409, ALREADY_MERGED, "该需求已被合并，不能重复合并", detail);
+    }
+
+    /** 合并目标自身已被合并：400（目标不可承接，调用方需要换目标）。 */
+    public static ApiException targetMerged(long targetId, Long mergedIntoId) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("targetId", targetId);
+        if (mergedIntoId != null) {
+            detail.put("mergedIntoId", mergedIntoId);
+        }
+        return new ApiException(400, TARGET_MERGED, "目标需求已被合并，不能再作为合并目标", detail);
+    }
+
+    /** 目标与源互为祖先/后代（或就是自身）：400，合并会形成父子环。 */
+    public static ApiException mergeCycle(long sourceId, long targetId) {
+        return new ApiException(400, MERGE_CYCLE, "目标需求与当前需求存在父子关系，不能合并",
+                Map.of("id", sourceId, "targetId", targetId));
     }
 }

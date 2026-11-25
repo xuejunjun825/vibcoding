@@ -159,7 +159,7 @@ for (const [ctor, high] of [['action', false], ['highRisk', true]]) {
     })
   }
 }
-eq('解析 ActionRegistry 动作数 = 81', 81, actions.length, '注册表必须恰好 81 个动作（TECHNICAL §10.1）')
+eq('解析 ActionRegistry 动作数 = 83', 83, actions.length, '注册表必须恰好 81 个动作（TECHNICAL §10.1）')
 
 const highRiskSrc = new Set(strings((actionSrc.match(/HIGH_RISK\s*=\s*Set\.of\(([\s\S]*?)\)/) || [])[1] || ''))
 const highRiskDeclared = new Set(actions.filter((a) => a.highRisk).map((a) => a.code))
@@ -197,7 +197,7 @@ const dbMenus = dbQuery('SELECT code, module, name, route_name, function_codes F
 const dbActions = dbQuery('SELECT code, menu_code, high_risk FROM sys_action ORDER BY code')
 
 eq('sys_menu 行数 = 38', 38, dbMenus.length, 'RbacSeeder.seedRegistries 未落库')
-eq('sys_action 行数 = 81', 81, dbActions.length, 'RbacSeeder.seedRegistries 未落库')
+eq('sys_action 行数 = 83', 83, dbActions.length, 'RbacSeeder.seedRegistries 未落库')
 
 const pageCodes = new Set(pages.map((p) => p.code))
 const dbPageCodes = new Set(dbMenus.map((r) => r[0]))
@@ -206,7 +206,7 @@ setEq('库 sys_menu = MenuRegistry（页面码集合）', pageCodes, dbPageCodes
 setEq('nav.ts 的 pageCode = MenuRegistry（排除 notifications）', pageCodes, navCodes,
   '导航漏 pageCode 会让页面永远不可见；多出的码是幽灵菜单（AC-2）')
 eq('导航 /notifications 不参与授权（pageCode 为空）', true, notificationsHasNoPage,
-  '通知是登录可读页，注册进 sys_menu 会污染 1980 行计数')
+  '通知是登录可读页，注册进 sys_menu 会污染 2002 行计数')
 eq('导航含新增「角色与权限」入口', true, navCodes.has('admin.roles'),
   'T5a：nav.ts 需新增 /admin/roles（pageCode: admin.roles）')
 

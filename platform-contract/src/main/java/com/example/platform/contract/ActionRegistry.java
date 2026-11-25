@@ -91,6 +91,20 @@ public final class ActionRegistry {
             // 「应用」给能交付或能拆需求的人（研发/产品经理都可应用，域负责人不应用）。
             action("req.action.change_request", "req.pool", "发起变更", "req:split"),
             action("req.action.change_apply", "req.pool", "应用变更", "req:deliver", "req:split"),
+            // r47 需求池运营：跟单与重复合并。两者都不进状态迁移矩阵（RequirementActionMatrix），
+            // 是关系/内容写入，与 req.action.merge（RD 测试通过后进入 MERGED 的状态动作）正交——
+            // 这也是为什么重复合并必须另起一个码：`req.action.merge` 已被 r17 的状态矩阵与
+            // MR 确认合并路由占用，改它的 functionCodes 会同时改掉研发的 RD 合并能力。
+            //
+            // follow 借用 notification:read 作为「参与类」功能码：契约 §3.2 要求「任何能看见该需求的
+            // 账号都能跟单」，而 11 个角色在矩阵里全部持有 notification:read 的 ALLOW；不新造功能码
+            // （契约 §4 明确功能码表 61 不变）。留空 functionCodes 虽然也能全放行，但会被
+            // RbacRegistryTest 的「每个动作必须指明授权功能码」冻结核对挡住——那是既有断言，不放宽。
+            action("req.action.follow", "req.pool", "我也需要", "notification:read"),
+            // 「合并重复需求」的准入 = PLATFORM_ADMIN / PMO / PRODUCT（契约 §3.3）。req:review 的
+            // ALLOW 集正好是这四个角色 + SUB_BUSINESS_LEADER，因此这里再对域负责人显式 DENY
+            // （RbacSeeder.ACTION_DENY_OVERRIDES），其余角色按 req:review 自然推导为 DENY。
+            action("req.action.merge_duplicate", "req.pool", "合并重复需求", "req:review"),
 
             // ---- PDR 评审 pdr.review（r41）----
             // 「发起」与「汇总结论」是评审的组织权，沿用 req:review（产品经理/域负责人/PMO 已持有，

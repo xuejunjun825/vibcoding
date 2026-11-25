@@ -119,6 +119,10 @@ change-verify: ## 需求变更单闭环门禁 S1–S6 共 40 条（迁移/申请
 pdr-verify: ## PDR 评审/厂商评估/附件/分类统计/多条意见转任务门禁 共 66 条（先 make platform-up && platform-seed && platform-demo-reset；--dry-run 免栈只打印断言清单）
 	@./scripts/pdr-flow-verify.sh
 
+# ---- r47 需求池运营（相似/跟单/合并）(20261125-r47) ----
+pool-ops-verify: ## 需求池运营门禁 P1–P4 共 33 条（相似检索/我也需要/合并重复/回归；先 make platform-up && platform-seed && platform-demo-reset；--dry-run 免栈只打印清单）
+	@./scripts/pool-ops-verify.sh
+
 # ---- r43 需求字段可编辑性 (20261124-r43) ----
 editability-verify: ## 需求字段可编辑性门禁 S1–S6 共 36 条（矩阵/三数组/PUT 两类 409/字段级变更记录/负向自检；先 make platform-up && platform-seed && platform-demo-reset；--static-only 免栈，--twice 连跑两次）
 	@./scripts/editability-verify.sh

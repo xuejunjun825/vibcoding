@@ -349,6 +349,8 @@ public class DemoResetService {
         counts.put("defects", db.count("SELECT COUNT(*) FROM defect WHERE tenant_id = ?", tenantId));
         counts.put("notifications", db.count(
                 "SELECT COUNT(*) FROM notification WHERE tenant_id = ?", tenantId));
+        counts.put("follows", db.count(
+                "SELECT COUNT(*) FROM requirement_follow WHERE tenant_id = ?", tenantId));
         // r15：漏删的四张表纳入计数（定义数据残留曾让 /reports、/portal、/admin 带着上次门禁的痕迹）。
         counts.put("reports", db.count(
                 "SELECT COUNT(*) FROM report_definition WHERE tenant_id = ?", tenantId));
@@ -564,6 +566,16 @@ public class DemoResetService {
             requirementIndex++;
         }
         log.info("demo-reset: 插入需求 {} 条", requirementIndex);
+
+        // 3b) 跟单（r47）：需求 id 落库之后才有得挂；INSERT IGNORE 让同一事务里重跑不重复。
+        int followIndex = 0;
+        for (Object[] row : DemoFixture.followRows(tenantId, requirementIds, refs)) {
+            db.update("INSERT IGNORE INTO requirement_follow"
+                    + " (tenant_id, requirement_id, user_id, org_id, note, created_at)"
+                    + " VALUES (?,?,?,?,?, NOW(3))", row);
+            followIndex++;
+        }
+        log.info("demo-reset: 插入跟单 {} 条", followIndex);
 
         // 4) 任务（甘特「任务」视图的数据来源，全部挂演示迭代）
         List<Long> taskIds = new ArrayList<>();
@@ -786,6 +798,7 @@ public class DemoResetService {
     private List<String> violations(long tenantId, Map<String, Long> counts) {
         List<String> violations = new ArrayList<>();
         expect(violations, "需求总数", counts.get("requirements"), DemoFixture.REQUIREMENT_COUNT);
+        expect(violations, "跟单数", counts.get("follows"), DemoFixture.FOLLOW_COUNT);
         expect(violations, "版本数", counts.get("releases"), DemoFixture.RELEASE_COUNT);
         expect(violations, "迭代数", counts.get("sprints"), DemoFixture.SPRINT_COUNT);
         expect(violations, "任务数", counts.get("tasks"), DemoFixture.TASK_COUNT);

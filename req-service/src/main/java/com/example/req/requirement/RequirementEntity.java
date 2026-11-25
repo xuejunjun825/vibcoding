@@ -41,6 +41,18 @@ public class RequirementEntity {
     @Column(name = "parent_id")
     private Long parentId;
 
+    /**
+     * 被合并进的目标需求（r47，V23）：NULL = 没被合并过。
+     *
+     * <p>非空即代表本需求已因「重复合并」关闭，不再参与相似检索与合并；列只在合并事务里写。</p>
+     */
+    @Column(name = "merged_into_id")
+    private Long mergedIntoId;
+
+    /** 关闭原因（r47，V23）：MERGED / REJECTED / DONE / NULL；状态仍是 CLOSED。 */
+    @Column(name = "close_reason", length = 32)
+    private String closeReason;
+
     /** 项目组（r41，V17）：NULL = 未挂项目，PDR 评审人回退「产品经理 + 域负责人」。 */
     @Column(name = "project_id")
     private Long projectId;
@@ -157,6 +169,10 @@ public class RequirementEntity {
     public void setType(String type) { this.type = type; }
     public Long getParentId() { return parentId; }
     public void setParentId(Long parentId) { this.parentId = parentId; }
+    public Long getMergedIntoId() { return mergedIntoId; }
+    public void setMergedIntoId(Long mergedIntoId) { this.mergedIntoId = mergedIntoId; }
+    public String getCloseReason() { return closeReason; }
+    public void setCloseReason(String closeReason) { this.closeReason = closeReason; }
     public Long getProjectId() { return projectId; }
     public void setProjectId(Long projectId) { this.projectId = projectId; }
     public Long getDomainId() { return domainId; }

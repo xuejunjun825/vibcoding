@@ -103,6 +103,8 @@ public class ReleaseService {
 
     /** r39：版本详情里的需求行同样带标签——与需求列表/详情同一个读路径，避免三处各说各话。 */
     private final RequirementTagQuery requirementTagQuery;
+    /** 版本详情里的需求也要带跟单热度（r47）：与列表/详情同一 RequirementFollowQuery。 */
+    private final com.example.req.requirement.RequirementFollowQuery requirementFollowQuery;
 
     /**
      * release 的 r30 新列（等级/必填项/驳回五列）不在 {@link ReleaseEntity} 里——
@@ -131,7 +133,8 @@ public class ReleaseService {
                           ApprovalHistoryRepository approvalHistories,
                           ApprovalTaskRepository approvalTasks,
                           EntityManager entityManager,
-                          RequirementTagQuery requirementTagQuery) {
+                          RequirementTagQuery requirementTagQuery,
+                          com.example.req.requirement.RequirementFollowQuery requirementFollowQuery) {
         this.releaseRepository = releaseRepository;
         this.releaseRequirementRepository = releaseRequirementRepository;
         this.milestoneRepository = milestoneRepository;
@@ -152,6 +155,7 @@ public class ReleaseService {
         this.approvalTasks = approvalTasks;
         this.entityManager = entityManager;
         this.requirementTagQuery = requirementTagQuery;
+        this.requirementFollowQuery = requirementFollowQuery;
     }
 
     // ------------------------------------------------------------------ create
@@ -579,17 +583,26 @@ public class ReleaseService {
                         com.example.req.requirement.Rows.object(row, "id")))
                 .filter(Objects::nonNull)
                 .toList());
+        Map<Long, com.example.req.requirement.RequirementFollowQuery.Stats> follows =
+                requirementFollowQuery.stats(rows.stream()
+                        .map(row -> com.example.req.requirement.Rows.toLong(
+                                com.example.req.requirement.Rows.object(row, "id")))
+                        .filter(Objects::nonNull)
+                        .toList());
         List<View> views = new ArrayList<>(rows.size());
         for (Map<String, Object> row : rows) {
             Long id = com.example.req.requirement.Rows.toLong(
                     com.example.req.requirement.Rows.object(row, "id"));
-            views.add(toRequirementView(row, release, tags.getOrDefault(id, List.of())));
+            views.add(toRequirementView(row, release, tags.getOrDefault(id, List.of()),
+                    follows.getOrDefault(id,
+                            com.example.req.requirement.RequirementFollowQuery.Stats.EMPTY)));
         }
         return views;
     }
 
     private View toRequirementView(Map<String, Object> row, ReleaseEntity release,
-                                   List<TagView> tags) {
+                                   List<TagView> tags,
+                                   com.example.req.requirement.RequirementFollowQuery.Stats follow) {
         Long parentId = com.example.req.requirement.Rows.toLong(
                 com.example.req.requirement.Rows.object(row, "parent_id"));
         String parentCode = parentId == null ? null : requirementRepository
@@ -627,7 +640,12 @@ public class ReleaseService {
                         com.example.req.requirement.Rows.object(row, "closed_at")),
                 com.example.req.requirement.Rows.toDateTime(
                         com.example.req.requirement.Rows.object(row, "updated_at")),
-                null, actions, Map.of(), null, null, tags);
+                null, actions, Map.of(), null, null,
+                follow.followCount(), follow.followedByMe(),
+                com.example.req.requirement.Rows.str(row, "close_reason"),
+                com.example.req.requirement.Rows.toLong(
+                        com.example.req.requirement.Rows.object(row, "merged_into_id")),
+                tags);
     }
 
     private List<ParentGroup> groups(List<View> requirements) {

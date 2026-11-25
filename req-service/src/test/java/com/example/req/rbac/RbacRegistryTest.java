@@ -34,10 +34,10 @@ class RbacRegistryTest {
     }
 
     @Test
-    void actionRegistryHasEightyOneUniqueActions() {
-        assertEquals(81, ActionRegistry.actions().size(),
-                "r41 appends 6 PDR-review/vendor actions to r40's 75");
-        assertEquals(81, new HashSet<>(ActionRegistry.codes()).size(), "action codes must be unique");
+    void actionRegistryHasEightyThreeUniqueActions() {
+        assertEquals(83, ActionRegistry.actions().size(),
+                "r47 appends follow/merge_duplicate to r41's 81");
+        assertEquals(83, new HashSet<>(ActionRegistry.codes()).size(), "action codes must be unique");
         assertEquals(ActionRegistry.codes(),
                 ActionRegistry.actions().stream().map(ActionRegistry.ActionDef::code).toList(),
                 "codes() must follow the registry order the admin table renders");

@@ -333,9 +333,17 @@ function openDetail(): void {
   if (selectedId.value) void router.push(requirementPath(selectedId.value))
 }
 
+function openMerged(row: RequirementRow): void {
+  if (row.mergedIntoId != null) void router.push(requirementPath(row.mergedIntoId))
+}
+
 async function openRowMore(command: string, row: RequirementRow): Promise<void> {
   if (command === 'open') {
     await router.push(requirementPath(row.id))
+    return
+  }
+  if (command === 'merged' && row.mergedIntoId != null) {
+    await router.push(requirementPath(row.mergedIntoId))
     return
   }
   try {
@@ -523,6 +531,14 @@ async function openRowMore(command: string, row: RequirementRow): Promise<void> 
                   <span class="req-card__code">{{ row.code }}</span>
                   <span class="req-card__type">{{ typeLabel(row.type) }}</span>
                   <StatusPill kind="requirement" :value="row.status" size="sm" />
+                  <!-- r47：closeReason=MERGED 的源需求标出主需求，点击直达（stop 防止同时选中本行） -->
+                  <span
+                    v-if="row.mergedIntoId != null"
+                    class="req-card__merged"
+                    :title="`打开主需求 #${row.mergedIntoId}`"
+                    @click.stop="openMerged(row)"
+                  >已并入 #{{ row.mergedIntoId }}</span>
+                  <span v-if="(row.followCount ?? 0) > 0" class="req-card__follow">{{ row.followCount }} 人需要</span>
                 </span>
                 <span class="req-card__title" :title="row.title">{{ row.title }}</span>
                 <span class="req-card__meta">
@@ -550,6 +566,7 @@ async function openRowMore(command: string, row: RequirementRow): Promise<void> 
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item command="open">打开详情</el-dropdown-item>
+                    <el-dropdown-item v-if="row.mergedIntoId != null" command="merged">查看主需求</el-dropdown-item>
                     <el-dropdown-item command="copy">复制编号与标题</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
@@ -599,6 +616,13 @@ async function openRowMore(command: string, row: RequirementRow): Promise<void> 
               <StatusPill kind="requirement" :value="selected.status" />
               <PriorityDot :value="selected.priority" />
               <span class="pool__preview-type">{{ typeLabel(selected.type) }}</span>
+              <button
+                v-if="selected.mergedIntoId != null"
+                type="button"
+                class="pool__merged"
+                :title="`打开主需求 #${selected.mergedIntoId}`"
+                @click="openMerged(selected)"
+              >已并入 #{{ selected.mergedIntoId }}</button>
             </div>
             <h2 class="pool__preview-title">{{ selected.title }}</h2>
             <p v-if="selected.description" class="pool__preview-desc">{{ selected.description }}</p>
@@ -626,6 +650,10 @@ async function openRowMore(command: string, row: RequirementRow): Promise<void> 
             <div>
               <dt>优先级</dt>
               <dd>{{ selected.priority }}</dd>
+            </div>
+            <div>
+              <dt>跟单</dt>
+              <dd>{{ selected.followCount ?? 0 }} 人需要{{ selected.followedByMe ? '（含我）' : '' }}</dd>
             </div>
             <div v-if="!summaryMode">
               <dt>期望交付</dt>
@@ -843,6 +871,33 @@ async function openRowMore(command: string, row: RequirementRow): Promise<void> 
   font-size: 12px;
   color: var(--text-muted-aa);
 }
+.req-card__merged {
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--color-info-bg);
+  color: var(--info-ink);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.req-card__merged:hover,
+.req-card__merged:focus-visible {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  outline: none;
+}
+.req-card__follow {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-muted-aa);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .req-card__title {
   font-size: 13px;
   font-weight: 500;
@@ -930,6 +985,21 @@ async function openRowMore(command: string, row: RequirementRow): Promise<void> 
 .pool__preview-type {
   font-size: 12px;
   color: var(--text-muted-aa);
+}
+.pool__merged {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--color-info-bg);
+  color: var(--info-ink);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pool__merged:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 .pool__preview-title {
   margin: 8px 0 0;

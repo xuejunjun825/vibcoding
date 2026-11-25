@@ -178,6 +178,86 @@ export interface RequirementRow {
   summary?: boolean
   updatedAt?: string
   createdAt?: string
+  /** r47 需求池运营：跟单人数（列表行与详情同源，旧后端缺省 0） */
+  followCount?: number
+  /** 当前用户是否已跟单 */
+  followedByMe?: boolean
+  /** 关闭原因：`MERGED` 表示「已并入主需求」 */
+  closeReason?: string | null
+  /** closeReason=MERGED 时的主需求 id（点击可跳转） */
+  mergedIntoId?: number | null
+}
+
+/* ---------------- r47 需求池运营（相似 / 跟单 / 合并） ---------------- */
+
+/** `GET /requirements/similar` 与 `GET /requirements/{id}/similar` 的单条命中 */
+export interface SimilarRequirementItem {
+  id: number
+  code: string
+  type: string
+  title: string
+  status: string
+  domainId?: number | null
+  reporterName?: string | null
+  orgName?: string | null
+  /** 相似度（0~1 或分制，后端唯一事实源；页面仅展示，不再二次打分） */
+  score: number
+  followCount: number
+}
+
+export interface SimilarRequirementPage {
+  items: SimilarRequirementItem[]
+  total: number
+}
+
+/** `POST /requirements/{id}/follow` 结果 */
+export interface RequirementFollowResult {
+  id: number
+  followCount: number
+  followedByMe: boolean
+  created: boolean
+}
+
+/** `GET /requirements/{id}/followers` 的单条跟单人 */
+export interface RequirementFollower {
+  userId: number
+  userName?: string | null
+  orgId?: number | null
+  orgName?: string | null
+  note?: string | null
+  createdAt?: string | null
+}
+
+export interface RequirementOrgCount {
+  orgId?: number | null
+  orgName?: string | null
+  count: number
+}
+
+export interface RequirementFollowerPage {
+  items: RequirementFollower[]
+  total: number
+  page: number
+  size: number
+  /** 当前用户是否在跟单之列 */
+  mine: boolean
+  /** 按组织聚合的人数（后端已排序，页面不再重算） */
+  orgs: RequirementOrgCount[]
+}
+
+/** `POST /requirements/{id}/merge` 请求体 */
+export interface RequirementMergePayload {
+  targetId: number
+  reason?: string
+}
+
+/** 合并结果：被并需求 → 主需求，跟单与子需求迁入数 */
+export interface RequirementMergeResult {
+  sourceId: number
+  targetId: number
+  movedFollows: number
+  movedChildren: number
+  closed: boolean
 }
 
 export interface RequirementRollup {

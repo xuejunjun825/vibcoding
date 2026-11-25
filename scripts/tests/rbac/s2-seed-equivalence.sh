@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # s2-seed-equivalence.sh — 种子逐格等价（TECHNICAL §3.3、AC-3）
 #
-# 等式（每租户 1980 行）：
+# 等式（每租户 2002 行）：
 #   FUNCTION = PermissionMatrix.accessFor(role, function)         671 行，原样复制
 #   MENU     = max(page.functionCodes 上的 FUNCTION 行)，空 ⇒ ALLOW   418 行
-#   ACTION   = max(action.functionCodes 上的 FUNCTION 行)，空 ⇒ ALLOW 891 行
+#   ACTION   = max(action.functionCodes 上的 FUNCTION 行)，空 ⇒ ALLOW 913 行
 #            —— 例外：r24 的 11 条角色×动作显式 DENY 覆盖（只此一处，见第 3 段）
-# 只要 418 + 891 个格子逐格等于这个推导，升级前后的能力就等价：
+# 只要 418 + 913 个格子逐格等于这个推导，升级前后的能力就等价：
 # 旧前端 canAny(功能码) == 新判定「页面非 DENY」，旧按钮判据 == 新动作档位。
 #
 # 期望值不是手抄：由 sys_menu/sys_action 的 function_codes ∪ sys_role_permission 的 FUNCTION 行
@@ -88,12 +88,17 @@ OVERRIDE_JOIN="LEFT JOIN (
               FROM sys_role r
               JOIN (${OVERRIDE_CODES}) o
              WHERE r.tenant_id = ${TENANT_ID} AND r.code = 'VENDOR_PM'
+            UNION ALL
+            -- r47：域负责人持有 req:review 是为了评审，不该连带获得「合并别人的需求」
+            SELECT r.id AS role_id, 'req.action.merge_duplicate' AS subject
+              FROM sys_role r
+             WHERE r.tenant_id = ${TENANT_ID} AND r.code = 'SUB_BUSINESS_LEADER'
           ) ov ON ov.role_id = m.role_id AND ov.subject = m.subject_code"
 
 log "${SEGMENT}：种子逐格等价（tenant=${T1_TENANT} id=${TENANT_ID}）"
 
 # ---------------------------------------------------------------- 1. 行数与覆盖
-check_eq "t1 授权行总数 = 1980，且每个角色 180 行" "11 180" \
+check_eq "t1 授权行总数 = 2002，且每个角色 182 行" "11 182" \
     "$(one "SELECT CONCAT(COUNT(DISTINCT role_id), ' ', MAX(c)) FROM (
              SELECT role_id, COUNT(*) AS c FROM sys_role_permission
               WHERE tenant_id = ${TENANT_ID} GROUP BY role_id) x")" \
@@ -149,25 +154,31 @@ ACTION_BAD="$(one "${EXPAND_ACTIONS}
          WHERE m.tenant_id = ${TENANT_ID} AND m.subject_type = 'ACTION'
            AND m.access <> CASE WHEN ov.role_id IS NOT NULL THEN 'DENY'
                                 ELSE COALESCE(e.access, 'ALLOW') END")"
-check_eq "ACTION 891 格逐格 == max(所需功能码)（11 条覆盖例外 ⇒ DENY），不符 = 0" 0 "${ACTION_BAD}" \
+check_eq "ACTION 913 格逐格 == max(所需功能码)（11 条覆盖例外 ⇒ DENY），不符 = 0" 0 "${ACTION_BAD}" \
     "动作档位是按钮判据：一格格错就会出现「按钮亮着、点下去 403」（r17 的类）"
 
 ACTION_COMPARED="$(one "${EXPAND_ACTIONS}
         SELECT COUNT(*) FROM sys_role_permission m
           JOIN expect e ON e.tenant_id = m.tenant_id AND e.role_id = m.role_id AND e.subject = m.subject_code
          WHERE m.tenant_id = ${TENANT_ID} AND m.subject_type = 'ACTION'")"
-check_eq "ACTION 实际比对了 891 格（全量，无空跑）" 891 "${ACTION_COMPARED}" \
-    "81 个动作都有功能码，必须整格比对"
+check_eq "ACTION 实际比对了 913 格（全量，无空跑）" 913 "${ACTION_COMPARED}" \
+    "83 个动作都有功能码，必须整格比对"
 
 # 3.3 覆盖例外本身也要被证明：11 条必须条条命中库里的行。命中数不足说明码写错（或角色不存在），
 # 此时 ACTION_BAD 仍可能全绿——因为错的那行根本没人跟它比。
-OVERRIDE_HIT="$(one "SELECT COUNT(*) FROM sys_role_permission m
-        JOIN sys_role r ON r.id = m.role_id
-        JOIN (${OVERRIDE_CODES}) o ON o.code = m.subject_code
-       WHERE m.tenant_id = ${TENANT_ID} AND m.subject_type = 'ACTION'
-         AND r.code = 'VENDOR_PM' AND m.access = 'DENY'")"
-check_eq "11 条 ACTION 覆盖逐条命中且为 DENY（VENDOR_PM 的写口）" 11 "${OVERRIDE_HIT}" \
-    "命中 < 11：覆盖码与 sys_action 对不上（或 VENDOR_PM 行缺失），等于收写口失效"
+OVERRIDE_HIT="$(one "SELECT (
+        SELECT COUNT(*) FROM sys_role_permission m
+          JOIN sys_role r ON r.id = m.role_id
+          JOIN (${OVERRIDE_CODES}) o ON o.code = m.subject_code
+         WHERE m.tenant_id = ${TENANT_ID} AND m.subject_type = 'ACTION'
+           AND r.code = 'VENDOR_PM' AND m.access = 'DENY')
+      + (SELECT COUNT(*) FROM sys_role_permission m
+           JOIN sys_role r ON r.id = m.role_id
+          WHERE m.tenant_id = ${TENANT_ID} AND m.subject_type = 'ACTION'
+            AND r.code = 'SUB_BUSINESS_LEADER' AND m.subject_code = 'req.action.merge_duplicate'
+            AND m.access = 'DENY')")"
+check_eq "12 条 ACTION 覆盖逐条命中且为 DENY（VENDOR_PM 11 + 域负责人合并 1）" 12 "${OVERRIDE_HIT}" \
+    "命中 < 12：覆盖码与 sys_action 对不上（或角色行缺失），等于收写口失效"
 
 # ---------------------------------------------------------------- 4. RESTRICTED 传导
 # max() 的真正牙齿：有 DENY 就 DENY，否则有 RESTRICTED 就 RESTRICTED（不能塌成 ALLOW）。

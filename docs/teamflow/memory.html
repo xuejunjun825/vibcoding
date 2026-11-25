@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>团队记忆</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:980px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+td:first-child,th:first-child{white-space:nowrap}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+h1.title{display:none}
+.page{max-width:1560px;margin:0 auto;padding:28px 32px}
+img{max-width:100%;height:auto}
+</style></head><body><div class="page">
+<div class="toc"><div class="toc-title">目录</div>
+<ul>
+<li><a href="#teamflow-产品记忆约定--待办"
+id="toc-teamflow-产品记忆约定--待办">TeamFlow 产品记忆（约定 /
+待办）</a>
+<ul>
+<li><a href="#技术栈20261108-r1-确立按用户确认单修订"
+id="toc-技术栈20261108-r1-确立按用户确认单修订">技术栈（20261108-r1
+确立，按用户确认单修订）</a></li>
+<li><a href="#devops-研发管理平台20261108-r2-起本轮-m1m5"
+id="toc-devops-研发管理平台20261108-r2-起本轮-m1m5">DevOps
+研发管理平台（20261108-r2 起，本轮 M1–M5）</a></li>
+<li><a href="#已解决20261108-r1-修复轮实测复核勿按旧结论排障"
+id="toc-已解决20261108-r1-修复轮实测复核勿按旧结论排障">已解决（20261108-r1
+修复轮实测复核，勿按旧结论排障）</a></li>
+<li><a href="#文档位置" id="toc-文档位置">文档位置</a></li>
+</ul></li>
+</ul></div>
+<h1 id="teamflow-产品记忆约定--待办">TeamFlow 产品记忆（约定 /
+待办）</h1>
+<blockquote>
+<p>跨需求共享的<strong>约定与决策</strong>，不是变更日志。同一主题只保留一行，改约定时替换该行。</p>
+</blockquote>
+<h2 id="技术栈20261108-r1-确立按用户确认单修订">技术栈（20261108-r1
+确立，按用户确认单修订）</h2>
+<ul>
+<li>运行时：本机 JDK <strong>25.0.2</strong>（Oracle OpenJDK
+arm64，Homebrew）。Boot 3.5.x 官方仅支持 JDK 17–24，故锁定
+<strong>Spring Boot 4.0.9 + Spring Cloud 2025.1.4</strong>；不要引入
+Boot 3.5 教程代码。</li>
+<li>构建：<strong>Maven 多模块</strong>（父 <code>packaging=pom</code> +
+<code>api-gateway</code> + <code>demo-service</code>），不用
+Gradle。</li>
+<li>注册/配置中心：<strong>Nacos 单机 standalone（服务端 3.3.0，客户端
+nacos-client 3.1.1 via SCA 2025.1.0.0）</strong>；发行包解压到仓库内
+<code>.nacos/</code>（整个目录 gitignore），由
+<code>scripts/nacos.sh</code> 下载/校验/启动/停止。不使用 Eureka、不使用
+Spring Cloud Config Server。</li>
+<li>网关：<code>spring-cloud-starter-gateway-server-webflux</code>（Cloud
+2025.1 的正式 artefact 名），路由 <code>lb://demo-service</code>。</li>
+<li>端口约定：<strong>8080 网关 / 8081 示例服务 / 8848 Nacos HTTP / 8849
+Nacos 控制台（3.x 默认 8080，必须改，否则与网关冲突）/ 9848 客户端 gRPC
+/ 9849 服务端 gRPC</strong>；允许环境变量覆盖，脚本默认值不变。</li>
+<li>交付形态：<strong>Makefile + bash
+脚本</strong>（<code>dev-up / dev-down / verify / lint / test / test-negative / clean</code>），<strong>不用
+docker-compose</strong>（本机无 Docker）。</li>
+<li><strong>本产品线 P0 交付不含 Python 工程</strong>（用户 20261108-r1
+确认移除）：<code>make verify</code> 与负向用例由 bash 承担；README
+可把本机 Python 3.14.3 作为事实记录，但不得作为验收依赖。</li>
+<li>仓洁：<code>target/</code>、<code>.nacos/</code>、<code>*.log</code>、<code>.env</code>、<code>.DS_Store</code>、<code>.idea/</code>
+一律忽略；<code>logs/teamflow/</code> 为插件运行日志，已被忽略且不得从
+<code>.gitignore</code> 删除；<code>config/nacos/</code>
+种子配置必须入库。</li>
+</ul>
+<h2 id="devops-研发管理平台20261108-r2-起本轮-m1m5">DevOps
+研发管理平台（20261108-r2 起，本轮 M1–M5）</h2>
+<ul>
+<li><p>服务与端口：复用 <code>api-gateway</code>(8080) + Nacos；新增
+<code>req-service</code>(8082：组织/需求/版本/审批/发布)、<code>deliver-service</code>(8083：缺陷/任务/测试/追溯/开放
+API)、<code>web/</code>(Vue 3 + Element Plus + Vite +
+ECharts)；<strong>8081 demo-service 保留不动</strong>。</p></li>
+<li><p>数据：本机 <strong>MySQL 9.6</strong>（brew service，已运行）+
+Flyway，库 <code>devops_platform</code>；本轮只做 <strong>ROW
+行级</strong>隔离（<code>tenant_id</code>/<code>domain_id</code>/<code>vendor_id</code>），SCHEMA/DATABASE
+形态留 M9。</p></li>
+<li><p>认证与集成：JWT + 租户上下文（<code>X-Tenant-Id</code> 必须与 JWT
+一致，缺失/不一致 403 且不落库）；开放 API 用 AppKey/Secret +
+HMAC-SHA256 + 时间戳 ±5min + IP 白名单 +
+scope，<strong>自动化测试结果只接收上报、不自建执行器</strong>。</p></li>
+<li><p>质量铁律：执行记录必须绑定 <code>case_version</code> 与
+<code>round_id</code>/<code>env_id</code>（改用例、换轮次都不改历史结论）；计划完成、测试报告、质量门三处共用同一准出/聚合实现（数字必须可复算、界面与接口同源）；发布单准入第
+6 项为质量门，P0/P1
+规则不可豁免；已会签报告与门禁快照不可变（历史发布单可回放）；缺陷/测试数据与需求同受
+§7
+隔离。发布单写库前必须按需求校验覆盖测试计划的批准状态（唯一闸门：未批准
+409 不落单，取数不可用 503
+fail-closed，无计划不阻塞）。质量门规则统计为四态分桶（r33）：PASS/WAIVED
+计入通过、SKIPPED 单列「跳过」、其余含未知状态 fail-closed
+归未通过；服务端唯一实现
+<code>platform-contract/.../quality/GateRuleBuckets</code>、前端唯一实现
+<code>web/src/components/release/qualityGateBuckets.ts</code>，<code>failedRules</code>
+只装 FAIL、跳过走 <code>skippedRules</code>，冻结快照按规则
+<code>status</code> 回放而非数组长度。</p></li>
+<li><p>验证：新增
+<code>make platform-up / platform-verify / platform-test-negative / platform-seed</code>
+并纳入 <code>make test</code>；r1 的
+<code>make dev-up / verify / test-negative / dev-down</code>
+必须继续全绿。</p></li>
+<li><p>集成与准入（M7）：发布准入 9 项的顺序与锁定集合以
+<code>AdmissionItemPolicy.order()/locked()</code> 为唯一源（①测试
+②无P0P1 ③审批 ④MR ⑤人天 ⑥质量门 ⑦构建 ⑧Sonar ⑨制品）；相对 M6 的 ③④⑤
+调换属 AC-8.1
+的有意变更，前端只做展示映射、断言从常量派生，不再各写一份顺序。</p></li>
+<li><p>禁止：Docker、Gradle、Python 交付物（示例脚本用
+bash/curl）、Redis/MQ；不替换版本矩阵而不改
+README/ARCHITECTURE。</p></li>
+<li><p>审批引擎（2026-11-23 暂缓决策）：继续自研 <code>wf_*</code>（39
+文件/4570 行，5 类单据）；Flowable 只在 <strong>8.0.0</strong>（对齐
+Spring Boot 4）可用、7.x 是 Boot 3
+线，实测可启动但置换需重做加签/减签、隔离变两层、门禁证据全部重做 ⇒
+暂缓；触发条件与 spike 方案见 <a
+href="APPROVAL-ENGINE-OPTIONS.md">APPROVAL-ENGINE-OPTIONS.md</a>。</p></li>
+<li><p>仓洁新增：<code>node_modules/</code>、<code>dist/</code>、<code>.vite/</code>、<code>.pnpm-store/</code>、<code>coverage/</code>、<code>*.tsbuildinfo</code>、<code>.env.*</code>（<code>.env.example</code>
+入库）必须忽略。</p></li>
+<li><p>协作/代码/测试治理（M8，20261109-r6）：五个单点必须复用——<code>WikiVisibility</code>（列表/树/详情/搜索/回收站/附件六出口唯一谓词）、<code>GanttWarnings</code>（告警唯一计算，前端只渲染
+code）、<code>FlowMetricFormulas</code>（均值/P90/效率/瓶颈且字典预览委托）、<code>ExecutorHealth</code>（24/72h
+阈值常量）、<code>ActualPeriodRecorder</code>（实际期唯一写入，与 V9
+回填同口径）；新增能力禁止第二套告警/公式/阈值/实际期/diff，权限码进
+<code>PermissionMatrix</code>（当前 56 格）与
+<code>PermissionRouteTable</code>。新门禁
+<code>make collab-verify</code>（s0–s8）与 <code>make collab-perf</code>
+纳入回归。</p></li>
+<li><p>演示与准入（r7）：页面显示字典统一走只读
+<code>GET /api/req/dictionaries/{domains,vendors,users}</code>（登录可读、按
+§7 裁剪、无管理字段），管理页仍用
+<code>/admin/*</code>；导航每条必须显式
+<code>functionCode</code>（登录即可读的页面用哨兵
+<code>AUTHENTICATED</code>），无权限不渲染；<code>make platform-demo-reset</code>
+是显式幂等的演示数据重建，不进自动门禁。r15 起删除序列的唯一来源仍是
+<code>DemoFixture.DELETE_ORDER</code>（改为
+<code>List&lt;TableReset&gt;</code>，可带 keepFilter）：覆盖 V1–V11
+全部业务实例表，含
+<code>report_definition</code>/<code>portal_card_config</code>/<code>api_client</code>（全清）与
+<code>test_executor</code>（仅保留
+STUB-LOCAL/LEGACY-OFF）；定义/种子表不进序列；重置后必须
+portalCards/portalPins/apiClients 全
+0、executors=2、通知=4，由服务端不变量与
+<code>scripts/platform-demo-reset.sh</code>
+双层断言守卫（漏删必须变红）。r16 起 <code>report_definition</code>
+例外：整表 purge 后回填 <code>DemoFixture.REPORTS</code> 的 2
+张演示报表（需求状态分布=域×状态、厂商交付概览=厂商，均
+<code>PRIVATE</code> 属主 <code>user:admin</code>、不 pin 门户，定义
+JSON 由 <code>ReportFixture.definitionJson()</code>
+固定键序产出），报表断言改为「数量=2 + 名称集合」（服务端 TreeSet、脚本
+<code>jq sort</code>，不比较原始顺序、不写死 id），探针 0 命中与
+run/export 自证同在重置脚本内。r25 起演示夹具须让厂商视角非空：VEN-A
+承接链（<code>DEMO-R-09</code> 及其研发子需求
+<code>DEMO-R-10/11</code>）纳入 <code>DEMO-REL-1</code>（同时写
+<code>requirement.release_id</code> 与
+<code>release_requirement</code>），用例的 <code>vendor_id</code>
+按所属需求派生（与
+<code>TestCaseService.setVendorId(requirement.vendorId())</code>
+线上同源），<strong>禁止用 UPDATE
+造厂商归属</strong>；演示计数变更只许改断言预期、不许删断言。同轮定下前端写按钮的统一形态：页面可见但写动作受限
+→ <strong>渲染 + <code>:disabled</code> +
+<code>:title="需要权限：&lt;码&gt;"</code> + handler 首行兜底
+return</strong>（全站唯一形态，不渲染方案不再采用）；需要探测可选能力的调用一律
+<code>silentForbidden</code>，403 就地降级，<strong>绝不让 403 落到全局
+<code>/403</code> 页</strong>（深链越权仍由路由守卫 403
+表达）。</p></li>
+<li><p>可选能力探测（r8；r45
+扩到审批）：页面内「读不到也不阻断」的调用（集成配置、执行器台账、审批角标、字典、<strong>审批实例详情
+/ 我的待办 / 工时评估审批</strong>）必须在同一次 http 调用上声明
+<code>silentForbidden</code>，403
+只降级为页面内可读状态（并说明真实原因），绝不触发全局 <code>/403</code>
+导航；审批区降级文案全仓唯一
+<code>FORBIDDEN_HINT = '无权查看审批进度（仅发起人/审批人/抄送人可见）'</code>（只在
+<code>web/src/views/req/tabs/ApprovalTab.vue</code>，主审批区与评估块共用，<code>forbidden</code>
+分支排在 <code>error</code> 之前），非 403 仍走 <code>messageOf</code> +
+<code>ErrorState</code>（403 与「加载失败+重试」在数据层就分叉，500
+不得被降级成无权文案）；无权限深链的默认跳转语义不变（深链越权仍落
+<code>/403</code>，服务端审批可见性与 403 code/message
+零改动，非参与人直调审批接口仍 403），<code>make access-verify</code> 的
+a5 段用「运行时角色矩阵 + 调用点静态审计 + 审计器自检」钉住这一点；r45
+起同主题再加两道钉：<code>make lint</code> <strong>L23</strong>（详情页
+<code>getApprovalInstance</code>/<code>listApprovalMine</code>
+裸调用计数必须等于带 <code>silentForbidden</code> 计数、页面不得裸调
+<code>http.</code>、负向夹具必红，24→<strong>25</strong>）与
+<code>make access-verify</code> <strong>a8</strong> 段
+<strong>13</strong> 条（S1–S4 静态 + 三角色运行时 R1–R6 + 非参与实例
+N1–N3 仍 403 不泄漏，206→<strong>219</strong>，九段）。</p></li>
+<li><p>分析与报表（r9）：岗位工作台 <code>/portal</code>、数据看板
+<code>/dashboard</code>、自助报表 <code>/reports</code> 共用唯一聚合引擎
+<code>AnalyticsQuery</code>（指标只在 <code>AnalyticsMetrics</code>
+注册，比率/环比由后端返回、前端只格式化，禁止第二套
+p90/完成态口径）；报表默认 <code>PRIVATE</code>，共享档位
+<code>PRIVATE|ROLE|DOMAIN|VENDOR|PUBLIC</code>（<code>TENANT</code> 为
+<code>PUBLIC</code> 入参别名、<code>scopeRef</code> 用数值 id；r11
+由四档扩为五档），门户 pin
+为个人级（<code>portal_card_config.user_id</code> 真实
+id，管理员角色显隐用 <code>user_id=0</code>），工作台模板 9 套（含
+<code>vendor</code>），共享只共享定义、数据始终按查看者 Scope
+聚合（<code>ScopedJdbc</code> 单点，缺 <code>/*scope:*/</code> 标记即
+fail-closed）；导出默认 XLSX 且必带水印，CSV 首行为 <code>#</code>
+元信息 + BOM；r13 起分析域筛选控件唯一实现
+<code>web/src/components/analytics/FilterBar.vue</code>（/portal 与
+/dashboard 共用，视图不得自带筛选控件或第二套 URL 解析）。新门禁
+<code>make workbench-verify</code>（w0–w5）与
+<code>make report-verify</code>（r0–r8）纳入回归；权限码 60 个（r9 新增
+<code>PORTAL_VIEW</code>/<code>PORTAL_CONFIG</code>/<code>REPORT_VIEW</code>/<code>REPORT_SHARE</code>）。</p></li>
+<li><p>动作级授权（r17）：<code>POST /requirements/{id}/actions</code>
+不再由 <code>PermissionRouteTable</code> 整段要求
+<code>req:review</code>，改为端点内按 <code>platform-contract</code> 的
+<code>RequirementActionMatrix</code>
+一动作一行判定（先鉴权后状态，未登记动作仍
+409，默认拒绝），<code>allowedActions</code>
+过滤与执行共用同一谓词；<code>submit</code>/<code>withdraw</code>
+谓词是「本人提报 或（<code>req:review</code> 且
+<code>vendorId==null</code>）」——vendor1 的角色码就是
+PMO，加权限码区分不了厂商，别再用角色码修越权；评审侧动作（<code>approve</code>/<code>reject</code>/<code>review_*</code>/<code>accept</code>/<code>close</code>）同样要求
+<code>vendorId==null</code>——厂商不得评审/入池/验收内部需求（2026-11-13
+QA BUG-1），<code>source=APPROVAL</code>/<code>GITLAB</code>
+的内部回调不进用户矩阵；前端按钮只认服务端
+<code>allowedActions</code>（不再按 <code>ACTION_META.permissions</code>
+二次过滤），动作 403 必须 <code>silentForbidden</code> 就地提示、绝不跳
+<code>/403</code>。</p></li>
+<li><p>权限配置化（r18，取代 r2
+的「矩阵常量即唯一判定」与「按钮复用功能码」）：授权唯一判定是
+<code>PermissionService</code>，固定三序 <strong>页面码非 DENY → 动作码
+ALLOW/RESTRICTED/DENY → 既有 <code>DataScope</code>
+收窄</strong>；三层授权共用
+<code>sys_role_permission(role_id, subject_type: FUNCTION|MENU|ACTION, subject_code, access)</code>，多角色<strong>任一
+DENY 即 DENY</strong>，<code>RESTRICTED</code> 仍只收窄
+<code>DataScope</code>；<code>PermissionMatrix</code> 退化为「<strong>11
+角色</strong> × 60 功能码种子」来源（r24 起：第 11 个内置角色
+<code>VENDOR_PM</code>；矩阵只声明「角色 × 功能码」，<strong>角色 ×
+动作的 11 条 DENY 覆盖在
+<code>RbacSeeder.actionAccessFor</code></strong>，不得塞进矩阵——塞进去会让「168
+格 = preset + 覆盖」的门禁公式失效），运行时代码不得再直连
+<code>accessOf/accessFor</code>；页面注册表 <code>sys_menu</code>（36
+页，含新增 <code>admin-roles</code>）与动作注册表
+<code>sys_action</code>（72 码，命名空间
+<code>&lt;模块&gt;.action.&lt;动作&gt;</code>）均为<strong>全局代码常量表</strong>（<code>MenuRegistry</code>/<code>ActionRegistry</code>）落库，三向比对；写端点必须声明
+<code>@RequiresAction</code> 或显式 <code>@PageOnly</code>（漏声明的由
+s9/lint 拦截）；V12 种子按现有行为反推（600 功能码格 + 360 页面格 + 720
+动作格 = 10 角色 × 168），r24 的第 11 角色由 V13 建角色行、168
+行由启动预置自愈补齐（合计 <strong>1848 = 11 ×
+168</strong>），升级后可用能力必须与旧版逐格等价（既有 10 角色 1680
+行逐格不变）；写操作提交后 <code>epoch++</code>
+失效缓存，改完<strong>下一次请求</strong>即生效；防锁死 = 冻结
+<code>PLATFORM_ADMIN</code> 的
+<code>org:manage</code>/<code>tenant:manage</code> 且至少保留 1
+个启用管理员（409
+<code>ADMIN_LOCKOUT_RISK</code>），高危动作（<code>deploy.action.force_release</code>/<code>role.action.grant</code>/<code>user.action.disable</code>）默认仅管理员；门禁
+<code>make rbac-verify</code>（s0–s9）。</p></li>
+<li><p>判定入口收口（r21 起，r22 收尾，2026-11-16）：业务代码不得再出现
+<code>TenantContext.can/access</code> 与
+<code>PermissionMatrix.accessOf</code>（含
+<code>RequirementActionMatrix</code>，r22 已删净，lint L19 残留计数
+0）；有 ACTION 登记的功能码一律
+<code>PermissionService.decide(页面码, 动作码)</code>（三序，页面 DENY
+连动作一起关），无 ACTION
+的老码（<code>plan:manage</code>/<code>TEST_EXECUTOR_MANAGE</code>/<code>CASE_REVIEW_SUBMIT</code>/<code>proddefect:report</code>）走
+<code>accessOf(FUNCTION, …)</code>（同一实例同一缓存，不新增派生）；各点
+403 code/message/detail 形状不变；a5 的 D3
+判据改为「动作码必须来自请求体」而非锁字面量
+<code>bodyAction(</code>。</p></li>
+<li><p>需求动作也数据驱动（r22）：<code>RequirementActionMatrix</code>
+的判定只经 <code>ActionPermissionResolver</code>（contract
+出接口、common 的 <code>PermissionService</code> 实现，<strong>依赖方向
+contract ← common，禁止 contract 反向依赖</strong>），动作码
+<code>req.action.&lt;动作&gt;</code>、页面码
+<code>req.pool</code>；自服务 <code>submit</code>/<code>withdraw</code>
+的「本人提报」也要求该动作格非 DENY，代他人读
+<code>req.action.approve</code> 的 ACTION 格 == ALLOW（登记功能码即
+<code>req:review</code>，等价 r17
+的全量评审授权）；<code>start_dev</code>/<code>submit_test</code> 的
+<code>sys_action</code> 登记已校正为
+<code>req:deliver</code>/<code>test:quick</code>（原
+<code>req:split</code>/<code>req:deliver</code> 会让 PRODUCT 扩权、QA
+不能提测），<strong>改注册表登记后必须先
+<code>make platform-demo-reset</code></strong>（不新增 V13，ACTION 格由
+preset 重算，未 reset 时 s2 报 drift 属门禁正确）。</p></li>
+<li><p>需求流转前置门（r23）：非状态转移的管控一律做<strong>服务端前置门</strong>，不塞进
+<code>allowedActions</code>（<code>decompose</code> 不在 16
+动作矩阵内，仍由路由 <code>req:split</code> 守卫）；产生 PDR 要求父 BUS
+已 <code>POOLED</code>（409 <code>PARENT_NOT_POOLED</code>，detail
+<code>{parentId,parentStatus,required}</code>），产生 RD 要求父 PDR 在
+<code>SCHEDULED|IN_DEV</code>（409
+<code>PARENT_NOT_SCHEDULED</code>，detail
+<code>{parentId,parentStatus,allowed[]}</code>）；<strong><code>decompose</code>
+/ <code>POST /requirements</code> 直建 / <code>PUT</code>
+改父三条写入口共用同一判定函数与同一错误结构，禁止「拆解拦、直建不拦」的两套语义</strong>；详情
+<code>view.decomposeGate</code> 与 409 必须同源，前端只认它 +
+<code>can('req:split')</code>；提报必填缺失返回 400
+<code>VALIDATION_FAILED</code> 且 <code>detail.field</code>
+指名字段，禁止裸 500（<code>domainIds</code> 含不存在域 400
+<code>invalidIds</code>、越权域 403
+<code>OUT_OF_SCOPE</code>）。</p></li>
+<li><p>工时评估门（r26，2026-11-17）：第五类审批单据
+<code>WBS_ESTIMATE</code>（PDR/RD 各绑一张，或签 = 域负责人 /
+产品经理）<strong>零 schema 变更</strong>——复用审批引擎
+<code>wf_instance/wf_task/wf_history</code>，单据人天与说明只存 SUBMIT
+快照（<code>StartApproval.attributes</code>），仅新增
+<code>WorkflowVersion.BIZ_WBS_ESTIMATE</code> 与
+<code>ApprovalInstance.STATUS_SUPERSEDED</code> 两个常量；门唯一插点
+<code>RequirementService.transition</code>（403 →
+<code>ILLEGAL_TRANSITION</code> → r23 前置门 → 409
+<code>ESTIMATE_NOT_APPROVED</code>，detail
+<code>{requirementId,status,required:ESTIMATE_APPROVED}</code>，<strong>不落库、不写
+<code>STATE_CHANGE</code> 审计</strong>），未过门时
+<code>schedule</code>（PDR）与 <code>start_dev</code>（RD）一律拦；六态
+<code>NONE/PENDING/APPROVED/REJECTED/SUPERSEDED/STALE</code> 只由
+<code>WbsEstimateService.statusOf</code> 派生，<code>STALE</code>
+是<strong>读时派生</strong>（<code>|当前人天 − 评估人天| &gt; 评估人天 × 20%</code>，BigDecimal
+严格大于），因此 <code>PUT</code> 与 <code>deliver</code>
+两条写路径不必各自加判；<code>allowedActions</code>
+口径不变（仍不返回被门挡住的这两个动作），但前端动作行统一为「<strong>渲染看权限、禁用看门</strong>」：按钮是否渲染只看权限码，<code>disabled</code>
+只看门，门文案<strong>只</strong>由
+<code>web/src/views/req/estimate.ts</code> 的
+<code>estimateGateTip</code> 生成（概览卡片门提示 / 动作行内联提示 /
+按钮 <code>title</code> 三处共用一个函数、逐字一致），权限不足仍是
+<code>需要权限：&lt;码&gt;</code>，两类原因不混用、不互相包含；演示夹具走两段事务（Tx1
+JDBC 业务重建 + Tx2 引擎路径给 11 条非 BUS 需求各批一张 APPROVED
+单，<code>seed</code> 包内切换 <code>TenantContext</code>
+身份、<strong>禁给引擎加代批</strong>否则 403 断言失效），并回填
+<code>biz_domain.owner_user_id</code>（为空则或签节点解析不出域负责人）；列表/搜索/导出与详情
+<code>allowedActions</code> 必须同源（r27）：池查询只能外调
+<code>RequirementService.allowedActionsByRow</code>/<code>allowedActions</code>
+这一条判定链（权限矩阵 ∩ 状态机 → r26 评估门过滤），<strong>禁止在
+<code>RequirementPoolQuery</code>
+二次实现</strong>（<code>stateMachine.allowedActions</code>
+直出即缺陷），由 <code>scripts/platform-verify.sh</code> 静态检查与
+<code>platform-test-negative</code> 4d 段的 <code>jq -c</code>
+原始数组逐字符比较长期守护。</p></li>
+<li><p>存量回填（r29，2026-11-18）：r26
+只补演示夹具、存量不回填，故本轮补运维入口
+<code>POST /internal/wbs-estimate-backfill</code>（<strong>独立开关</strong>
+<code>platform.ops.backfill.enabled</code> 默认
+<code>false</code>→404、<code>X-Internal-Token</code> 不符
+<strong>401</strong>（<code>InternalTokenFilter</code>
+在控制器之前拦截；控制器的 403
+分支仅同构防御、真实链路不可达）；<strong>不复用</strong>
+<code>PLATFORM_SEED_ENABLED</code>，生产 seed 必须持续关闭）+ 薄封装
+<code>scripts/backfill-wbs-estimate.sh</code>（<strong>默认
+dry-run</strong>，<code>--apply</code> 才写）。选取 = 类型
+<code>PDR/RD</code>（<code>BUS</code> 仅扫入报告、一律
+<code>SKIPPED/TYPE_BUS</code>）×
+非终态（<code>StateTables.isTerminal</code>，不另写一份终态表）×
+<code>estimateDays&gt;0</code>（否则
+<code>NO_ESTIMATE_DAYS</code>，<strong>不臆造</strong>）×
+状态只信唯一真相
+<code>WbsEstimateService.statusOf</code>（<code>PENDING</code>→<code>HAS_ACTIVE_ESTIMATE</code>、<code>APPROVED</code>→<code>HAS_APPROVED_ESTIMATE</code>
+即幂等落点、<code>STALE/NONE/REJECTED/SUPERSEDED</code> 才补）。建单必走
+<code>StartApproval(WBS_ESTIMATE)</code> +
+该实例<strong>真实待办审批人</strong> <code>engine.approve</code>（禁
+JDBC 直插 <code>wf_*</code>、禁代批），每条一个
+<code>REQUIRES_NEW</code> 事务且<strong>事务内重读人天</strong>（RD
+获批会改写父 PDR 汇总值），故 RD 先于 PDR
+排序；<code>attrs.source=BACKFILL</code>、说明与意见统一
+<code>存量回填（&lt;batchId&gt;）</code>、审批人域负责人优先否则打
+<code>FALLBACK_APPROVER</code>。报告逐行含
+<code>code/type/status/estimateDays/instanceId/result/reason</code>，<code>result∈PLANNED|CREATED|SKIPPED|FAILED</code>，失败不中断、有
+FAILED 退出码 1（用法 2／连不上 3）。门禁
+<code>make wbs-backfill-verify</code> = <strong>18</strong> 条（dry-run
+双表零写入、409 转可执行、二次 0 变更、BUS 不补、无人天仍被拦、FAILED 非
+0）。</p></li>
+<li><p>门禁判据卫生（r31 立，r41 修订，2026-11-23）：提交卫生类断言只认
+<code>git merge-base main HEAD</code>..<code>HEAD</code> 的
+<code>git diff --name-status --no-renames</code>（纯区间判据、只读 git
+对象库不读工作树），<strong>禁止用
+<code>git status</code>/<code>git diff HEAD</code></strong>（提交后必假红、已提交违规又假绿）；迁移判据与版本号无关（r41
+起）：区间内 <code>db/migration/</code> 只允许 0 或 1 条
+<code>A</code>、文件名必须
+<code>V&lt;数字&gt;__&lt;snake&gt;.sql</code>、版本号必须 ==
+基线提交树（<code>git merge-base</code>）现存最大 + 1（由
+<code>mig_max_version &lt;repo&gt; &lt;rev&gt;</code> 从
+<code>git ls-tree -r --name-only</code>
+动态派生，判据里不得出现写死的允许版本号或允许文件名常量），<code>M/D/R</code>、一次新增多条、跳号即红；pom/package
+同基线判空，覆盖<strong>全部 7 个 <code>*pom.xml</code></strong>（根 +
+api-gateway/deliver-service/demo-service/platform-common/platform-contract/req-service）与
+<code>web/pnpm-lock.yaml</code>——仓库用 pnpm，<strong>不存在
+<code>web/package-lock.json</code></strong>，写成后者等于一条永远为空的判据。第
+32 条内置变异自检（r41 起 5 条、逐条打
+<code>HYG_SELF[k/5]</code>）：正例（clean range +
+未跟踪临时文件）必须绿，反例（<code>M V13</code> / 一次 <code>A</code>
+两条 / 跳号 <code>V&lt;max+2&gt;</code> /
+<code>M pom.xml·web/package.json·web/pnpm-lock.yaml</code> /
+<code>A web/package-lock.json</code>）必须红，任一不符即该条红；分母仍
+32，并由 <code>gate-order-verify</code> 第 21
+条静态自证（不得再出现写死的允许版本措辞、判据必须动态派生、5
+条自检标记齐全）。同族修复：S6-1 判据先 <code>[[ -f ]]</code> 再
+grep（文件缺失不得回落为「未发现违规」），S1 六个
+<code>(bizType,level)</code> 槽逐槽幂等 DELETE 回默认（不
+<code>pass</code> 计数）。</p></li>
+<li><p>演示夹具到
+PUBLISHED（r32，2026-11-19）：<code>platform-demo-reset</code> 的
+<code>reset()</code> 是<strong>三段事务</strong>——Tx1 裸 JDBC
+业务行、Tx2 <code>DemoEstimateFixture</code> 工时引擎、Tx3 新增
+<code>DemoApprovalFixture</code>（走真实动作链
+<code>submit → 会签 → review_start(pm) → 会签</code> 把
+<code>DEMO-R-01</code> 的
+<code>REQ_SUBMIT</code>/<code>REQ_REVIEW</code> 批到
+<code>APPROVED</code> 且净状态回 <code>POOLED</code>，再
+<code>deliver</code> 写 <code>DEMO-R-04</code> 的 MR 与
+<code>actual_days</code>，链上通知按 <code>notification.id</code>
+水位线删除以保住「4 条」口径），<strong>禁在 Tx1 直插
+<code>wf_*</code></strong>；<code>DemoFixture</code> 收口
+<code>MR_URL</code>/<code>ACTUAL_DAYS</code>
+两个常量供夹具、文档、门禁同源引用。演示链<strong>不能跑在
+<code>DEMO-REL-1</code></strong> 上：QG-01 分母是
+<code>release_requirement</code>（11 条、计划只覆盖 5 条 = 45%），第 1
+步必须先从版本摘除 R-04 再建只挂它的演示版本（1/1 =
+100%）。实操事实：登记交付 <code>req.action.deliver</code> 背后是
+<code>req:deliver</code>，<strong>PRODUCT 是 DENY</strong>（pm 调
+403），用需求负责人 dev2；清空 MR 必须传
+<code>mrUrl:""</code>（<code>deliver</code> 只在非 null 时写库，传 null
+是假绿）；<code>POST /quality-gates/{id}/evaluate</code>
+返回评审结果而非快照，链路第③段要读
+<code>flowChain.qualityGate</code>。门禁
+<code>release-flow-verify</code> 分母 32→<strong>40</strong>、静态分段
+6→<strong>7</strong>，新增 S7 八条（夹具就绪/到
+TEST_PASSED/三签/质量门/负向 409
+<code>failed=[MR_FILLED]</code>/提交快照 round=1 +
+64hex/发布单两级/版本三级到 PUBLISHED），S7 起跑自愈
+<code>platform-demo-reset</code> 以与 S1–S5 数据解耦。</p></li>
+<li><p>门禁基线以实测为准（r20
+订正，2026-11-14）：<code>platform-verify</code>
+<strong>167</strong>、<code>platform-test-negative</code>
+<strong>30</strong>（r22 实测 30，原 28 为笔误）、<code>access</code>
+<strong>152</strong>、<code>rbac</code> 101（r20 起含 <code>s2r</code>
+收尾段为 <strong>111</strong>，<code>s2r</code> 实跑 10 条、下限
+8，只增不降）、<code>lint</code> 22、<code>verify</code>
+14、<code>analytics</code> 74、<code>demo-reset</code> 57
+为本轮复跑实测；<code>platform-unit</code> 306、<code>collab</code> 263
+沿用上轮全绿记录（本轮未复跑，勿当轮次实测引用）。r19 文档写的
+<code>168/30</code>（更早文档的 <code>148/30</code>
+同）属基线漂移，<strong>勿再作为判据</strong>——订正行只新增在 r19
+任务夹顶部，AC 文本一字未改。r24 起授权行 <strong>1848</strong>（11 角色
+× 168，第 11 角色 <code>VENDOR_PM</code> 由 V13 建角色 + 启动预置补齐
+168 行），<code>s2</code> 等价公式随之扩到 11 角色/1848 行并新增 11 条
+ACTION 覆盖例外（<code>RbacSeeder.ACTION_DENY_OVERRIDES</code>
+是唯一来源，脚本只证不改语义）；r24 的门禁下限为 rbac ≥111、access
+≥152、platform-verify ≥168、negative ≥54、demo-reset ≥60、unit
+≥335、lint ≥22、verify 14/14，实测数以该轮 QA 复跑为准。r25
+本轮实测：<strong>demo-reset 66/66</strong>（+5 条厂商视角真实登录 API
+断言，连跑两次逐键一致）、<strong>platform-verify
+174/174</strong>、<strong>lint 22/22</strong>、req-service
+夹具单测绿；<code>access</code> 下限随 a6 写按钮门禁接入提到
+≥189（该段未接入前仍是 165）。r26 实测（r27 于 2026-11-17
+复跑订正）：<strong>demo-reset 69/69</strong>（66 + 工时评估单三条计数
+11/0/11）、<strong>platform-verify 192/192</strong>（新增 4 处
+<code>approve_estimate</code> 前置：新建 PDR 排期、RD_A 开始开发、D9
+准入正反两条）、<strong>platform-test-negative 111/111</strong>（新增 4c
+段 16 条：六态拦人、驳回原因留痕、改人天派生 STALE、越权提交
+403）、<strong>access
+206/206</strong>（八段，<code>a7-estimate-gate</code>
+<strong>16</strong> 条：静态 10 + 运行时 6，原记 15
+条为笔误）、<strong>rbac 113/113</strong>、<code>lint</code>
+22/22、<code>req-service</code> 单测绿、<code>web</code> typecheck+build
+绿；r26 起门禁下限为 demo-reset <strong>69</strong>、platform-verify
+<strong>≥192</strong>、negative <strong>≥111</strong>、access
+<strong>≥206</strong>、rbac <strong>≥113</strong>。r27
+本轮实测：<strong>platform-verify 193/193</strong>（+AC-2
+静态同源检查）、<strong>platform-test-negative 130/130</strong>（+4d 段
+19 条：五处原始数组 <code>jq -c</code> 逐字符相等、pm 反假修复、200
+行逐行抽样、<code>R27_PARITY_MUTATE=order</code>
+变异必红）、<strong>access 206/206</strong>、<strong>rbac
+113/113</strong>、<strong>demo-reset
+69/69</strong>、<strong>platform-unit 371</strong>、<code>lint</code>
+22/22、<code>web</code> typecheck+build 绿；下限随实测只增不减，r27 起为
+demo-reset <strong>≥69</strong>、platform-verify
+<strong>≥193</strong>、negative <strong>≥130</strong>、access
+<strong>≥206</strong>、rbac <strong>113</strong>、unit
+<strong>≥371</strong>。r28（2026-11-17）订正：<code>platform-test-negative</code>
+第 7/8 段<strong>已自带夹具</strong>，不再依赖环境待办——段内以 biz1
+建一张 BUS 并自服务 <code>submit</code>（走默认
+<code>REQ_SUBMIT/BUS</code>，审批人 PRODUCT=pm），再按
+<code>bizId + bizType=REQ_SUBMIT</code> 从 pm 待办取真实
+taskId，两条断言（减签空原因 400
+<code>REASON_REQUIRED</code>、已处理加签 409
+<code>TASK_ALREADY_HANDLED</code>）恒定执行；干净重置下由 128 变
+<strong>130</strong> 且总数恒定 130（夹具步骤不 <code>pass</code>
+计数），夹具失败一律 <code>fail</code> 不
+<code>warn</code>（门禁不得静默缩水）；r28 的下限沿用 r27（negative
+<strong>130</strong> 恒定）。r29 新增门禁
+<code>wbs-backfill-verify</code>
+<strong>18</strong>（<code>make wbs-backfill-verify</code>，覆盖 dry-run
+双表零写入／409→可执行／二次 0 变更／BUS 不补／无人天仍 409／FAILED
+退出码非 0），其余下限沿用 r28（platform-verify ≥193、negative
+≥130、access ≥206、rbac 113（s0–s9）、demo-reset 69、lint 22、unit ≥371
+且因新增 <code>WbsBackfillServiceTest</code> 只增不减），实测值以该轮 QA
+复跑为准。r40（2026-11-23）订正：动作码 73→<strong>75</strong>
+后计数基线为动作 <strong>75</strong>、每角色
+<strong>173</strong>、<code>sys_role_permission</code>
+<strong>1903</strong>（11×173）、ACTION 格
+<strong>825</strong>（FUNCTION 671 / MENU 407
+不变），<code>s0/s1/s2/s5/s7/s8/_lib/rbac-verify/platform-verify/platform-demo-reset</code>
+同批更新且 <code>s0</code> 的 Flyway 断言
+15→<strong>16</strong>；下限沿用 r38/r39（<code>platform-verify</code>
+≥194、<code>negative</code> ≥130、<code>access</code>
+≥206、<code>rbac</code> 113、<code>demo-reset</code> <strong>80</strong>
+连跑两次、<code>release-flow</code> 44、<code>automation</code>
+40、<code>gate-order</code> 21、<code>wbs-backfill</code>
+18、<code>lint</code> 22、<code>unit</code> ≥447、<code>web</code> build
+0 error），新增 <code>change-verify</code>
+<strong>42</strong>（S1–S6，<code>--static-only</code> 12
+免栈、<code>--twice</code> 连跑两次逐行比对），实测数以该轮 QA
+复跑为准。r43（2026-11-24）新增 <code>editability-verify</code>
+<strong>36</strong>（<code>make editability-verify</code>；S1 静态契约 6
+/ S2 三组对照 9 / S3 字段特例 7 / S4 PUT 错误码 5 / S5 响应一致性 5 / S6
+变更记录与负向 4；<code>--static-only</code> 6
+条免栈、<code>--twice</code>
+连跑一致、<code>EDITABILITY_MUTATE=always-edit</code> 负向必红），接入
+<code>test-all.sh</code> 的 <code>change-verify</code> 之后；下限沿用
+r42 并本轮实测：<code>platform-verify</code>
+<strong>199</strong>、<code>platform-test-negative</code>
+<strong>132</strong>、<code>access</code>
+<strong>206</strong>、<code>rbac</code>
+<strong>113</strong>、<code>release-flow</code>
+<strong>44</strong>、<code>gate-order</code>
+<strong>21</strong>、<code>change</code>
+<strong>42</strong>、<code>demo-reset</code>
+<strong>80</strong>（连跑两次）、<code>lint</code>
+<strong>24</strong>、<code>unit</code>
+<strong>430</strong>、<code>web</code> typecheck/build 绿；实测数以该轮
+QA 复跑为准。r44（2026-11-24）订正：<code>change-verify</code>
+<strong>46</strong>（42 + 缺 <code>changeType</code>/空白
+<code>changeType</code> 400 与非 5xx
+通用断言）；新增约定「不可变集合（<code>List.of</code>/<code>Set.of</code>/<code>Map.of</code>/<code>copyOf</code>）做成员判定前必须先
+null/blank 短路，错误响应必须 4xx+<code>code</code>，禁止用 500
+表达校验失败」；同族全仓扫描 63 处成员判定 + 79 处 switch 见
+<code>docs/teamflow/20261124-r44-null-safe-enums/NULL-SAFETY-SCAN.md</code>；detail
+键序<strong>不是</strong>契约（<code>ApiException.copyWithoutNulls</code>
+的 <code>Map.copyOf</code>
+会打乱迭代序，断言一律用键集合/键值比较），<strong>不得为键序去改
+<code>platform-common</code> 平台级共享类</strong>——r44 QA D-1
+已回退过一次；其余下限沿用 r43。</p></li>
+<li><p>门禁幂等（r20 起）：任何写 <code>sys_role_permission</code>
+的门禁段必须 <code>trap</code>
+恢复<strong>本段改过的行</strong>（不得用整库 reset 代替），套件跑完 =
+库回到预设、<code>CANONICAL_HASH</code> 不变；<code>rbac-verify</code>
+末尾的 <code>s2r</code> 段把这条不变量本身变成断言（复用 s2
+的脚本与阈值，只增不改）；任务夹按 ADR-0008 不可变，基线订正依 r20 PRD
+§5.1 的唯一例外只新增订正行、不改 AC 文本。</p></li>
+<li><p>门禁顺序无关（r34，2026-11-19）：凡写演示租户的门禁（<code>release-flow-verify</code>/<code>platform-verify</code>/<code>platform-test-negative</code>）必须
+<code>source scripts/lib/gate-fixture.sh</code>——<code>gate_fixture_begin</code>
+注册 EXIT/INT/TERM trap
+并在起跑前自愈残留，<code>gate_fixture_end</code> 以
+<code>POST /internal/demo-reset</code> 复位后断言「本 tag 残留 0 + 夹具
+12/1/11/0 + <code>DEMO-R-02</code> rollup 5.0 且评估
+<code>APPROVED</code> + <code>DEMO-R-04</code> 回
+<code>DEMO-REL-1</code>」，清理失败显式
+<code>exit 1</code>（<strong>禁止</strong>
+<code>platform-demo-reset.sh &gt;/dev/null 2&gt;&amp;1</code> + WARN
+放过）；夹具父链必须挂自建 BUS→PDR，<strong>禁止按状态取第一条种子
+PDR</strong>（<code>platform-test-negative.sh:97</code> 旧写法取到
+<code>DEMO-R-02</code>，3 条子需求把 5.0 抬到 6.5/8.5 → 20% STALE →
+access a7 R2 红）；<code>demo-reset</code> 对 <code>requirement</code>
+是整租户 purge（保留数恒 0），故只补「非夹具需求保留 0
+条」输出与断言（74→75）、不扩删除范围；新增
+<code>make gate-order-verify</code>（r35 <strong>15</strong> 条；r36
+<strong>18</strong> 条、r37 <strong>19</strong> 条、r38 起
+<strong>20</strong> 条，A：reset→rfv→access→access（r34
+原样不动）；B：reset→access→rfv→access→rbac（只在尾部追加一次全段
+rbac）；+5 静态契约 + 5 收尾（r37 起含负向自检；r38 第 5 条为 join
+行孤儿 0）），其余下限：rfv <strong>44</strong>、platform-verify
+<strong>≥194</strong>、negative <strong>≥130</strong>、access
+<strong>206</strong>、rbac <strong>113</strong>、mvn
+<strong>≥392</strong>。</p></li>
+<li><p>门禁夹具自足（r35，2026-11-20）：<code>release-flow-verify</code>
+的 S7 演示链不再读演示种子——<code>s7_fixture_ready</code> 用
+<code>gate_pool_bus</code> 自造 <code>BUS→PDR→RD</code>（MR
+<code>r35-${GATE_TAG}</code>、预估/实际 2 人天、两轮会签、2
+条自造用例）后读回复核，<code>s7_build_chain</code>
+只建版本/计划/报告/发布单（删掉把 <code>DEMO-R-04</code> 从
+<code>DEMO-REL-1</code> 解挂的 DELETE 与 <code>DEMO-C-03/04</code>
+取数），变量 <code>S7_R04</code>→<code>S7_RD</code>；新增静态检查
+<code>[12]</code>：S7 区段 <code>DEMO-R-|DEMO-C-|DEMO-REL-</code>
+命中必须为 0（<code>STATIC_TOTAL</code>
+11→<strong>12</strong>），<code>RELEASE_FLOW_TOTAL</code> 仍
+<strong>44</strong>、S7
+八条判据的数值/正则不放宽；<code>gate-order-verify</code> 收尾 check 14
+增「<code>title LIKE '%S7-%'</code> = 0」，条数仍
+<strong>15</strong>；<code>DEMO-R-02</code> 汇总 5.00 与
+<code>DEMO-R-04</code> 回 <code>DEMO-REL-1</code>
+由「被改回」变成「从未被改」的证据；下限不变：platform-verify
+≥194、negative ≥130、access 206、rbac 113、demo-reset 76（r37 起）、mvn
+≥392。</p></li>
+<li><p>门禁临时主体幂等（r36–r38，2026-11-23）：<code>scripts/tests/rbac/{s3,s5,s6,s7,s8}</code>
+造号一律
+<code>rbac_run_tag</code>（<code>%m%d%H%M%S</code>+<code>$$</code>+<code>$RANDOM</code>，全数字；<code>RBAC_RUN_TAG</code>
+可覆盖以复现撞名），不再只靠 <code>$RANDOM</code>；建号/建角色失败按
+<code>HTTP_CODE</code> 显式 <code>exit 1</code>，禁止
+<code>&gt;/dev/null</code> 吞 409 后靠 <code>login_as</code> 403
+兜底；<code>trap cleanup EXIT</code>（INT/TERM 先转
+<code>exit 130</code>）顺序 = 还原授权 →
+<code>rbac_purge_users &lt;prefix&gt;</code>（用户无 DELETE API，db_q
+直连删 <code>^&lt;prefix&gt;[a-z0-9]*$</code> 的 sys_user 及其
+sys_user_role/sys_user_domain join 行）→
+<code>rbac_purge_roles &lt;prefix&gt;</code>（API DELETE，仅 S5/S7/S8
+非内置前缀）→ 复核 0 条，清理失败 <code>err</code>+<code>exit 1</code>
+置红；每段 <code>admin_login</code> 后先 purge
+自愈；<code>rbac-verify</code> 连续两次 113/113（含同一
+<code>RBAC_RUN_TAG</code> 重跑）；r37 起清理真源收敛到
+<code>scripts/lib/temp-accounts.sh</code>（<code>TEMP_ACCOUNT_REGEX</code>
+全仓唯一生成点，白名单 4 前缀
+<code>s[3-8]</code>/<code>t6p</code>/<code>t6probe</code>/<code>probe</code>；14
+名种子保护名单命中即拒；只删 <code>status='DISABLED'</code>，join
+行先行；薄入口 <code>legacy-probe-purge.sh</code> 首跑清掉 4
+条遗留探针（<code>sys_user</code> 72/76/77/452，含
+<code>probe11272</code> 的 2 条角色关系行）、二跑 0），入口 /
+<code>gate-order-verify</code> / <code>platform-demo-reset</code>
+三个消费方共用同一份正则，新增探针只加一行数组元素；<code>platform-demo-reset</code>
+r36 <strong>75</strong> 条 → r37 <strong>76</strong> 条（最后一次 reset
+后清理并复核 DISABLED=0 + 14 名种子
+ACTIVE=14，全库同名为历史债不作判据）；<code>gate-order-verify</code>
+r36 <strong>18</strong> 条 → r37 <strong>19</strong> 条（第 18 条 =
+白名单用户任意状态 0 + DISABLED 0 + S5/S7/S8 角色 0；第 19 条负向自检插
+<code>probe9&lt;时间戳+pid&gt;</code> 必须让计数 ≥1），收尾断言「t1
+下白名单临时用户 0 条、<code>^(S5|S7|S8)</code> 角色 0
+条」；首次运行一次性清掉 527 条历史 DISABLED 残留（s3 103/s5 90/s6 81/s7
+168/s8 85）；r38（2026-11-23）把孤儿判定从只数
+<code>sys_user_role</code> 扩到
+<code>sys_user_domain</code>：<code>temp_orphan_join_left()</code>
+输出的 <code>orphans_role=&lt;n&gt; orphans_domain=&lt;n&gt;</code>
+两者都必须为 0（同租户 join 不中，与 r37 role 同形；任一分量查询失败
+return 1、不出半行），新增可复跑脚本
+<code>scripts/orphan-join-purge.sh</code>（默认 dry-run 打
+<code>role/domain/distinct users</code>，<code>--apply</code>
+用同一谓词删除并复核回 0，DB 不可连 exit 1），一次清掉 413
+条历史域孤儿（59 个全库不存在的
+user_id）；<code>legacy-probe-purge</code> 证据行/退出码同步含
+domain；<code>gate-order-verify</code> <strong>19→20</strong> 条（第 20
+条 = role/domain 孤儿 0 + 插一条 domain 孤儿必 ≥1
+的负向自检），<code>Makefile:106</code> 帮助文案同步 20 条；demo-reset
+仍 <strong>76</strong>，无 Java/迁移/种子改动。</p></li>
+<li><p>已知待办（M8 P3，不阻断）：D-04 s8 无第二租户时 INFO 跳过、D-05
+<code>audit_log</code> 的 <code>idx_audit_req</code> 与
+<code>idx_audit_biz</code> 重复、N-06 collab 子集模式仍按 60
+断言守卫、N-07/N-08/N-09 检查器多租户/夹具/前置清理；真实 GitLab/Sonar
+联调与浏览器视觉走查待客户环境。r25
+登记两处已知偏差（同族、都在本轮改动面外）：① <code>:disabled</code>
+按钮不进 tab 序，而 <code>ScopeChip</code> 只有
+<code>clickable=true</code> 才带
+<code>tabindex</code>，「需要权限」的原因对键盘用户不可达——修共享组件会改
+<code>placeholder</code>/契约，本轮只记录；② 用例库空态
+<code>web/src/views/deliver/TestCaseLibraryView.vue:552</code>
+在无权限时把主操作 <code>v-if</code> 隐藏、版本库空态
+<code>web/src/views/deliver/ReleaseListView.vue:162</code>
+干脆不提供创建 CTA，与「渲染 + <code>:disabled</code> +
+<code>title</code>」统一形态不一致。r29
+登记一处架构技术债（P3，蓝图明令本轮不改演示夹具）：<code>WbsBackfillRowWriter</code>
+与 <code>DemoEstimateFixture.seedDemo</code>
+各持一份「start→挑待办→切身份 approve→还原 scope」驱动链，建议下轮立项抽
+<code>WbsEstimateApprovalDriver</code> 统一两处。</p></li>
+<li><p>自动化规则引擎（r39，2026-11-23）：<code>automation_rule</code>/<code>automation_event</code>/<code>automation_run</code>/<code>requirement_tag</code>
+四表由 <code>V15__automation_rule.sql</code> 建（V1–V14
+不动）；事件唯一源是 <code>AuditService</code> 同事务写的
+outbox（禁前端上报），动作不得直接改状态/审批/人天汇总/提发布单；幂等键
+<code>(tenant,rule,requirement,event)</code> <strong>先抢占</strong>
+<code>automation_run</code> 唯一键（<code>RUNNING</code>）再复核
+Scope/条件/限流，重复事件不写第二行；规则动作产生的事件标
+<code>origin=RULE</code> 直接
+<code>DROPPED/RULE_ORIGIN</code>，<code>chain_depth≥4</code>
+兜底拦；规则建改仅 PLATFORM_ADMIN/PMO，厂商账号 403
+<code>INTERNAL_ONLY</code>；演示 R1/R2 由 demo-reset
+种入，<code>platform-demo-reset</code>
+76→<strong>80</strong>（<strong>种子</strong>通知恰 4 条；重置后全表 26
+行 = 4 种子 + 22 条演示审批链通知，别当回归），新增
+<code>make automation-verify</code>（6 段 40
+条）；<strong>需求视图的标签只有一条读路径</strong>（r39
+Q-1）：<code>RequirementViews.View.tags</code>
+是必填参数、详情/写回/版本详情都经
+<code>RequirementTagQuery.byRequirementIds</code> 补齐，禁止再出现默认
+<code>List.of()</code> 的兼容构造器或重载（lint <strong>L22</strong>
+静态锁、automation-verify S3 真栈断言兜底），否则同一需求会「列表有
+chip、详情没有」；<strong>技术债（TECHNICAL §14
+风险表登记）</strong>：<code>AutomationRateLimiter</code>
+是单实例内存分钟窗口，多实例部署会线性放大租户上限——目前按单实例部署，扩容前必须先换共享计数（Redis
+或 DB 计数），不要靠调小阈值糊过去。</p></li>
+<li><p>需求变更单（r40，2026-11-23）：<code>req_change</code>/<code>req_change_item</code>
+由 <code>V16__requirement_change.sql</code> 建（V1–V15 不动，<strong>无
+FK</strong>，快照存 JSON；<code>items</code> 只在 apply 落库，复合主键
+<code>(change_id, field)</code> 即幂等约束）；<strong>审批通过 ≠
+生效</strong>——回调只做 <code>PENDING→APPROVED/REJECTED/WITHDRAWN</code>
+且绝不写需求字段，只有显式 <code>POST /changes/{id}/apply</code>
+才在<strong>单事务</strong>里做「状态闸→需求行锁→逐字段比对
+<code>before</code>（不等即 409 <code>CHANGE_CONFLICT</code>
+且零写）→复验父链/人天/版本→条件更新
+<code>APPROVED→APPLIED</code>→RELEASE 双写→写字段→写 items→<strong>恰 1
+条</strong> <code>REQUIREMENT_CHANGE_APPLIED</code> 审计→锁后补
+<code>CHANGE_AFTER_RELEASE_LOCK</code>」，字段事件由
+<code>AutomationEventMapper</code> 派生（规则字段词表 7 可变更 +
+<code>owner_user_id</code> = 8）；<code>before/after</code> 固定
+<strong>7
+键</strong>（title/description/priority/expectedDeliveryDate/estimateDays/releaseId/parentId），与
+<code>AuditService.auditSnapshot</code>（缺
+description/parentId）<strong>刻意分离、禁止合并</strong>；<code>impact</code>
+固定 <strong>8
+顶层键</strong>（fields/children/release/targetRelease/days/admission/postLock/frozenAt），缺数据前端只写「无法评估」，禁止显示
+0/—；人天 STALE 判定只认
+<code>WbsEstimateService.wouldBeStale</code>（严格
+<code>&gt;0.20</code>、未舍入比值，<code>decide()</code>
+与影响评估同源，禁止第二套 0.20 比较），20.0%–20.1% 带内显示 2
+位小数；<strong>早期态表唯一来源</strong>
+<code>RequirementChangeFields.editableFields</code>（BUS
+<code>SUBMITTED/APPROVING/PENDING_REVIEW</code>、PDR 仅
+<code>PENDING_ANALYSIS</code>、RD 仅 <code>TODO</code>），前端只读后端
+<code>permissions.editableFields</code>，晚期态 <code>PUT</code>
+四类字段返回 409 <code>CHANGE_REQUIRED</code>（detail
+<code>{changeEndpoint, fields[]}</code>，early 态/仅
+domainIds/同值放行）；版本 <code>LOCKED/PUBLISHED</code> 仍可
+apply（这就是变更单要解决的「锁定后只能线下协调」）；两个动作码
+<code>req.action.change_request</code>/<code>req.action.change_apply</code>
+只进 <code>ActionRegistry</code> + <code>PermissionRouteTable</code>（5
+条规则），<strong>不进</strong> 16
+条状态迁移矩阵、零新菜单码，<code>VENDOR_PM</code> 显式 DENY
+两条；<strong>本轮不做变更回滚</strong>（再开一张单，<code>before</code>
+冻结成当前值形成审计链）。</p></li>
+<li><p>需求池运营·相似/跟单/合并（r47，2026-11-25）：相似检索用 2-gram
+打分（同标题 3.0 + 同类型 0.5 + <strong>同域 1.0（参照域=请求的
+<code>domainId</code>，不是结果行自身域）</strong> + 细粒度
++0.5），<code>/similar</code> 与 <code>/{id}/similar</code>
+两个入口；「我也需要」= <code>requirement_follow</code> 唯一键幂等，热度
+<code>followCount/followedByMe</code>
+单点批量查、列表与详情同源；合并六条前置 + 单事务（关源/迁跟单/子需求
+reparent/审计）落在 <code>RequirementMergeService</code>。动作
+81→<strong>83</strong>（<code>req.action.follow</code> 挂
+<code>notification:read</code>、<code>req.action.merge_duplicate</code>
+挂 <code>req:review</code>；<strong>不要复用
+<code>req.action.merge</code></strong>，它被 RD 的
+<code>TEST_PASSED→MERGED</code> 与 <code>mr/confirm-merge</code>
+占用）、<code>sys_role_permission</code>
+1980→<strong>2002</strong>、每角色 <strong>182</strong>、Flyway
+<strong>23</strong>（V22 follow / V23 merge）、<code>s2</code> 覆盖例外
+11→12；演示数据 13 需求 / 15 账号（新增 <code>biz2</code>）/
+<code>DEMO-R-02</code> 6 条跟单。门禁：新增
+<code>make pool-ops-verify</code> 33 条；全部既有门禁同步计数后实测
+<code>platform-verify</code> <strong>208</strong>、<code>negative</code>
+<strong>132</strong>、<code>access</code>
+<strong>219</strong>、<code>rbac</code>
+<strong>113</strong>、<code>release-flow</code>
+<strong>44</strong>、<code>gate-order</code>
+<strong>21</strong>、<code>change</code>
+<strong>46</strong>、<code>collab</code>
+<strong>257</strong>、<code>pdr</code>
+<strong>66</strong>、<code>editability</code>
+<strong>36</strong>、<code>automation</code>
+<strong>40</strong>、<code>demo-reset</code>
+<strong>80</strong>、<code>lint</code> <strong>25</strong>
+全绿。JdbcTemplate
+白名单新增两个「必须同事务读改写」的写路径（<code>RequirementFollowQuery</code>/<code>RequirementMergeService</code>），lint
+L22 判据改为「View 规范构造器以必填
+<code>List&lt;TagView&gt; tags</code> 收尾」（tags
+移到参数表末尾，语义不变）。</p></li>
+<li><p>产品需求评审 + 厂商工时评估（r46，2026-11-25）：PDR
+流程由「拆出来就评估/排期」改为 <strong>评审 → 指派厂商 → 厂商评估 →
+排期 → 拆 RD</strong> 四道顺序门（<code>PDR_REVIEW_REQUIRED</code> /
+<code>VENDOR_NOT_ASSIGNED</code> /
+<code>ESTIMATE_NOT_APPROVED</code>，换厂商作废原评估、子 RD 进
+<code>IN_DEV</code> 后
+<code>VENDOR_LOCKED</code>）。项目组成员是唯一评审人来源（项目组为空回退
+产品经理+域负责人并回
+<code>fallback:true</code>）；<strong>同一评审人可提多条意见</strong>，每条独立分类（<code>sys_dict</code>
+九类
+<code>RANGE/TECH/SCHEDULE/RISK/ACCEPTANCE/UI/DATA/COMPLIANCE/OTHER</code>）、结论、附件与状态（<code>OPEN/TASKED/RESOLVED</code>），意见可一键转交付任务（<code>task_id</code>
+回写 + <code>PDR_OPINION_TO_TASK</code> 审计 + 重复转
+409）；附件复用既有 <code>/attachments</code>（新增
+<code>bizType=PDR_REVIEW</code>，跨厂商/非成员下载 404）；统计
+<code>GET /pdr-reviews/stats?groupBy=CATEGORY|REVIEWER|DECISION</code>
+与分析域 <code>pdr_review</code>/<code>pdr_review_opinion</code>
+两个数据集、报表/看板/导出同源（<code>PdrReviewDatasetParityTest</code>）。计数：功能码
+<strong>61</strong>（新增 <code>req:review</code>）、页
+<strong>38</strong>（<code>pdr.review</code>）、动作
+<strong>81</strong>、<code>sys_role_permission</code>
+<strong>1980</strong>、每角色 <strong>180</strong>、Flyway
+<strong>21</strong>（V17 项目/成员、V18 评审、V19 意见、V20 意见 version
+列、V21 报表 dataset 宽 64）。<code>DataScope.canSeeDomain</code>
+的「空集=不可见」与契约「空集=不限制」相反，ORG 档用户会「列表可见、详情
+403」——新代码统一用新增的
+<code>canSeeDomainOrUnrestricted</code>。门禁：新增
+<code>make pdr-verify</code>（<code>scripts/pdr-flow-verify.sh</code>
+<strong>66</strong> 条，S1–S6，含 teardown 残留断言）；既有门禁复跑实测
+<code>platform-verify</code>
+<strong>208</strong>、<code>platform-test-negative</code>
+<strong>132</strong>、<code>access</code>
+<strong>219</strong>、<code>rbac</code>
+<strong>113</strong>、<code>release-flow</code>
+<strong>44</strong>、<code>gate-order</code>
+<strong>21</strong>、<code>change</code>
+<strong>46</strong>、<code>editability</code>
+<strong>36</strong>、<code>automation</code>
+<strong>40</strong>、<code>collab</code>
+<strong>257</strong>、<code>demo-reset</code>
+<strong>80</strong>、<code>lint</code>
+<strong>25</strong>。<strong>执行方式</strong>：TeamFlow 宿主
+<code>subagents</code> 注册表为空导致 <code>teamflow_start</code>
+恒失败，本轮由 Agent Teams（子代理）离线执行，Lead 复验与提交。</p></li>
+<li><p>网关非 ASCII 查询（r42，2026-11-23）：<strong>根因不是 SCG/Spring
+版本不兼容</strong>——<code>mvn package</code> 的 jar
+插件在服务运行时<strong>就地截断写</strong>同一 inode 的
+<code>api-gateway/target/*.jar</code>（repackage 再把 thin jar 改名
+<code>.jar.original</code>），运行中 JVM 打开的还是那个
+inode：已加载类可用、未加载类读不出来；非 ASCII query 首次触发
+<code>HierarchicalUriComponents$Type</code>
+加载（<code>RouteToRequestUrlFilter</code>→<code>ServerWebExchangeUtils.containsEncodedParts</code>→<code>UriComponentsBuilder.build()</code>→<code>verify()</code>）即
+<code>NoClassDefFoundError</code> → Netty 断连（curl
+<strong>000</strong>，ASCII 仍 200）。证据：同一 fat jar 起新进程中文
+200；坏进程 <code>lsof -p &lt;pid&gt;</code> 的 fd 指向 <strong>11793
+字节</strong>的 <code>.jar.original</code>（磁盘 fat jar
+72MB）；受控实验就地覆盖后首个中文请求 000 +
+<code>ClassNotFoundException: reactor.core.Exceptions</code>。修复：<code>start_app</code>
+记 jar
+指纹（inode:size:mtime，<code>.run/&lt;name&gt;.jar.fp</code>）并在指纹变化时强制重启；<code>platform-up</code>
+构建后重跑
+<code>start_app api-gateway/demo-service</code>（不再静默沿用旧进程）。门禁：<code>platform-verify</code>
+新增 AC-21「网关非 ASCII 查询」段
+<strong>194→199</strong>，<code>platform-test-negative</code>
+加两条反证（8080/8082 响应体逐字节一致 + total
+同源）<strong>130→132</strong>；新下限 <strong>platform-verify
+≥199、negative ≥132</strong>，其余不变（access 206 / rbac 113 / rfv 44 /
+gate-order 21 / change 42 / demo-reset
+80）。教训：<strong><code>make platform-up</code>
+不会换进程</strong>，疑似"版本不兼容"前先
+<code>lsof -p &lt;pid&gt; | grep jar</code> 看进程打开的是哪个
+inode。</p></li>
+<li><p>需求可编辑性矩阵（r43，2026-11-24）：「哪些字段能直接改」是<strong>协议</strong>，不是服务内部逻辑——唯一矩阵在
+<code>platform-contract/src/main/java/com/example/platform/contract/RequirementEditability.java</code>（3
+类型 × 全状态 × 11 字段 →
+<code>EDIT</code>|<code>CHANGE_REQUIRED</code>|<code>LOCKED</code> + 9
+个 reasonCode，判定顺序固定：未知 type/status fail-closed →
+<code>type</code> IMMUTABLE → 终态 TERMINAL → BUS 父需求 NO_PARENT → 非
+RD 人天 PARENT_ROLLUP → 负责人 ASSIGN_FLOW → 域/技术 OPEN_STATE → 早期
+EARLY_STAGE → 其余 CHANGE_REQUIRED），<code>req-service</code>
+只委托、<strong>禁止第二份状态→字段表</strong>（<code>RequirementChangeFields.EARLY_STATUSES</code>
+已删、<code>editableFields</code> 仅投影 7
+字段供旧键）；<code>Detail</code> 顶层投影
+<code>editableFields</code>/<code>changeRequiredFields</code>/<code>lockedFields</code>（元素
+<code>{field,reasonCode}</code>，两两互斥、并集恰 11、规范序），旧
+<code>permissions.editableFields</code> 降为 <code>EDIT ∩ 七字段</code>
+的 deprecated 投影；PUT 顺序固定为 <strong>可见性 → 矩阵 → 业务校验 →
+落库</strong>，先判真实变化：11 字段全同值 → 200 零写库零审计，有变化时
+<code>LOCKED</code> 优先 → 409 <code>FIELD_LOCKED</code>（detail
+<code>{fields,field,reasonCode}</code>、<strong>无</strong>
+changeEndpoint），受控字段 → 409 <code>CHANGE_REQUIRED</code>（detail
+<code>{fields,changeEndpoint}</code>），一次只报一类；前端唯一单点在
+<code>web/src/views/req/editability.ts</code>（<code>REASON_TEXT</code>/<code>REASON_MARKER</code>/<code>editabilityOf</code>/<code>editDisabledReason</code>
+全仓唯一），抽屉与详情只按三数组渲染、任一数组缺失即
+fail-closed，<strong>禁止</strong>
+<code>children.length</code>/<code>isParent</code>/按 status
+本地推断可编辑性；门禁 <code>editability-verify</code>
+<strong>36</strong> 条 6 段（<code>--static-only</code> 6 条免栈，S1
+静态段同时守护本文件的基线与 REQUIREMENT-FLOW 小节已回写）。</p></li>
+</ul>
+<h2
+id="已解决20261108-r1-修复轮实测复核勿按旧结论排障">已解决（20261108-r1
+修复轮实测复核，勿按旧结论排障）</h2>
+<ul>
+<li><code>make dev-down</code> 实测
+<strong>4–5s</strong>（≤10s）：两个模块已设
+<code>spring.cloud.nacos.discovery.graceful-shutdown-wait-time: 0</code>，不再有
+SCA 默认 10s × 2 的等待。</li>
+<li>停掉 demo-service 后网关<strong>首个非 200 即 503</strong>（固定
+JSON
+<code>downstream instance unreachable</code>）：<code>ApiGatewayApplication.connectRefusedIs503</code>
+同时映射 <code>ConnectException</code> 与
+<code>PrematureCloseException</code>；重启恢复实测 2–17s（≤60s）。</li>
+<li><code>make dev-up</code> <strong>可重入</strong>：环境 READY 时重跑
+exit 0 + <code>READY</code>（阶段 0 识别本项目 PID），不再需要先
+<code>make dev-down</code>。</li>
+<li>回归防线：<code>make lint</code>（<code>scripts/tests/lint.sh</code>）用
+9 条静态/实测断言锁住上述缺陷类（<code>${VAR}</code>
+插值、公共函数单点、错误提示、文档一致性），<code>make test</code>
+已包含它。</li>
+</ul>
+<h2 id="文档位置">文档位置</h2>
+<ul>
+<li>需求产物：<code>docs/teamflow/&lt;yyyyMMdd-rN-slug&gt;/</code>（创建后不可变、不升版）。</li>
+<li>跨需求架构文档：<code>docs/teamflow/architecture/ARCHITECTURE.md</code>（模块契约、脚本契约、版本矩阵、验收映射）。</li>
+<li>脚手架入口：<code>README.md</code>
+的“从零到绿灯”五条命令；<code>make dev-up / verify / test-negative / dev-down</code>（加静态门禁
+<code>make lint</code>）为唯一验证路径。</li>
+</ul>
+</div></body></html>

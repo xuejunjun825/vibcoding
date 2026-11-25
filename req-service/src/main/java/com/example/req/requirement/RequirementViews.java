@@ -48,7 +48,25 @@ public final class RequirementViews {
                        LocalDate expectedDeliveryDate, LocalDate planStartDate, LocalDate planEndDate,
                        LocalDateTime closedAt, LocalDateTime updatedAt,
                        Rollup rollup, List<String> allowedActions, Map<String, Object> permissions,
-                       Long projectId, DecomposeGate decomposeGate, List<TagView> tags) {
+                       Long projectId, DecomposeGate decomposeGate,
+                       /*
+                        * r47 需求池运营：跟单热度。两个字段放在 View 上、由
+                        * RequirementFollowQuery 统一批量查，列表（RequirementPoolQuery）与详情
+                        * （RequirementService.toView）必须走同一个来源——r27 的教训正是「列表加了、
+                        * 详情忘了」，同一需求两个页面显示不同的热度/「我也需要」状态。
+                        *
+                        * followCount 含自己；followedByMe 由调用者视角算出（系统作用域恒 false）。
+                        */
+                       long followCount, boolean followedByMe,
+                       /*
+                        * r47 需求池运营/合并：合并后的可追溯信息。close_reason 与 merged_into_id 是
+                        * V23 新增的两列，详情与列表都要能读到——门禁 P3-1 与前端「已并入 X」提示都
+                        * 依赖 detail.view 上的这两个字段，只落库不回读等于运营看不到合并去向。
+                        */
+                       String closeReason, Long mergedIntoId,
+                       /* tags 必须是最后一个参数：lint L22 静态锁住「构造器签名以必填 List<TagView> tags 收尾」，
+                        * tags 一旦被默认成空表或改成可选，详情就会静默丢标签（r39 Q-1 的原始缺陷）。 */
+                       List<TagView> tags) {
 
         /*
          * 只有一个构造器，`tags` 是必填参数（r39 Q-1）。
