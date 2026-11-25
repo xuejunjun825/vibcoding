@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>流程调整设计方案：产品需求评审 + 厂商工时评估</title>
+<style>
+:root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
+*{box-sizing:border-box}
+body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:980px;margin:0 auto;padding:28px 32px}
+h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
+h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
+tr:hover td{background:#F7F9FC}
+td:first-child,th:first-child{white-space:nowrap}
+code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
+pre code{background:none;padding:0;color:var(--text)}
+blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
+blockquote p{margin:4px 0}
+.toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+h1.title{display:none}
+.page{max-width:1560px;margin:0 auto;padding:28px 32px}
+img{max-width:100%;height:auto}
+</style></head><body><div class="page">
+<div class="toc"><div class="toc-title">目录</div>
+<ul>
+<li><a href="#流程调整设计方案产品需求评审--厂商工时评估"
+id="toc-流程调整设计方案产品需求评审--厂商工时评估">流程调整设计方案：产品需求评审
++ 厂商工时评估</a>
+<ul>
+<li><a href="#1-一句话目标" id="toc-1-一句话目标">1. 一句话目标</a></li>
+<li><a href="#2-现状取证改之前先确认现在长什么样"
+id="toc-2-现状取证改之前先确认现在长什么样">2.
+现状取证（改之前先确认现在长什么样）</a></li>
+<li><a href="#3-目标流程" id="toc-3-目标流程">3. 目标流程</a></li>
+<li><a href="#4-数据模型变更" id="toc-4-数据模型变更">4.
+数据模型变更</a></li>
+<li><a href="#5-接口变更" id="toc-5-接口变更">5. 接口变更</a></li>
+<li><a href="#6-服务端规则可直接抄成-prd-验收"
+id="toc-6-服务端规则可直接抄成-prd-验收">6. 服务端规则（可直接抄成 PRD
+验收）</a></li>
+<li><a href="#7-权限与动作码" id="toc-7-权限与动作码">7.
+权限与动作码</a></li>
+<li><a href="#8-前端交互交互稿见-prototype-pdr-reviewindexhtml"
+id="toc-8-前端交互交互稿见-prototype-pdr-reviewindexhtml">8.
+前端交互（交互稿见
+<code>prototype-pdr-review/index.html</code>）</a></li>
+<li><a href="#9-演示数据要求make-platform-demo-reset-后"
+id="toc-9-演示数据要求make-platform-demo-reset-后">9.
+演示数据要求（<code>make platform-demo-reset</code> 后）</a></li>
+<li><a href="#10-验收标准可执行" id="toc-10-验收标准可执行">10.
+验收标准（可执行）</a></li>
+<li><a href="#11-迁移与兼容" id="toc-11-迁移与兼容">11.
+迁移与兼容</a></li>
+<li><a href="#12-影响面与风险" id="toc-12-影响面与风险">12.
+影响面与风险</a></li>
+<li><a href="#13-建议分轮" id="toc-13-建议分轮">13. 建议分轮</a></li>
+<li><a href="#14-交付物清单" id="toc-14-交付物清单">14.
+交付物清单</a></li>
+</ul></li>
+</ul></div>
+<h1
+id="流程调整设计方案产品需求评审--厂商工时评估">流程调整设计方案：产品需求评审
++ 厂商工时评估</h1>
+<blockquote>
+<p><strong>本文是什么</strong>：给流水线 PRD 阶段的输入材料（不是最终
+PRD）。含现状取证（精确到文件行）、目标流程、数据/接口/权限变更、交互稿、可执行验收口径、迁移与风险。
+<strong>基线</strong>：<code>main = f8dee2a</code>（2026-11-25）。取证方式=读代码
++ 真跑接口，每条都带证据。 <strong>用户原话</strong>（2026-11-25）：</p>
+<ol type="1">
+<li>「工作量评估是由厂商做的，所以要先选择厂商后再评估工作量，再任务还没开始前，允许变更厂商」</li>
+<li>「产品需求也需要进行评审，要反馈评审意见，评审人员可以选择参与的项目组成员，大家各自发表评审意见」</li>
+</ol>
+</blockquote>
+<h2 id="1-一句话目标">1. 一句话目标</h2>
+<p>把产品需求（PDR）从「拆出来就评估排期」改成 <strong>评审 → 选厂商 →
+厂商评估 → 排期 → 拆
+RD</strong>，并把工时评估的所有权从内部挪到承接厂商（任务开始前可换厂商，换厂商即重评）。</p>
+<h2 id="2-现状取证改之前先确认现在长什么样">2.
+现状取证（改之前先确认现在长什么样）</h2>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>现状</th>
+<th>证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>指派厂商</td>
+<td>只校验「未终态」；写 <code>VENDOR_TRANSFER</code> 审计 +
+通知；<strong>没有任何状态门</strong>，也不与工时评估联动</td>
+<td><code>req-service/src/main/java/com/example/req/requirement/RequirementService.java:680-714</code></td>
+</tr>
+<tr>
+<td>指派厂商的权限</td>
+<td>动作码 <code>req.action.assign_vendor</code> → 功能码
+<code>req:assign-vendor</code>；路由规则精确匹配</td>
+<td><code>platform-contract/.../ActionRegistry.java:80</code>、<code>platform-common/.../PermissionRouteTable.java:139-140</code></td>
+</tr>
+<tr>
+<td>PDR 状态机</td>
+<td><code>PENDING_ANALYSIS --schedule--&gt; SCHEDULED --start_dev--&gt; IN_DEV --deliver--&gt; DELIVERED --accept--&gt; ACCEPTED_CLOSED</code>，<strong>没有评审态</strong></td>
+<td><code>platform-contract/.../StateTables.java:76-78</code></td>
+</tr>
+<tr>
+<td>工时评估提交</td>
+<td><code>POST /requirements/{id}/estimate</code> → 建第 5 类单据
+<code>WBS_ESTIMATE</code>；权限是<strong>服务层</strong>判
+<code>can("deliver")</code>（内部 PMO/研发），厂商账号无此档位</td>
+<td><code>req-service/.../requirement/WbsEstimateService.java:92-141</code>、<code>:583-590</code></td>
+</tr>
+<tr>
+<td>评估单与厂商</td>
+<td><strong>无绑定</strong>：评估单文档里没有 vendor
+字段，换厂商不会让评估失效</td>
+<td>同上；<code>EstimateSnapshot</code>/<code>WbsEstimateViews</code> 无
+vendor</td>
+</tr>
+<tr>
+<td>评估失效</td>
+<td>只有「人天变动 &gt;±20%」派生 <code>STALE</code>（r26）</td>
+<td><code>WbsEstimateService.STALE_THRESHOLD</code></td>
+</tr>
+<tr>
+<td>产品需求评审</td>
+<td><strong>不存在</strong>。仅业务需求有
+<code>REQ_REVIEW</code>，且审批通过由回调自动推进 POOLED</td>
+<td><code>PlatformContract</code>/<code>StateTables.java:66-71</code>；<code>req-service/.../requirement/RequirementReviewCallback.java:26-30</code></td>
+</tr>
+<tr>
+<td>审批引擎能力</td>
+<td>支持 5
+类单据、节点会签/或签（<code>MODE_ALL</code>/<code>MODE_ANY</code>）、审批人来源
+<code>ROLE/USER/SUPERVISOR/DOMAIN_OWNER</code>，可复用来做「多人评审」</td>
+<td><code>req-service/.../approval/WorkflowDefinition.java:27-28</code>、<code>ApproverResolver.java:18-78</code>、<code>ApprovalEngine.java:542</code></td>
+</tr>
+<tr>
+<td>项目组 / 项目成员</td>
+<td><strong>全仓不存在</strong>（<code>grep -rniE "project_member|projectMember|sys_project|项目组"</code>
+零命中）</td>
+<td>需新增，否则「评审人从项目组成员里选」没有数据来源</td>
+</tr>
+<tr>
+<td>迁移现状</td>
+<td>最新 <code>V16__requirement_change.sql</code>，新增从
+<strong>V17</strong> 起</td>
+<td><code>req-service/src/main/resources/db/migration/</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>一个容易踩的坑</strong>：<code>POST /requirements/{id}/estimate</code>
+在路由表里落到兜底规则
+<code>^/requirements.*$ → page("req.pool","me.tasks")</code>（<code>PermissionRouteTable.java:163</code>），所以它<strong>看起来</strong>没有权限校验；真正的
+403 来自服务层
+<code>requireDeliverPermission</code>（<code>WbsEstimateService.java:583-590</code>）。改造时若要新增动作码，必须把精确规则插在这条兜底之前，否则会被页面权限放行。</p>
+<h2 id="3-目标流程">3. 目标流程</h2>
+<h3 id="31-pdr-段目标顺序">3.1 PDR 段目标顺序</h3>
+<pre><code>拆出产品需求(PDR, PENDING_ANALYSIS)
+      │
+      ▼
+① 产品需求评审  项目组成员多人并行，各自 通过/需修改/驳回 + 意见
+      │ 全部通过
+      ▼
+② 指派承接厂商  assign-vendor（此时才允许；换厂商窗口直到「任务开始」）
+      │
+      ▼
+③ 厂商提交工时评估  评估人天 + 说明，评估单绑定 vendor_id
+      │ 审批通过
+      ▼
+④ 排期 schedule → SCHEDULED
+      │
+      ▼
+⑤ 拆研发需求 decompose → RD(TODO)
+      │
+      ▼
+   现有 RD 链路（开始开发→任务→提测→测试结论→合入→完成→交付→验收）</code></pre>
+<h3 id="32-状态与门禁对照">3.2 状态与门禁对照</h3>
+<table>
+<thead>
+<tr>
+<th>环节</th>
+<th>现在</th>
+<th>目标</th>
+<th>违反时的错误码</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PDR 评审</td>
+<td>无</td>
+<td>未通过评审：不能指派厂商/评估/排期</td>
+<td><code>409 PDR_REVIEW_REQUIRED</code>（detail:
+<code>reviewId?</code>, <code>required:"pdr_review"</code>）</td>
+</tr>
+<tr>
+<td>指派厂商</td>
+<td>任何未终态</td>
+<td>评审通过后；<code>IN_DEV</code> 之后不可换</td>
+<td><code>409 VENDOR_LOCKED</code>（detail: <code>currentStatus</code>,
+<code>allowed:["TODO"]</code> 语义按类型给）</td>
+</tr>
+<tr>
+<td>工时评估</td>
+<td>内部 PMO/研发提交</td>
+<td><strong>由承接厂商提交</strong>（内部保留兜底权，见 §6 R4）</td>
+<td><code>409 VENDOR_NOT_ASSIGNED</code>（detail:
+<code>required:"assign_vendor"</code>）</td>
+</tr>
+<tr>
+<td>排期</td>
+<td>需评估通过（r26）</td>
+<td>不变，额外要求厂商评估</td>
+<td><code>409 ESTIMATE_NOT_APPROVED</code>（已有）</td>
+</tr>
+<tr>
+<td>换厂商</td>
+<td>随时可换、评估不失效</td>
+<td>换厂商 → 原评估单失效 → 必须新厂商重评</td>
+<td>审计 <code>VENDOR_CHANGED</code>；评估派生 <code>STALE</code>（原因
+<code>VENDOR_CHANGED</code>）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="33-厂商生命周期">3.3 厂商生命周期</h3>
+<pre><code>未指派 ──assign-vendor(原因必填)──▶ 已指派(VENDOR_A)
+                                        │
+                    厂商提交评估 ──▶ 评估通过(绑定 VENDOR_A)
+                                        │
+     ┌──────────── 任务未开始（RD=TODO 且 PDR≠IN_DEV）────────────┐
+     │  换厂商(原因必填) → 评估单失效(STALE/VENDOR_CHANGED) → 回「未评估」│
+     └──────────────────────────────────────────────────────────┘
+                                        │ 任务开始（RD IN_DEV / PDR IN_DEV）
+                                        ▼
+                                      锁定（换厂商 409 VENDOR_LOCKED，走需求变更单）</code></pre>
+<h2 id="4-数据模型变更">4. 数据模型变更</h2>
+<h3 id="41-新增表">4.1 新增表</h3>
+<table>
+<thead>
+<tr>
+<th>表</th>
+<th>关键列</th>
+<th>约束/索引</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>project</code></td>
+<td><code>id, tenant_id, code, name, domain_id, owner_user_id, status(ACTIVE/ARCHIVED), created_at</code></td>
+<td><code>uk(tenant_id, code)</code>；<code>idx(tenant_id, domain_id)</code></td>
+</tr>
+<tr>
+<td><code>project_member</code></td>
+<td><code>id, tenant_id, project_id, user_id, role_in_project(PO/PM/DEV/QA/SME), active, joined_at</code></td>
+<td><code>uk(project_id, user_id)</code>；<code>idx(tenant_id, user_id)</code></td>
+</tr>
+<tr>
+<td><code>pdr_review</code></td>
+<td><code>id, tenant_id, requirement_id, project_id, instance_id, status(DRAFT/IN_REVIEW/PASSED/REJECTED/CANCELLED), conclusion, initiator_id, created_at, closed_at</code></td>
+<td><strong><code>uk(requirement_id) where status='IN_REVIEW'</code></strong>（同一需求同时只允许
+1 张在评）；<code>idx(tenant_id, status)</code></td>
+</tr>
+<tr>
+<td><code>pdr_review_opinion</code></td>
+<td><code>id, tenant_id, review_id, reviewer_id, decision(PASS/NEED_CHANGE/REJECT), comment, created_at</code></td>
+<td><code>uk(review_id, reviewer_id)</code>（同一人只留一条有效意见，重提覆盖并进历史）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42-既有表增量">4.2 既有表增量</h3>
+<table>
+<thead>
+<tr>
+<th>表</th>
+<th>新增列</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>requirement</code></td>
+<td><code>project_id BIGINT NULL</code></td>
+<td>PDR 建议必填；存量 NULL
+走回退规则；<code>idx(tenant_id, project_id)</code></td>
+</tr>
+<tr>
+<td><code>wbs_estimate</code>（若评估单落独立表）或评估文档</td>
+<td><code>vendor_id BIGINT NULL</code>、<code>participant_kind INTERNAL/VENDOR</code></td>
+<td>存量回填
+<code>vendor_id = requirement.assignee_vendor_id</code>；为空表示内部评估</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>若评估单以 JSON
+文档存于审批实例（现状如此，<code>EstimateSnapshot</code>），则把
+<code>vendor_id</code> 写进文档并在 <code>wbs_estimate</code>
+汇总表加列以便查询/校验；两种存法都要在验收里断言「换厂商后读出来是
+STALE」。</p>
+</blockquote>
+<h2 id="5-接口变更">5. 接口变更</h2>
+<h3 id="51-新增">5.1 新增</h3>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>路径</th>
+<th>用途</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET/POST</code></td>
+<td><code>/projects</code>、<code>PUT /projects/{id}</code></td>
+<td>项目维护</td>
+<td>权限 <code>org:manage</code></td>
+</tr>
+<tr>
+<td><code>GET/POST/DELETE</code></td>
+<td><code>/projects/{id}/members</code></td>
+<td>项目成员维护</td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/requirements/{id}/pdr-review</code></td>
+<td>发起 PDR 评审：<code>{reviewerIds:[], note}</code></td>
+<td>动作码 <code>req.action.pdr_review_start</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/pdr-reviews/{reviewId}/opinions</code></td>
+<td>评审人提交意见：<code>{decision, comment}</code></td>
+<td>动作码 <code>req.action.pdr_review_opinion</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/pdr-reviews/{reviewId}/conclude</code></td>
+<td>汇总结论（<strong>也可以全票后自动汇总</strong>，见 §6 R2）</td>
+<td>动作码 <code>req.action.pdr_review_conclude</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/requirements/{id}/pdr-review</code></td>
+<td>读评审单 + 意见列表</td>
+<td>页面码 <code>req.pool</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="52-变更">5.2 变更</h3>
+<table>
+<thead>
+<tr>
+<th>接口</th>
+<th>变更</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /requirements/{id}/assign-vendor</code></td>
+<td>加状态门（评审通过才允许、IN_DEV 后
+409）；换厂商时作废已通过评估单并通知新旧厂商</td>
+</tr>
+<tr>
+<td><code>POST /requirements/{id}/estimate</code></td>
+<td>要求「已指派厂商」（409
+<code>VENDOR_NOT_ASSIGNED</code>）；允许厂商账号提交且仅限本厂商承接需求；评估文档写
+<code>vendor_id</code></td>
+</tr>
+<tr>
+<td><code>GET /requirements/{id}</code></td>
+<td><code>view</code> 增加
+<code>pdrReview{status, conclusion, opinions[]}</code>、<code>estimate.vendorId/vendorName</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-服务端规则可直接抄成-prd-验收">6. 服务端规则（可直接抄成 PRD
+验收）</h2>
+<ul>
+<li><strong>R1 顺序门</strong>：PDR 未通过评审 → 指派厂商/评估/排期一律
+409 <code>PDR_REVIEW_REQUIRED</code>；未指派厂商 → 评估 409
+<code>VENDOR_NOT_ASSIGNED</code>；评估未通过 → 排期 409
+<code>ESTIMATE_NOT_APPROVED</code>（已有）。</li>
+<li><strong>R2
+评审结论</strong>：<code>MODE_ALL</code>（默认全员通过才算通过）；任一
+<code>NEED_CHANGE</code>/<code>REJECT</code> → 评审
+<code>REJECTED</code>，PDR
+保持可编辑并记录意见；重新发起评审需新建单据（历史保留）。</li>
+<li><strong>R3 换厂商</strong>：允许窗口 = RD 处于 <code>TODO</code> 且
+PDR 未进 <code>IN_DEV</code>；换厂商 → 该需求 <code>APPROVED</code>
+评估单派生 <code>STALE</code>（原因 <code>VENDOR_CHANGED</code>）→
+状态回到「待评估」；<code>IN_DEV</code> 之后 409
+<code>VENDOR_LOCKED</code>；换厂商必须填原因，写
+<code>VENDOR_CHANGED</code> 审计并通知新旧厂商。</li>
+<li><strong>R4 厂商评估</strong>：厂商账号（<code>VENDOR_PM</code>
+与厂商研发）可提交评估，且
+<code>requirement.assignee_vendor_id == user.vendorId</code>，否则
+<code>403 OUT_OF_SCOPE</code>；内部
+PMO/研发<strong>保留提交权</strong>（缺省保留，便于兜底），但同样要求先指派厂商。</li>
+<li><strong>R5 幂等与并发</strong>：同一需求同时只有 1 张
+<code>IN_REVIEW</code> 评审单、1 张 <code>ACTIVE</code>
+评估单；并发发起/重复提交用唯一约束 + 409
+兜底；换厂商与提交评估加乐观锁（<code>version</code>）避免「换厂商后立刻被旧厂商提交评估」。</li>
+<li><strong>R6 审计</strong>：<code>PDR_REVIEW_START</code> /
+<code>PDR_REVIEW_OPINION</code> / <code>PDR_REVIEW_REJECT</code> /
+<code>PDR_REVIEW_PASS</code> / <code>VENDOR_CHANGED</code> /
+<code>ESTIMATE_STALE_BY_VENDOR</code>，全部进动态流与追溯。</li>
+</ul>
+<h2 id="7-权限与动作码">7. 权限与动作码</h2>
+<table>
+<thead>
+<tr>
+<th>新增动作码</th>
+<th>页面码</th>
+<th>默认授予</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>req.action.pdr_review_start</code></td>
+<td><code>req.pool</code></td>
+<td>产品经理、域负责人、PMO</td>
+<td>发起评审</td>
+</tr>
+<tr>
+<td><code>req.action.pdr_review_opinion</code></td>
+<td><code>req.pool</code></td>
+<td>被选中的项目组成员（运行时校验）+ 产品经理</td>
+<td>提交意见</td>
+</tr>
+<tr>
+<td><code>req.action.pdr_review_conclude</code></td>
+<td><code>req.pool</code></td>
+<td>产品经理、域负责人</td>
+<td>汇总/驳回</td>
+</tr>
+<tr>
+<td><code>req.action.estimate_submit</code></td>
+<td><code>req.pool</code></td>
+<td><code>VENDOR_PM</code>、厂商研发、内部 PMO/研发</td>
+<td>替代现在只认 <code>req:deliver</code> 的判定</td>
+</tr>
+</tbody>
+</table>
+<p>路由表新增条目<strong>必须插在 <code>^/requirements.*$</code>
+兜底之前</strong>（<code>PermissionRouteTable.java:163</code>），否则会被页面权限放行。</p>
+<h2 id="8-前端交互交互稿见-prototype-pdr-reviewindexhtml">8.
+前端交互（交互稿见 <code>prototype-pdr-review/index.html</code>）</h2>
+<p><img src="prototype-pdr-review/shot-1-pdr-review.png"
+alt="PDR 评审" /> <img
+src="prototype-pdr-review/shot-2-vendor-transfer.png"
+alt="指派/换厂商" /> <img
+src="prototype-pdr-review/shot-3-vendor-estimate.png"
+alt="厂商提交评估" /></p>
+<ol type="1">
+<li><strong>PDR 详情新增「评审」tab</strong>：发起按钮 +
+评审人选择（只能选项目组成员，多选）+
+说明；列表展示每人「通过/需修改/驳回 + 意见 + 时间」；顶部结论条（N/M
+已评）。</li>
+<li><strong>指派厂商弹窗改造</strong>：加「换厂商会作废已通过的工时评估，需重新评估」的黄色提示；原因必填；<code>IN_DEV</code>
+后按钮禁用并给原因。</li>
+<li><strong>工时评估弹窗改造</strong>：显示「承接厂商」徽标；厂商账号进入时默认本单位；非本厂商或无权限时按钮禁用
++ 悬停原因（沿用 r25 的 <code>需要权限：&lt;码&gt;</code>
+文案形态）。</li>
+<li><strong>需求详情评估卡</strong>：增加「评估厂商 / 评估人 /
+评估时间」三行；<code>STALE</code> 时展示失效原因（人天变动 /
+换厂商）。</li>
+</ol>
+<h2 id="9-演示数据要求make-platform-demo-reset-后">9.
+演示数据要求（<code>make platform-demo-reset</code> 后）</h2>
+<table>
+<thead>
+<tr>
+<th>样例</th>
+<th>期望</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>项目</td>
+<td><code>DEMO-PROJ-1 供应链平台</code>，成员 5
+人（产品经理/域负责人/研发/测试/厂商 PM）</td>
+</tr>
+<tr>
+<td>PDR-1</td>
+<td>待评审（评审单 IN_REVIEW，2/4 已评）</td>
+</tr>
+<tr>
+<td>PDR-2</td>
+<td>评审通过、已指派 VEN-A、待提交评估</td>
+</tr>
+<tr>
+<td>PDR-3</td>
+<td>评审通过、VEN-A 评估通过、已排期</td>
+</tr>
+<tr>
+<td>RD</td>
+<td>挂在 PDR-3 下，<code>TODO</code>（可用于演示换厂商 → 评估失效）</td>
+</tr>
+</tbody>
+</table>
+<h2 id="10-验收标准可执行">10. 验收标准（可执行）</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>断言</th>
+<th>期望</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A1</td>
+<td>未指派厂商直接 <code>POST /estimate</code></td>
+<td>409 <code>VENDOR_NOT_ASSIGNED</code></td>
+</tr>
+<tr>
+<td>A2</td>
+<td>厂商 <code>vpm1</code> 对已指派 VEN-A 的 PDR 提交评估</td>
+<td>201；<code>GET</code> 评估卡 <code>vendorName=VEN-A</code></td>
+</tr>
+<tr>
+<td>A3</td>
+<td>换厂商（VEN-A→VEN-B）后读评估</td>
+<td><code>status=STALE</code>、<code>reason=VENDOR_CHANGED</code>；审计有
+<code>VENDOR_CHANGED</code>；新厂商重评 → 201</td>
+</tr>
+<tr>
+<td>A4</td>
+<td>RD 进入 <code>IN_DEV</code> 后换厂商</td>
+<td>409 <code>VENDOR_LOCKED</code>，提示走变更单</td>
+</tr>
+<tr>
+<td>A5</td>
+<td>厂商对<strong>别家</strong>厂商承接的需求提交评估</td>
+<td>403 <code>OUT_OF_SCOPE</code></td>
+</tr>
+<tr>
+<td>B1</td>
+<td>未通过评审直接指派厂商/评估/排期</td>
+<td>409 <code>PDR_REVIEW_REQUIRED</code></td>
+</tr>
+<tr>
+<td>B2</td>
+<td>4 名评审人：3 通过 1 需修改</td>
+<td>评审 <code>REJECTED</code>；意见 4 条可见；PDR 可编辑</td>
+</tr>
+<tr>
+<td>B3</td>
+<td>重新发起并 4 人全通过</td>
+<td><code>PASSED</code>；此后指派厂商 200</td>
+</tr>
+<tr>
+<td>B4</td>
+<td>评审人不在项目组</td>
+<td>400 <code>REVIEWER_NOT_IN_PROJECT</code></td>
+</tr>
+<tr>
+<td>B5</td>
+<td>项目组为空发起评审</td>
+<td>按回退规则（产品经理+域负责人）成功，响应带
+<code>fallback:true</code></td>
+</tr>
+</tbody>
+</table>
+<p>门禁：既有 9 套不得降（<code>rbac</code> / <code>access</code> /
+<code>platform</code> / <code>negative</code> /
+<code>release-flow</code> / <code>gate-order</code> /
+<code>automation</code> / <code>change</code> /
+<code>demo-reset</code>）；新增 <code>scripts/pdr-flow-verify.sh</code>
+≥18 条断言（含 A1–A5、B1–B5 与换厂商幂等），接入
+<code>make test</code>。</p>
+<h2 id="11-迁移与兼容">11. 迁移与兼容</h2>
+<ul>
+<li>迁移 <strong>V17</strong> 建 4 张表 +
+<code>requirement.project_id</code>、评估 vendor
+列；<strong>V18</strong> 回填（存量 PDR 的 <code>project_id</code>
+留空，评审走回退；存量评估单
+<code>vendor_id = assignee_vendor_id</code>）。</li>
+<li>符合 r41 迁移卫生判据：区间内 0 或 1 条新增、版本 = 基线最大 +
+1（若一次交付两条迁移需先在方案里说明并扩展判据，建议合并为单条
+V17）。</li>
+<li>回滚：表可 DROP；<code>project_id</code>/<code>vendor_id</code>
+可空，回滚不丢业务数据；评估单派生 <code>STALE</code>
+只改状态不改历史。</li>
+<li>兼容：旧客户端不传 <code>project_id</code> 时 PDR
+仍可创建（评审回退规则），避免一次性破坏演示脚本。</li>
+</ul>
+<h2 id="12-影响面与风险">12. 影响面与风险</h2>
+<p><strong>后端</strong>：<code>requirement</code>（服务/控制器/规则/错误码）、<code>approval</code>（新单据类型
++ 回调）、<code>estimate</code>（vendors
+绑定）、<code>sys</code>（项目组
+CRUD）、<code>platform-contract</code>（动作码/状态表）、<code>platform-common</code>（路由表）、迁移
+2 条。 <strong>前端</strong>：需求详情（评审
+tab、评估卡、指派厂商弹窗）、项目组管理页、审批中心（新单据类型文案）、动作按钮禁用原因。
+<strong>脚本/数据</strong>：<code>platform-demo-reset.sh</code>（新夹具）、<code>pdr-flow-verify.sh</code>（新门禁）、<code>SeedService</code>（项目组种子）、<code>DEMO-BY-ROLE.md</code>、<code>FLOW-CONTROL-AUDIT.md</code>。</p>
+<p><strong>风险</strong> | 风险 | 影响 | 缓解 | |---|---|---| | 评审人多
+→ 流程卡住 | PDR 长期停在待评审 | 超时提醒（48h
+站内+邮件）、发起人可催办、可撤销重发 | | 换厂商导致评估抖动 |
+评估单反复作废 | 换厂商原因必填 + 频率限制（如同一需求 24h 内 ≤2 次）+
+审计留痕 | | 存量数据无项目组 | 老 PDR 无法评审 | 回退规则（产品经理 +
+域负责人）并标记 <code>fallback</code> | | 状态机改动面大 |
+旧门禁/演示脚本红 | 不改 PDR
+状态机（用门禁而非新态），把风险限制在规则层 | | 厂商权限放大 |
+越权看到别家需求 | 复用既有 <code>ScopeSql</code> 行级隔离 +
+<code>OUT_OF_SCOPE</code> 负向断言 |</p>
+<h2 id="13-建议分轮">13. 建议分轮</h2>
+<ul>
+<li><strong>轮 1（P0，一轮交付）</strong>：项目组模型 + PDR
+评审（发起/意见/汇总）+ 顺序门 + 厂商评估绑定 + 换厂商失效 + 4 张表 + 2
+条迁移 + <code>pdr-flow-verify.sh</code> + 演示数据。工作量估计：后端
+2.5 人日、前端 2 人日、测试 1 人日（按 0.5 人天精度记）。</li>
+<li><strong>轮
+2（P1）</strong>：评审超时提醒/催办、评审意见导出（带水印）、评估历史对比视图、换厂商频率限制可配。</li>
+</ul>
+<h2 id="14-交付物清单">14. 交付物清单</h2>
+<ol type="1">
+<li><code>docs/teamflow/CHANGE-PDR-REVIEW-VENDOR-ESTIMATE.md</code> +
+<code>.html</code>（本文）</li>
+<li><code>docs/teamflow/prototype-pdr-review/index.html</code>（3
+屏交互稿）+ 截图</li>
+<li>流水线 PRD（由 TeamFlow 依据本文生成）→ 设计 → 技术方案 → 开发 → QA
+→ 验收</li>
+</ol>
+</div></body></html>
