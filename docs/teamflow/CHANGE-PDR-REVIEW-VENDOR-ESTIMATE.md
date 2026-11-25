@@ -89,7 +89,7 @@
 | `project` | `id, tenant_id, code, name, domain_id, owner_user_id, status(ACTIVE/ARCHIVED), created_at` | `uk(tenant_id, code)`；`idx(tenant_id, domain_id)` |
 | `project_member` | `id, tenant_id, project_id, user_id, role_in_project(PO/PM/DEV/QA/SME), active, joined_at` | `uk(project_id, user_id)`；`idx(tenant_id, user_id)` |
 | `pdr_review` | `id, tenant_id, requirement_id, project_id, instance_id, status(DRAFT/IN_REVIEW/PASSED/REJECTED/CANCELLED), conclusion, initiator_id, created_at, closed_at` | **`uk(requirement_id) where status='IN_REVIEW'`**（同一需求同时只允许 1 张在评）；`idx(tenant_id, status)` |
-| `pdr_review_opinion` | `id, tenant_id, review_id, reviewer_id, decision(PASS/NEED_CHANGE/REJECT), **category**, comment, created_at` | `uk(review_id, reviewer_id)`；`idx(tenant_id, category)`（统计用） |
+| `pdr_review_opinion` | `id, tenant_id, review_id, reviewer_id, seq(该评审人第几条), decision(PASS/NEED_CHANGE/REJECT), **category**, comment, **status(OPEN/TASKED/RESOLVED)**, **task_id**, created_at` | **不做 (review_id, reviewer_id) 唯一约束**（同一人可提多条）；`idx(review_id)`、`idx(tenant_id, category)`、`idx(task_id)` |
 
 ### 4.2 评审附件（复用既有附件表，不新增表）
 
@@ -134,6 +134,26 @@
 - 评审人维度：每人发起/参与/意见数/需修改比例。
 - 维度表：`pdr_review`（评审单）、`pdr_review_opinion`（意见）作为新数据集进分析域，供 `/reports` 自助报表与看板直接取数（复用既有 `AnalyticsDatasets` 白名单机制，**不写第二套 SQL 引擎**）。
 
+### 4.5 多条意见与「意见转任务」
+
+**为什么允许多条**：一条评审意见通常只针对一个点（范围、性能、验收口径……），把它们塞进一段文字里，既无法分类统计，也无法逐条跟踪闭环。所以：
+
+- 同一次评审、同一个人可以提 **N 条意见**（`seq` 递增，不设唯一约束），每条独立拥有 `category / decision / comment / 附件 / status`；
+- **评审结论仍由评审单整体判定**（`MODE_ALL` 等），不因某人不通过而"每人只能一条"——多条意见属于"一个人提了几个问题"，不是"投了几票"；统计口径里"意见"与"评审单"分开算（见 4.4）。
+- 每条意见有生命周期：`OPEN`（待处理）→ `TASKED`（已转任务）→ `RESOLVED`（任务完成/问题消除）；`decision=REJECT` 的意见可标 `RESOLVED` 结案，不必都转任务。
+
+**意见转任务**（把评审结论变成可执行动作，闭环的关键）：
+
+| 项 | 说明 |
+|---|---|
+| 端点 | `POST /pdr-reviews/{reviewId}/opinions/{opinionId}/to-task` |
+| 请求 | `{assigneeId?, dueDate?, estimateHours?, title?, description?}`（都可选，缺省从意见推导） |
+| 落库 | 复用交付域 `task` 表（`deliver-service`）：`title` 缺省取意见前 40 字、`description` 带「来源：PDR 评审 #reviewId · 分类 · 原文」、`requirementId` 挂该 PDR 的父 RD 或 PDR 本身（PDR 无任务归属时挂 PDR） |
+| 回写 | `pdr_review_opinion.task_id` = 新任务 id、`status = TASKED`；写入 `audit_log`（`PDR_OPINION_TO_TASK`，detail 带 opinionId/taskId/category） |
+| 限制 | 已转过的意见再转 → `409 OPINION_ALREADY_TASKED`（detail 带既有 `taskId`）；非本评审评审人且非产品经理 → `403 NOT_ALLOWED`；**评审结束后仍可转任务**（复盘落地属后续动作，不随评审关闭而禁止） |
+| 可见性 | 任务继承 `ScopeSql` 行级隔离；厂商评审人转出的任务只能落在本厂商承接范围（越界 `403 OUT_OF_SCOPE`） |
+| 统计 | `/pdr-reviews/stats` 增加 `taskedCount` 与「意见闭环率 = TASKED+RESOLVED / 全部意见」两个度量 |
+
 ## 5. 接口变更
 
 ### 5.1 新增
@@ -146,6 +166,8 @@
 | `POST` | `/pdr-reviews/{reviewId}/opinions` | 评审人提交意见：`{decision, **category**, comment}`（`category` 必填，非法值 400 `INVALID_CATEGORY`） | 动作码 `req.action.pdr_review_opinion` |
 | `POST` | `/pdr-reviews/{reviewId}/conclude` | 汇总结论（**也可以全票后自动汇总**，见 §6 R2） | 动作码 `req.action.pdr_review_conclude` |
 | `GET` | `/requirements/{id}/pdr-review` | 读评审单 + 意见列表 | 页面码 `req.pool` |
+| `POST` | `/pdr-reviews/{reviewId}/opinions/{opinionId}/to-task` | 意见转任务（见 4.5），返回 `{taskId, taskCode}` | 动作码 `req.action.pdr_review_task` |
+| `GET` | `/requirements/{id}/pdr-review/opinions` | 意见列表：支持 `?reviewerId&category&status&page&size`（多条意见分页） | 页面码 `req.pool` |
 | `GET` | `/pdr-reviews/stats` | 意见分类统计：`?domainId&from&to&groupBy=CATEGORY\|REVIEWER\|DECISION` → 计数 / 占比 / 平均评审时长 | 页面码 `req.pool`（读） |
 | `GET` | `/pdr-reviews/datasets` | 分析域数据集白名单元信息（`pdr_review`、`pdr_review_opinion`，含维度/度量） | 复用 `/reports/datasets` 机制 |
 
@@ -174,6 +196,7 @@
 - **R4 厂商评估**：厂商账号（`VENDOR_PM` 与厂商研发）可提交评估，且 `requirement.assignee_vendor_id == user.vendorId`，否则 `403 OUT_OF_SCOPE`；内部 PMO/研发**保留提交权**（缺省保留，便于兜底），但同样要求先指派厂商。
 - **R5 幂等与并发**：同一需求同时只有 1 张 `IN_REVIEW` 评审单、1 张 `ACTIVE` 评估单；并发发起/重复提交用唯一约束 + 409 兜底；换厂商与提交评估加乐观锁（`version`）避免「换厂商后立刻被旧厂商提交评估」。
 - **R7 评审附件**：`bizType=PDR_REVIEW` 时，服务层校验「调用者是本次评审的评审人或发起人」且「评审单状态 = IN_REVIEW」，否则 `403 NOT_REVIEWER` / `409 REVIEW_CLOSED`；上传沿用 20MB 上限与 `sha256`；类型白名单（缺省 `pdf/docx/xlsx/png/jpg/zip/csv/md`），非白名单 `415 UNSUPPORTED_MEDIA_TYPE`；**不落公开 URL**，下载一律过鉴权（越权 404，不泄露存在性）；评审结束后附件只读，删除 → 409 `REVIEW_CLOSED`。
+- **R8 多条意见与转任务**：`POST .../opinions` 不做「同人唯一」校验，每次新建一条（`seq` 自动递增，可一次提交多条 `opinions[]`）；`to-task` 只能由本评审评审人/产品经理发起、每 opinion 只成功一次（`409 OPINION_ALREADY_TASKED`）、任务创建与 `task_id` 回写同事务、跨服务失败回滚并返回 `503 TASK_CREATE_UNAVAILABLE`；评审单关闭后 `to-task` 仍可用，但禁止再新增/修改意见（`409 REVIEW_CLOSED`）。
 - **R6 审计**：`PDR_REVIEW_START` / `PDR_REVIEW_OPINION` / `PDR_REVIEW_REJECT` / `PDR_REVIEW_PASS` / `VENDOR_CHANGED` / `ESTIMATE_STALE_BY_VENDOR`，全部进动态流与追溯。
 
 ## 7. 权限与动作码
@@ -192,12 +215,13 @@
 ![PDR 评审](prototype-pdr-review/shot-1-pdr-review.png)
 ![指派/换厂商](prototype-pdr-review/shot-2-vendor-transfer.png)
 ![厂商提交评估](prototype-pdr-review/shot-3-vendor-estimate.png)
-![评审附件](prototype-pdr-review/shot-4-review-attachments.png)
+![多条意见与转任务](prototype-pdr-review/shot-4-opinions-to-task.png)
 ![评审统计](prototype-pdr-review/shot-5-review-stats.png)
 
 
 0. **意见分类**：提交意见时先选分类（9 个 chip，单选，必填），意见卡左上角展示分类标签；评审 tab 顶部一行「分类分布」小条形（范围 3 / 技术 1 / 工期 2 …），点分类可过滤意见列表。
-0.1 **统计视图**：分析域「评审质量」看板卡：各分类意见数堆叠柱、需修改率、平均评审时长 P90、按评审人 Top N（复用 `MetricFormulas` 同源口径）。
+0.1 **多条意见**：提交意见区改成「意见列表」——点「+ 再加一条」逐条填（分类 chip + 结论 + 正文 + 附件），一次提交多条；已提意见卡片右侧有「转为任务」按钮（已转则显示 `TASKED · 任务 #123` 与链接），支持按分类/状态过滤。
+0.2 **统计视图**：分析域「评审质量」看板卡：各分类意见数堆叠柱、需修改率、平均评审时长 P90、按评审人 Top N（复用 `MetricFormulas` 同源口径）。
 0. **评审附件**：发起评审弹窗里可先挂「评审材料」；每位评审人提交意见时可附 1–5 个附件（截图里是「规格说明.pdf / 差异样例.xlsx」这类），意见卡下方展示附件 chip（文件名 + 大小 + 下载）；评审结束后 chip 变只读、无删除按钮。
 1. **PDR 详情新增「评审」tab**：发起按钮 + 评审人选择（只能选项目组成员，多选）+ 说明；列表展示每人「通过/需修改/驳回 + 意见 + 时间」；顶部结论条（N/M 已评）。
 2. **指派厂商弹窗改造**：加「换厂商会作废已通过的工时评估，需重新评估」的黄色提示；原因必填；`IN_DEV` 后按钮禁用并给原因。
@@ -209,7 +233,7 @@
 | 样例 | 期望 |
 |---|---|
 | 项目 | `DEMO-PROJ-1 供应链平台`，成员 5 人（产品经理/域负责人/研发/测试/厂商 PM） |
-| PDR-1 | 待评审（评审单 IN_REVIEW，2/4 已评），带 2 个评审附件（`规格说明.pdf`、`差异样例.xlsx`）；已有意见覆盖 3 个分类（RANGE/TECH/ACCEPTANCE） |
+| PDR-1 | 待评审（评审单 IN_REVIEW，2/4 已评），带 2 个评审附件（`规格说明.pdf`、`差异样例.xlsx`）；已有 **6 条意见**（王坤 3 条：2 RANGE + 1 ACCEPTANCE；李雯 2 条：1 TECH + 1 DATA；陈晓 1 条 TECH/NEED_CHANGE），其中 1 条已转任务（`TASKED`，任务 #1024，`OPEN` 5 条） |
 | PDR-2 | 评审通过、已指派 VEN-A、待提交评估 |
 | PDR-3 | 评审通过、VEN-A 评估通过、已排期 |
 | RD | 挂在 PDR-3 下，`TODO`（可用于演示换厂商 → 评估失效） |
@@ -232,12 +256,16 @@
 | B7 | 非本评审的评审人上传 | 403 `NOT_REVIEWER` |
 | B8 | 评审结束后再上传/删除 | 409 `REVIEW_CLOSED`；下载仍可（只读） |
 | B9 | 上传 25MB 文件 / 上传 `.exe` | 413 `FILE_TOO_LARGE` / 415 `UNSUPPORTED_MEDIA_TYPE` |
+| D1 | 同一评审人一次提交 3 条意见 | 落 3 行（`seq=1/2/3`），`stats` 计数 3、分类分布各 +1；评审单结论仍按 `MODE_ALL` 计算，不因多条放大票数 |
+| D2 | 意见转任务（指定负责人+截止） | 201 返回 `taskId/taskCode`；任务在「我的任务」可见且 `requirementId` 正确；`opinion.status=TASKED`、`task_id` 回写、审计 `PDR_OPINION_TO_TASK` 存在 |
+| D3 | 同一意见重复转任务 | 409 `OPINION_ALREADY_TASKED`（detail 带既有 `taskId`），任务表不新增行 |
+| D4 | 非评审人转任务 / 评审关闭后新增意见 | 403 `NOT_ALLOWED` / 409 `REVIEW_CLOSED`；评审关闭后 `to-task` 仍 201（复盘落地） |
 | C1 | 提交意见不带 `category` / 传 `category=FOO` | 400 `INVALID_CATEGORY`（`detail.allowed[]` 含 9 个 code） |
 | C2 | 一次评审 6 条意见（3 RANGE / 2 TECH / 1 ACCEPTANCE） | `GET /pdr-reviews/stats?groupBy=CATEGORY` 返回与明细逐分类相等，占比合计 100% |
 | C3 | 同一批数据在 `/reports` 用新数据集 `pdr_review_opinion` 拉交叉表 | 与 `/pdr-reviews/stats` 数字逐项相等（同源断言） |
 | C4 | 统计按域/厂商隔离 | 厂商账号的 `stats` 只统计本厂商可见评审（与明细条数一致） |
 
-门禁：既有 9 套不得降（`rbac` / `access` / `platform` / `negative` / `release-flow` / `gate-order` / `automation` / `change` / `demo-reset`）；新增 `scripts/pdr-flow-verify.sh` ≥30 条断言（含 A1–A5、B1–B9、C1–C4、换厂商幂等与附件越权），接入 `make test`。
+门禁：既有 9 套不得降（`rbac` / `access` / `platform` / `negative` / `release-flow` / `gate-order` / `automation` / `change` / `demo-reset`）；新增 `scripts/pdr-flow-verify.sh` ≥34 条断言（含 A1–A5、B1–B9、C1–C4、D1–D4、换厂商幂等与附件越权），接入 `make test`。
 
 ## 11. 迁移与兼容
 
@@ -251,6 +279,7 @@
 **后端**：`requirement`（服务/控制器/规则/错误码）、`approval`（新单据类型 + 回调）、`estimate`（vendors 绑定）、`sys`（项目组 CRUD）、`platform-contract`（动作码/状态表）、`platform-common`（路由表）、迁移 2 条。
 **前端**：需求详情（评审 tab、评估卡、指派厂商弹窗）、项目组管理页、审批中心（新单据类型文案）、动作按钮禁用原因。
 **附件**：`AttachmentService.normalizeType` 加 `PDR_REVIEW`、`resolveBiz` 增加评审单归属解析、上传/删除的评审态校验、前端评审 tab 附件区。
+**多条意见与转任务**：意见表去掉「同人唯一」、加 `seq/status/task_id`；`to-task` 跨域调用交付域任务创建（`deliver-service` `/tasks` 或内部接口），需定义跨服务失败语义（503 + 回滚）与审计；前端意见列表化 + 「转为任务」按钮 + 已转状态展示。
 **统计**：`sys_dict` 加 `review_opinion_category` 字典、`/pdr-reviews/stats` 聚合（单条 SQL 按 category/reviewer/decision 分组，避免 N+1）、分析域新增两个数据集进 `AnalyticsDatasets` 白名单、看板卡与自助报表复用 `MetricFormulas` 同源口径。
 **脚本/数据**：`platform-demo-reset.sh`（新夹具）、`pdr-flow-verify.sh`（新门禁）、`SeedService`（项目组种子）、`DEMO-BY-ROLE.md`、`FLOW-CONTROL-AUDIT.md`。
 
@@ -262,6 +291,7 @@
 | 存量数据无项目组 | 老 PDR 无法评审 | 回退规则（产品经理 + 域负责人）并标记 `fallback` |
 | 状态机改动面大 | 旧门禁/演示脚本红 | 不改 PDR 状态机（用门禁而非新态），把风险限制在规则层 |
 | 厂商权限放大 | 越权看到别家需求 | 复用既有 `ScopeSql` 行级隔离 + `OUT_OF_SCOPE` 负向断言 |
+| 意见条数失控 / 每条都转任务 | 评审冗长、任务爆炸 | 不限制条数但列表分页 + 按分类过滤；`to-task` 由评审人/产品经理主动触发（不自动批量转）；统计给「意见闭环率」暴露积压 |
 | 分类体系设计不当 | 统计维度失真、填了没用 | 先给 9 类最小集合 + `OTHER` 兜底；字典可配、后续按实际使用率收敛；统计口径三处同源断言（C2/C3） |
 | 评审附件被滥用（大文件/恶意类型/越权下载） | 存储膨胀、信息泄露 | 20MB 上限 + 类型白名单 + `sha256` + 鉴权下载（越权 404）+ 评审结束只读；病毒扫描列为 P2（接 ClamAV 或不接，需产品确认） |
 
@@ -273,5 +303,5 @@
 ## 14. 交付物清单
 
 1. `docs/teamflow/CHANGE-PDR-REVIEW-VENDOR-ESTIMATE.md` + `.html`（本文）
-2. `docs/teamflow/prototype-pdr-review/index.html`（5 屏交互稿：PDR 评审（含分类）/ 指派换厂商 / 厂商评估 / 评审附件 / 评审统计）+ 截图
+2. `docs/teamflow/prototype-pdr-review/index.html`（5 屏交互稿：PDR 评审（含分类）/ 指派换厂商 / 厂商评估 / 多条意见·转任务（含附件）/ 评审统计）+ 截图
 3. 流水线 PRD（由 TeamFlow 依据本文生成）→ 设计 → 技术方案 → 开发 → QA → 验收

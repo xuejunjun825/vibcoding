@@ -293,8 +293,9 @@ vendor</td>
 </tr>
 <tr>
 <td><code>pdr_review_opinion</code></td>
-<td><code>id, tenant_id, review_id, reviewer_id, decision(PASS/NEED_CHANGE/REJECT), **category**, comment, created_at</code></td>
-<td><code>uk(review_id, reviewer_id)</code>；<code>idx(tenant_id, category)</code>（统计用）</td>
+<td><code>id, tenant_id, review_id, reviewer_id, seq(该评审人第几条), decision(PASS/NEED_CHANGE/REJECT), **category**, comment, **status(OPEN/TASKED/RESOLVED)**, **task_id**, created_at</code></td>
+<td><strong>不做 (review_id, reviewer_id)
+唯一约束</strong>（同一人可提多条）；<code>idx(review_id)</code>、<code>idx(tenant_id, category)</code>、<code>idx(task_id)</code></td>
 </tr>
 </tbody>
 </table>
@@ -433,6 +434,71 @@ STALE」。</p>
 <code>AnalyticsDatasets</code> 白名单机制，<strong>不写第二套 SQL
 引擎</strong>）。</li>
 </ul>
+<h3 id="45-多条意见与意见转任务">4.5 多条意见与「意见转任务」</h3>
+<p><strong>为什么允许多条</strong>：一条评审意见通常只针对一个点（范围、性能、验收口径……），把它们塞进一段文字里，既无法分类统计，也无法逐条跟踪闭环。所以：</p>
+<ul>
+<li>同一次评审、同一个人可以提 <strong>N
+条意见</strong>（<code>seq</code> 递增，不设唯一约束），每条独立拥有
+<code>category / decision / comment / 附件 / status</code>；</li>
+<li><strong>评审结论仍由评审单整体判定</strong>（<code>MODE_ALL</code>
+等），不因某人不通过而"每人只能一条"——多条意见属于"一个人提了几个问题"，不是"投了几票"；统计口径里"意见"与"评审单"分开算（见
+4.4）。</li>
+<li>每条意见有生命周期：<code>OPEN</code>（待处理）→
+<code>TASKED</code>（已转任务）→
+<code>RESOLVED</code>（任务完成/问题消除）；<code>decision=REJECT</code>
+的意见可标 <code>RESOLVED</code> 结案，不必都转任务。</li>
+</ul>
+<p><strong>意见转任务</strong>（把评审结论变成可执行动作，闭环的关键）：</p>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>端点</td>
+<td><code>POST /pdr-reviews/{reviewId}/opinions/{opinionId}/to-task</code></td>
+</tr>
+<tr>
+<td>请求</td>
+<td><code>{assigneeId?, dueDate?, estimateHours?, title?, description?}</code>（都可选，缺省从意见推导）</td>
+</tr>
+<tr>
+<td>落库</td>
+<td>复用交付域 <code>task</code>
+表（<code>deliver-service</code>）：<code>title</code> 缺省取意见前 40
+字、<code>description</code> 带「来源：PDR 评审 #reviewId · 分类 ·
+原文」、<code>requirementId</code> 挂该 PDR 的父 RD 或 PDR 本身（PDR
+无任务归属时挂 PDR）</td>
+</tr>
+<tr>
+<td>回写</td>
+<td><code>pdr_review_opinion.task_id</code> = 新任务
+id、<code>status = TASKED</code>；写入
+<code>audit_log</code>（<code>PDR_OPINION_TO_TASK</code>，detail 带
+opinionId/taskId/category）</td>
+</tr>
+<tr>
+<td>限制</td>
+<td>已转过的意见再转 → <code>409 OPINION_ALREADY_TASKED</code>（detail
+带既有 <code>taskId</code>）；非本评审评审人且非产品经理 →
+<code>403 NOT_ALLOWED</code>；<strong>评审结束后仍可转任务</strong>（复盘落地属后续动作，不随评审关闭而禁止）</td>
+</tr>
+<tr>
+<td>可见性</td>
+<td>任务继承 <code>ScopeSql</code>
+行级隔离；厂商评审人转出的任务只能落在本厂商承接范围（越界
+<code>403 OUT_OF_SCOPE</code>）</td>
+</tr>
+<tr>
+<td>统计</td>
+<td><code>/pdr-reviews/stats</code> 增加 <code>taskedCount</code>
+与「意见闭环率 = TASKED+RESOLVED / 全部意见」两个度量</td>
+</tr>
+</tbody>
+</table>
 <h2 id="5-接口变更">5. 接口变更</h2>
 <h3 id="51-新增">5.1 新增</h3>
 <table>
@@ -480,6 +546,19 @@ STALE」。</p>
 <td><code>GET</code></td>
 <td><code>/requirements/{id}/pdr-review</code></td>
 <td>读评审单 + 意见列表</td>
+<td>页面码 <code>req.pool</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/pdr-reviews/{reviewId}/opinions/{opinionId}/to-task</code></td>
+<td>意见转任务（见 4.5），返回 <code>{taskId, taskCode}</code></td>
+<td>动作码 <code>req.action.pdr_review_task</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/requirements/{id}/pdr-review/opinions</code></td>
+<td>意见列表：支持
+<code>?reviewerId&amp;category&amp;status&amp;page&amp;size</code>（多条意见分页）</td>
 <td>页面码 <code>req.pool</code></td>
 </tr>
 <tr>
@@ -597,6 +676,15 @@ IN_REVIEW」，否则 <code>403 NOT_REVIEWER</code> /
 URL</strong>，下载一律过鉴权（越权
 404，不泄露存在性）；评审结束后附件只读，删除 → 409
 <code>REVIEW_CLOSED</code>。</li>
+<li><strong>R8 多条意见与转任务</strong>：<code>POST .../opinions</code>
+不做「同人唯一」校验，每次新建一条（<code>seq</code>
+自动递增，可一次提交多条 <code>opinions[]</code>）；<code>to-task</code>
+只能由本评审评审人/产品经理发起、每 opinion
+只成功一次（<code>409 OPINION_ALREADY_TASKED</code>）、任务创建与
+<code>task_id</code> 回写同事务、跨服务失败回滚并返回
+<code>503 TASK_CREATE_UNAVAILABLE</code>；评审单关闭后
+<code>to-task</code>
+仍可用，但禁止再新增/修改意见（<code>409 REVIEW_CLOSED</code>）。</li>
 <li><strong>R6 审计</strong>：<code>PDR_REVIEW_START</code> /
 <code>PDR_REVIEW_OPINION</code> / <code>PDR_REVIEW_REJECT</code> /
 <code>PDR_REVIEW_PASS</code> / <code>VENDOR_CHANGED</code> /
@@ -649,14 +737,18 @@ src="prototype-pdr-review/shot-2-vendor-transfer.png"
 alt="指派/换厂商" /> <img
 src="prototype-pdr-review/shot-3-vendor-estimate.png"
 alt="厂商提交评估" /> <img
-src="prototype-pdr-review/shot-4-review-attachments.png"
-alt="评审附件" /> <img
+src="prototype-pdr-review/shot-4-opinions-to-task.png"
+alt="多条意见与转任务" /> <img
 src="prototype-pdr-review/shot-5-review-stats.png" alt="评审统计" /></p>
 <ol start="0" type="1">
 <li><strong>意见分类</strong>：提交意见时先选分类（9 个
 chip，单选，必填），意见卡左上角展示分类标签；评审 tab
 顶部一行「分类分布」小条形（范围 3 / 技术 1 / 工期 2
 …），点分类可过滤意见列表。 0.1
+<strong>多条意见</strong>：提交意见区改成「意见列表」——点「+
+再加一条」逐条填（分类 chip + 结论 + 正文 +
+附件），一次提交多条；已提意见卡片右侧有「转为任务」按钮（已转则显示
+<code>TASKED · 任务 #123</code> 与链接），支持按分类/状态过滤。 0.2
 <strong>统计视图</strong>：分析域「评审质量」看板卡：各分类意见数堆叠柱、需修改率、平均评审时长
 P90、按评审人 Top N（复用 <code>MetricFormulas</code> 同源口径）。</li>
 <li><strong>评审附件</strong>：发起评审弹窗里可先挂「评审材料」；每位评审人提交意见时可附
@@ -694,8 +786,11 @@ P90、按评审人 Top N（复用 <code>MetricFormulas</code> 同源口径）。
 <tr>
 <td>PDR-1</td>
 <td>待评审（评审单 IN_REVIEW，2/4 已评），带 2
-个评审附件（<code>规格说明.pdf</code>、<code>差异样例.xlsx</code>）；已有意见覆盖
-3 个分类（RANGE/TECH/ACCEPTANCE）</td>
+个评审附件（<code>规格说明.pdf</code>、<code>差异样例.xlsx</code>）；已有
+<strong>6 条意见</strong>（王坤 3 条：2 RANGE + 1 ACCEPTANCE；李雯 2
+条：1 TECH + 1 DATA；陈晓 1 条 TECH/NEED_CHANGE），其中 1
+条已转任务（<code>TASKED</code>，任务 #1024，<code>OPEN</code> 5
+条）</td>
 </tr>
 <tr>
 <td>PDR-2</td>
@@ -796,6 +891,34 @@ P90、按评审人 Top N（复用 <code>MetricFormulas</code> 同源口径）。
 <code>UNSUPPORTED_MEDIA_TYPE</code></td>
 </tr>
 <tr>
+<td>D1</td>
+<td>同一评审人一次提交 3 条意见</td>
+<td>落 3 行（<code>seq=1/2/3</code>），<code>stats</code> 计数
+3、分类分布各 +1；评审单结论仍按 <code>MODE_ALL</code>
+计算，不因多条放大票数</td>
+</tr>
+<tr>
+<td>D2</td>
+<td>意见转任务（指定负责人+截止）</td>
+<td>201 返回 <code>taskId/taskCode</code>；任务在「我的任务」可见且
+<code>requirementId</code>
+正确；<code>opinion.status=TASKED</code>、<code>task_id</code>
+回写、审计 <code>PDR_OPINION_TO_TASK</code> 存在</td>
+</tr>
+<tr>
+<td>D3</td>
+<td>同一意见重复转任务</td>
+<td>409 <code>OPINION_ALREADY_TASKED</code>（detail 带既有
+<code>taskId</code>），任务表不新增行</td>
+</tr>
+<tr>
+<td>D4</td>
+<td>非评审人转任务 / 评审关闭后新增意见</td>
+<td>403 <code>NOT_ALLOWED</code> / 409
+<code>REVIEW_CLOSED</code>；评审关闭后 <code>to-task</code> 仍
+201（复盘落地）</td>
+</tr>
+<tr>
 <td>C1</td>
 <td>提交意见不带 <code>category</code> / 传
 <code>category=FOO</code></td>
@@ -827,7 +950,7 @@ P90、按评审人 Top N（复用 <code>MetricFormulas</code> 同源口径）。
 <code>release-flow</code> / <code>gate-order</code> /
 <code>automation</code> / <code>change</code> /
 <code>demo-reset</code>）；新增 <code>scripts/pdr-flow-verify.sh</code>
-≥30 条断言（含 A1–A5、B1–B9、C1–C4、换厂商幂等与附件越权），接入
+≥34 条断言（含 A1–A5、B1–B9、C1–C4、D1–D4、换厂商幂等与附件越权），接入
 <code>make test</code>。</p>
 <h2 id="11-迁移与兼容">11. 迁移与兼容</h2>
 <ul>
@@ -855,6 +978,11 @@ tab、评估卡、指派厂商弹窗）、项目组管理页、审批中心（�
 <strong>附件</strong>：<code>AttachmentService.normalizeType</code> 加
 <code>PDR_REVIEW</code>、<code>resolveBiz</code>
 增加评审单归属解析、上传/删除的评审态校验、前端评审 tab 附件区。
+<strong>多条意见与转任务</strong>：意见表去掉「同人唯一」、加
+<code>seq/status/task_id</code>；<code>to-task</code>
+跨域调用交付域任务创建（<code>deliver-service</code> <code>/tasks</code>
+或内部接口），需定义跨服务失败语义（503 + 回滚）与审计；前端意见列表化 +
+「转为任务」按钮 + 已转状态展示。
 <strong>统计</strong>：<code>sys_dict</code> 加
 <code>review_opinion_category</code>
 字典、<code>/pdr-reviews/stats</code> 聚合（单条 SQL 按
@@ -871,8 +999,12 @@ category/reviewer/decision 分组，避免 N+1）、分析域新增两个数据�
 旧门禁/演示脚本红 | 不改 PDR
 状态机（用门禁而非新态），把风险限制在规则层 | | 厂商权限放大 |
 越权看到别家需求 | 复用既有 <code>ScopeSql</code> 行级隔离 +
-<code>OUT_OF_SCOPE</code> 负向断言 | | 分类体系设计不当 |
-统计维度失真、填了没用 | 先给 9 类最小集合 + <code>OTHER</code>
+<code>OUT_OF_SCOPE</code> 负向断言 | | 意见条数失控 / 每条都转任务 |
+评审冗长、任务爆炸 | 不限制条数但列表分页 +
+按分类过滤；<code>to-task</code>
+由评审人/产品经理主动触发（不自动批量转）；统计给「意见闭环率」暴露积压
+| | 分类体系设计不当 | 统计维度失真、填了没用 | 先给 9 类最小集合 +
+<code>OTHER</code>
 兜底；字典可配、后续按实际使用率收敛；统计口径三处同源断言（C2/C3） | |
 评审附件被滥用（大文件/恶意类型/越权下载） | 存储膨胀、信息泄露 | 20MB
 上限 + 类型白名单 + <code>sha256</code> + 鉴权下载（越权 404）+
@@ -891,8 +1023,8 @@ category/reviewer/decision 分组，避免 N+1）、分析域新增两个数据�
 <li><code>docs/teamflow/CHANGE-PDR-REVIEW-VENDOR-ESTIMATE.md</code> +
 <code>.html</code>（本文）</li>
 <li><code>docs/teamflow/prototype-pdr-review/index.html</code>（5
-屏交互稿：PDR 评审（含分类）/ 指派换厂商 / 厂商评估 / 评审附件 /
-评审统计）+ 截图</li>
+屏交互稿：PDR 评审（含分类）/ 指派换厂商 / 厂商评估 /
+多条意见·转任务（含附件）/ 评审统计）+ 截图</li>
 <li>流水线 PRD（由 TeamFlow 依据本文生成）→ 设计 → 技术方案 → 开发 → QA
 → 验收</li>
 </ol>
