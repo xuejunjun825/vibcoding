@@ -125,7 +125,9 @@ class WbsEstimateSubmitTest {
                 new BigDecimal("8.5"), null), ApiException.class);
         assertThat(error.status()).isEqualTo(403);
         assertThat(error.code()).isEqualTo(RequirementErrors.FORBIDDEN);
-        assertThat(error.detail()).containsEntry("required", "req:deliver");
+        // r41：403 的落点统一指向动作码 req:estimate_submit（= req:deliver any-of task:manage），
+        // 内部账号的判定仍是 req:deliver 那一格，厂商账号走 estimate_submit——提示文案只说出口。
+        assertThat(error.detail()).containsEntry("required", "req:estimate_submit");
         verify(engine, never()).start(any());
     }
 
@@ -197,6 +199,8 @@ class WbsEstimateSubmitTest {
         entity.setStatus(status);
         entity.setReporterId(5L);
         entity.setDomainId(1L);
+        // r41：工时评估必须指向承接厂商（设计 §6 R4），未指派的单在 submit 时 409 VENDOR_NOT_ASSIGNED。
+        entity.setAssigneeVendorId(3L);
         return entity;
     }
 

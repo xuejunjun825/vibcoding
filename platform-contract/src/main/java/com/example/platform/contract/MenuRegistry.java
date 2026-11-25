@@ -60,6 +60,11 @@ public final class MenuRegistry {
             new MenuPage("req.release", "需求域", "版本计划", "releases", List.of("release:plan"), 30),
             new MenuPage("req.iteration", "需求域", "迭代", "iterations",
                     List.of("task:manage"), 40),
+            // r41：PDR 评审页。functionCodes 故意为空——评审的准入不是「功能码」而是运行时事实
+            // （我是这张单的评审人 / 发起人），把边界写进角色矩阵只会让「项目组成员可评审」
+            // 这条设计（§7）在矩阵里无处安放；页面可见即可，具体动作由四个 ACTION 码与
+            // 服务层的评审人校验共同收口。
+            new MenuPage("pdr.review", "需求域", "PDR 评审", "pdr-reviews", List.of(), 50),
 
             // ---- 交付域 ----
             new MenuPage("defect.list", "交付域", "缺陷", "defects", List.of(), 10),

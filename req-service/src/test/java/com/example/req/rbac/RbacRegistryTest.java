@@ -21,11 +21,11 @@ import org.junit.jupiter.api.Test;
 class RbacRegistryTest {
 
     @Test
-    void pageRegistryHasThirtySevenUniquePagesInSixModules() {
-        assertEquals(37, MenuRegistry.pages().size(), "r39 appends the automation page to r18's 36");
-        assertEquals(37, new HashSet<>(MenuRegistry.codes()).size(), "page codes must be unique");
-        assertEquals(6, MenuRegistry.modules().size(), "37 pages grouped in 6 modules");
-        assertEquals(36, MenuRegistry.pages().stream()
+    void pageRegistryHasThirtyEightUniquePagesInSixModules() {
+        assertEquals(38, MenuRegistry.pages().size(), "r41 appends the pdr.review page to r39's 37");
+        assertEquals(38, new HashSet<>(MenuRegistry.codes()).size(), "page codes must be unique");
+        assertEquals(6, MenuRegistry.modules().size(), "38 pages grouped in 6 modules");
+        assertEquals(37, MenuRegistry.pages().stream()
                 .map(MenuRegistry.MenuPage::routeName).distinct().count(),
                 "route names are unique except /requirements, which two pages share");
         assertTrue(MenuRegistry.isRegistered("admin.roles"));
@@ -34,10 +34,10 @@ class RbacRegistryTest {
     }
 
     @Test
-    void actionRegistryHasSeventyFiveUniqueActions() {
-        assertEquals(75, ActionRegistry.actions().size(),
-                "r40 appends change_request/change_apply to r39's 73");
-        assertEquals(75, new HashSet<>(ActionRegistry.codes()).size(), "action codes must be unique");
+    void actionRegistryHasEightyOneUniqueActions() {
+        assertEquals(81, ActionRegistry.actions().size(),
+                "r41 appends 6 PDR-review/vendor actions to r40's 75");
+        assertEquals(81, new HashSet<>(ActionRegistry.codes()).size(), "action codes must be unique");
         assertEquals(ActionRegistry.codes(),
                 ActionRegistry.actions().stream().map(ActionRegistry.ActionDef::code).toList(),
                 "codes() must follow the registry order the admin table renders");

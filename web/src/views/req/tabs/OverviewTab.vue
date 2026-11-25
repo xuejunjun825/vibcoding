@@ -27,6 +27,7 @@ import {
   estimateStatusOf,
 } from '@/views/req/estimate'
 import { messageOf, requirementPath, typeLabel, usePlatformDict } from '@/views/req/platform'
+import { pdrModeLabel, pdrProgress } from '@/views/req/pdr'
 
 /**
  * P2 · 概览 tab：左字段网格，右审批进度小卡 + 最近 5 条动态。
@@ -137,6 +138,18 @@ const formError = ref('')
 const submitting = ref(false)
 const flash = ref(false)
 
+/** 承接厂商：需求上带（详情 view.vendorId/vendorName）；评估提交前必须有主 */
+const vendorText = computed(() =>
+  props.detail.vendorId ? props.detail.vendorName ?? vendorName(props.detail.vendorId) : '未指派厂商',
+)
+const pdrReview = computed(() => props.detail.pdrReview?.review ?? null)
+const pdrMeta = computed(() => {
+  const review = pdrReview.value
+  if (!review) return ''
+  const progress = pdrProgress(props.detail.pdrReview)
+  return `${pdrModeLabel(review.mode)} · ${progress.submitted}/${progress.total} 已评`
+})
+
 const dialogTitle = computed(() =>
   estimateStatus.value === 'NONE' ? '提交工时评估' : '重新提交工时评估',
 )
@@ -163,6 +176,11 @@ function flashCard(): void {
 
 async function submitForm(): Promise<void> {
   if (!canSubmitEstimate.value) return
+  // 契约顺序：先指派厂商 → 再有厂商的工时评估（后端 409 VENDOR_NOT_ASSIGNED）
+  if (!props.detail.vendorId) {
+    formError.value = '请先指派厂商，再由厂商提交工时评估'
+    return
+  }
   const days = Number(formDays.value ?? 0)
   if (!Number.isFinite(days) || days <= 0) {
     formError.value = '评估人天必须大于 0'
@@ -314,8 +332,21 @@ async function submitForm(): Promise<void> {
             </dd>
           </div>
           <div>
-            <dt>厂商</dt>
-            <dd>{{ detail.vendorName ?? vendorName(detail.vendorId) }}</dd>
+            <dt>承接厂商</dt>
+            <dd>
+              {{ detail.vendorName ?? vendorName(detail.vendorId) }}
+              <span v-if="!detail.vendorId" class="overview__muted">未指派</span>
+            </dd>
+          </div>
+          <div v-if="detail.type === 'PDR'">
+            <dt>评审状态</dt>
+            <dd>
+              <template v-if="pdrReview">
+                <StatusPill kind="pdrReview" :value="pdrReview.status" size="sm" />
+                <span class="overview__muted">{{ pdrMeta }}</span>
+              </template>
+              <span v-else class="overview__muted">未发起</span>
+            </dd>
           </div>
           <div>
             <dt>负责人</dt>
@@ -461,6 +492,14 @@ async function submitForm(): Promise<void> {
 
     <el-dialog v-model="dialogOpen" :title="dialogTitle" width="520px" append-to-body>
       <el-form label-position="top" size="small" @submit.prevent>
+        <!-- r49：承接厂商由需求带出，只读；没指派就不让提交（后端也会 409 VENDOR_NOT_ASSIGNED） -->
+        <el-form-item label="承接厂商">
+          <el-input :model-value="vendorText" readonly disabled data-test="estimate-vendor">
+            <template #suffix>
+              <span v-if="!detail.vendorId" class="t-aux">系统带出，不可改</span>
+            </template>
+          </el-input>
+        </el-form-item>
         <el-form-item label="评估人天" required>
           <el-input-number
             v-model="formDays"
@@ -485,10 +524,18 @@ async function submitForm(): Promise<void> {
         </el-form-item>
       </el-form>
       <p v-if="lastDaysHint" class="estimate-dialog__hint">{{ lastDaysHint }}</p>
+      <p v-if="!detail.vendorId" class="estimate-dialog__hint estimate-dialog__hint--warn" data-test="estimate-vendor-hint">
+        请先指派厂商：工时评估由承接厂商给出，未指派时不能提交。
+      </p>
       <p v-if="formError" class="dialog-error">{{ formError }}</p>
       <template #footer>
         <el-button @click="dialogOpen = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" :disabled="submitting" @click="submitForm">
+        <el-button
+          type="primary"
+          :loading="submitting"
+          :disabled="submitting || !detail.vendorId"
+          @click="submitForm"
+        >
           {{ ESTIMATE_CTA_LABEL.submit }}
         </el-button>
       </template>
@@ -669,6 +716,13 @@ async function submitForm(): Promise<void> {
   margin: 0;
   font-size: 12px;
   color: var(--text-muted-aa);
+}
+.estimate-dialog__hint--warn {
+  padding: 6px 8px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--r-ctl);
+  background: var(--color-warning-bg);
+  color: var(--warning-ink);
 }
 .dialog-error {
   margin: 8px 0 0;

@@ -86,6 +86,8 @@ public class TaskService {
         entity.setRequirementId(requirement.id());
         entity.setSprintId(cmd.sprintId());
         entity.setTitle(cmd.title().trim());
+        entity.setDescription(cmd.description() == null || cmd.description().isBlank()
+                ? null : cmd.description().trim());
         entity.setAssigneeId(cmd.assigneeId());
         entity.setEstimateHours(cmd.estimateHours());
         entity.setStartDate(cmd.startDate());
@@ -211,7 +213,8 @@ public class TaskService {
 
     private TaskView view(TaskEntity entity) {
         return new TaskView(entity.getId(), entity.getRequirementId(), entity.getSprintId(),
-                entity.getTitle(), entity.getAssigneeId(), entity.getEstimateHours(),
+                entity.getTitle(), entity.getDescription(), entity.getAssigneeId(),
+                entity.getEstimateHours(),
                 entity.getStartDate(), entity.getDueDate(), entity.getStatus(), entity.getSortNo(),
                 entity.getDomainId(), entity.getVendorId(), entity.getUpdatedAt());
     }

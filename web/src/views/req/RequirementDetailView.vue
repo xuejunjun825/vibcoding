@@ -2,9 +2,9 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { assignVendor, deliverRequirement, getApprovalInstance, getRequirement, actOnRequirement, listApprovalMine, listRequirementChanges } from '@/api/req'
-import { listDictionaryUsers, listDictionaryVendors } from '@/api/dictionaries'
-import type { DictionaryUser, DictionaryVendor } from '@/api/dictionaries'
+import { deliverRequirement, getApprovalInstance, getRequirement, actOnRequirement, listApprovalMine, listRequirementChanges } from '@/api/req'
+import { listDictionaryUsers } from '@/api/dictionaries'
+import type { DictionaryUser } from '@/api/dictionaries'
 import type {
   ApprovalInstanceDetail,
   ApprovalTimelineEvent,
@@ -28,6 +28,8 @@ import {
 } from '@/views/req/estimate'
 import ApprovalTab from '@/views/req/tabs/ApprovalTab.vue'
 import ChildrenTab from '@/views/req/tabs/ChildrenTab.vue'
+import PdrReviewTab from '@/views/req/tabs/PdrReviewTab.vue'
+import AssignVendorDialog from '@/views/req/dialogs/AssignVendorDialog.vue'
 import DefectsTab from '@/views/req/tabs/DefectsTab.vue'
 import IntegrationTab from '@/views/req/tabs/IntegrationTab.vue'
 import DocumentsTab from '@/views/req/tabs/DocumentsTab.vue'
@@ -39,6 +41,7 @@ import ChangeTab from '@/views/req/tabs/ChangeTab.vue'
 import ChangeCreateDrawer from '@/components/req/ChangeCreateDrawer.vue'
 import RequirementEditDrawer from '@/components/req/RequirementEditDrawer.vue'
 import { changePermissionsOf, changeTypeOfField, fieldLabel } from '@/views/req/change'
+import { pdrProgress } from '@/views/req/pdr'
 import {
   canOpenEdit,
   editDisabledHint,
@@ -83,7 +86,7 @@ const approvalError = ref('')
 const approvalForbidden = ref(false)
 const estimateForbidden = ref(false)
 
-const TAB_KEYS = ['overview', 'children', 'tasks', 'testing', 'defects', 'approval', 'change', 'trace', 'integration', 'documents'] as const
+const TAB_KEYS = ['overview', 'children', 'pdr', 'tasks', 'testing', 'defects', 'approval', 'change', 'trace', 'integration', 'documents'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 const activeTab = ref<TabKey>(TAB_KEYS.includes(String(route.query.tab) as TabKey) ? (String(route.query.tab) as TabKey) : 'overview')
 const tabCounts = reactive({ children: 0, tasks: 0, changePending: 0 })
@@ -174,9 +177,17 @@ async function onChangeCreated(): Promise<void> {
   void changeTabs.value?.refresh()
 }
 
+/** 评审 tab 只在 PDR 上出现（RD 需求没有 PDR 评审单） */
+const isPdr = computed(() => detail.value?.type === 'PDR')
+const pdrPending = computed(() => pdrProgress(detail.value?.pdrReview ?? null).pending.length)
+
 const tabs = computed(() => [
   { key: 'overview', label: '概览' },
   { key: 'children', label: `子需求${tabCounts.children ? ` ${tabCounts.children}` : ''}` },
+  // 「评审」只对 PDR 存在（RD 走 厂商评估 → 开发），非 PDR 连 tab 都不出，避免误导
+  ...(isPdr.value
+    ? [{ key: 'pdr', label: `评审${pdrPending.value ? ` ${pdrPending.value}` : ''}` }]
+    : []),
   { key: 'tasks', label: `任务${tabCounts.tasks ? ` ${tabCounts.tasks}` : ''}` },
   { key: 'testing', label: '测试' },
   { key: 'defects', label: '缺陷' },
@@ -282,6 +293,8 @@ async function load(): Promise<void> {
     // 这里补一次合并，否则评估卡片永远等于 null
     detail.value = { ...normalizeRequirementDetail(raw), estimate: raw.estimate ?? null }
     tabCounts.children = detail.value.children.length
+    // 深链 `?tab=pdr` 打开一个 RD 需求时，评审 tab 不存在：回落到概览，避免空白 body
+    if (detail.value.type !== 'PDR' && activeTab.value === 'pdr') setTab('overview')
   } catch (error) {
     detail.value = null
     loadError.value = messageOf(error)
@@ -418,6 +431,8 @@ function handleActionError(error: unknown): void {
       code,
       changeFields: code === 'CHANGE_REQUIRED' && declaredFields.length ? declaredFields : undefined,
     }
+    // 评审门被挡：直接把人带到评审 tab，省掉「去哪个 tab 发起」的一轮试错
+    if (code === 'PDR_REVIEW_REQUIRED' && isPdr.value) setTab('pdr')
     void refreshAll()
     return
   }
@@ -528,54 +543,15 @@ async function submitDeliver(): Promise<void> {
   }
 }
 
-// —— 转派 / 分配厂商 ——
+// —— 转派 / 分配厂商（r49 抽成 AssignVendorDialog：加「换厂商会让评估失效」与「研发已开始禁用」） ——
 const assignOpen = ref(false)
-const assignVendorId = ref<number | undefined>()
-const assignOwner = ref<number | undefined>()
-const assignReason = ref('')
-const assignError = ref('')
-const vendors = ref<DictionaryVendor[]>([])
 
-async function openAssign(): Promise<void> {
+function openAssign(): void {
   assignOpen.value = true
-  assignError.value = ''
-  assignReason.value = ''
-  assignVendorId.value = detail.value?.vendorId ?? undefined
-  assignOwner.value = detail.value?.ownerId ?? undefined
-  await ensureUsers()
-  if (vendors.value.length === 0) {
-    try {
-      vendors.value = await listDictionaryVendors()
-    } catch {
-      vendors.value = []
-    }
-  }
 }
 
-async function submitAssign(): Promise<void> {
-  if (assignVendorId.value == null) {
-    assignError.value = '请选择承接厂商'
-    return
-  }
-  if (assignReason.value.trim().length < 2) {
-    assignError.value = '转派必须填写原因（会写入审计日志）'
-    return
-  }
-  busy.value = true
-  try {
-    await assignVendor(id.value, {
-      vendorId: assignVendorId.value,
-      ownerUserId: assignOwner.value,
-      reason: assignReason.value.trim(),
-    })
-    ElMessage.success('已转派，厂商范围随之更新')
-    assignOpen.value = false
-    await refreshAll()
-  } catch (error) {
-    assignError.value = messageOf(error)
-  } finally {
-    busy.value = false
-  }
+async function onAssigned(): Promise<void> {
+  await refreshAll()
 }
 
 // —— 拆解 ——
@@ -778,6 +754,7 @@ onMounted(async () => {
           @request-change="onFieldRequestChange"
         />
         <ChildrenTab v-else-if="activeTab === 'children'" :detail="detail" @decompose="decomposeOpen = true" />
+        <PdrReviewTab v-else-if="activeTab === 'pdr'" :detail="detail" @refresh="refreshAll" />
         <TasksTab
           v-else-if="activeTab === 'tasks'"
           :requirement-id="detail.id"
@@ -898,28 +875,16 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="assignOpen" title="转派 / 分配厂商" width="520px" append-to-body>
-      <el-form label-position="top" size="small" @submit.prevent>
-        <el-form-item label="承接厂商" required>
-          <el-select v-model="assignVendorId" filterable placeholder="选择厂商" style="width: 100%">
-            <el-option v-for="vendor in vendors" :key="vendor.id" :label="vendor.name" :value="vendor.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="负责人">
-          <el-select v-model="assignOwner" filterable clearable placeholder="选择负责人" style="width: 100%">
-            <el-option v-for="user in users" :key="user.id" :label="user.name" :value="user.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="转派原因" required>
-          <el-input v-model="assignReason" type="textarea" :rows="3" maxlength="200" placeholder="原因写入审计日志，厂商侧可见" />
-        </el-form-item>
-      </el-form>
-      <p v-if="assignError" class="dialog-error">{{ assignError }}</p>
-      <template #footer>
-        <el-button @click="assignOpen = false">取消</el-button>
-        <el-button type="primary" :loading="busy" @click="submitAssign">确认转派</el-button>
-      </template>
-    </el-dialog>
+    <AssignVendorDialog
+      v-model="assignOpen"
+      :requirement-id="id"
+      :requirement-code="detail?.code"
+      :status="detail?.status"
+      :vendor-id="detail?.vendorId ?? null"
+      :owner-id="detail?.ownerId ?? null"
+      :estimate="estimate"
+      @assigned="onAssigned"
+    />
   </div>
 </template>
 

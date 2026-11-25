@@ -256,17 +256,17 @@ async function main() {
       '厂商账号仍应看到需求池/缺陷；可见数越界通常意味着 AUTHENTICATED 哨兵判定顺序被打乱')
   }
 
-  // A15：/auth/me/permissions 的 menus 集合 = 37 个页面码（r18 的 MENU 层已生效；r39 加 automation.rules）
+  // A15：/auth/me/permissions 的 menus 集合 = 38 个页面码（r18 的 MENU 层已生效；r41 加 pdr.review）
   const adminMenus = menusByRole.get('admin')
   const adminEpoch = epochByRole.get('admin')
-  if (adminMenus && adminMenus.size === 37) {
-    ok(`admin 的 menus 集合 = 37 个页面码（epoch=${adminEpoch}，MENU 层与 FUNCTION 同源）`)
+  if (adminMenus && adminMenus.size === 38) {
+    ok(`admin 的 menus 集合 = 38 个页面码（epoch=${adminEpoch}，MENU 层与 FUNCTION 同源）`)
   } else if (!adminMenus) {
     bad('admin 拿不到 /auth/me/permissions 的 menus 集合',
       'T4 落地后 login 响应须带 epoch + menus（TECHNICAL §7）：否则前端只能按功能码推页面，三层授权形同两层')
   } else {
-    bad(`admin 的 menus 集合只有 ${adminMenus.size} 个页面码（应 37）`,
-      'RbacSeeder 的 MENU 行必须覆盖 11 角色 × 37 页；缺行 = 该页面永远不可见（s0/s2 会同时红）')
+    bad(`admin 的 menus 集合只有 ${adminMenus.size} 个页面码（应 38）`,
+      'RbacSeeder 的 MENU 行必须覆盖 11 角色 × 38 页；缺行 = 该页面永远不可见（s0/s2 会同时红）')
   }
 
   // A16：页面码不额外挡人 —— 双条件可见集与「只按功能码」逐角色完全相同。

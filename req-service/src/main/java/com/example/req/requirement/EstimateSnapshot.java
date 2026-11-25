@@ -77,6 +77,15 @@ final class EstimateSnapshot {
         return estimate != null ? estimate : number(document, "approvedDays");
     }
 
+    /**
+     * 单据上的承接厂商（r41）。空 = 内部提交或 r41 之前的老单据——两种都按「当前的承接厂商」
+     * 处理，所以存量评估不会在上线当天集体失效。
+     */
+    static Long vendorId(Map<String, Object> document) {
+        BigDecimal raw = number(document, "vendorId");
+        return raw == null ? null : Long.valueOf(raw.longValue());
+    }
+
     static String note(Map<String, Object> document) {
         if (document == null) {
             return null;

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # s2-seed-equivalence.sh — 种子逐格等价（TECHNICAL §3.3、AC-3）
 #
-# 等式（每租户 1903 行）：
+# 等式（每租户 1980 行）：
 #   FUNCTION = PermissionMatrix.accessFor(role, function)         671 行，原样复制
-#   MENU     = max(page.functionCodes 上的 FUNCTION 行)，空 ⇒ ALLOW   407 行
-#   ACTION   = max(action.functionCodes 上的 FUNCTION 行)，空 ⇒ ALLOW 825 行
+#   MENU     = max(page.functionCodes 上的 FUNCTION 行)，空 ⇒ ALLOW   418 行
+#   ACTION   = max(action.functionCodes 上的 FUNCTION 行)，空 ⇒ ALLOW 891 行
 #            —— 例外：r24 的 11 条角色×动作显式 DENY 覆盖（只此一处，见第 3 段）
-# 只要 407 + 825 个格子逐格等于这个推导，升级前后的能力就等价：
+# 只要 418 + 891 个格子逐格等于这个推导，升级前后的能力就等价：
 # 旧前端 canAny(功能码) == 新判定「页面非 DENY」，旧按钮判据 == 新动作档位。
 #
 # 期望值不是手抄：由 sys_menu/sys_action 的 function_codes ∪ sys_role_permission 的 FUNCTION 行
@@ -93,7 +93,7 @@ OVERRIDE_JOIN="LEFT JOIN (
 log "${SEGMENT}：种子逐格等价（tenant=${T1_TENANT} id=${TENANT_ID}）"
 
 # ---------------------------------------------------------------- 1. 行数与覆盖
-check_eq "t1 授权行总数 = 1903，且每个角色 173 行" "11 173" \
+check_eq "t1 授权行总数 = 1980，且每个角色 180 行" "11 180" \
     "$(one "SELECT CONCAT(COUNT(DISTINCT role_id), ' ', MAX(c)) FROM (
              SELECT role_id, COUNT(*) AS c FROM sys_role_permission
               WHERE tenant_id = ${TENANT_ID} GROUP BY role_id) x")" \
@@ -111,7 +111,7 @@ check_eq "每页绑定的功能码都能在 FUNCTION 行里找到（页面侧无
     "$([[ -n "${MISSING_FN}" && "${MISSING_FN}" -gt 0 ]] && echo 1 || echo 0)" \
     "sys_menu.function_codes 写了 PermissionMatrix 里不存在的码：MENU 推导会退化成 ALLOW"
 
-check_eq "空绑定功能码的页面 = 4（me.todo/me.tasks/req.pool/defect.list），其 MENU 行恒 ALLOW" "4 44 44" \
+check_eq "空绑定功能码的页面 = 5（me.todo/me.tasks/req.pool/defect.list/pdr.review），其 MENU 行恒 ALLOW" "5 55 55" \
     "$(one "SELECT CONCAT(
                 (SELECT COUNT(*) FROM sys_menu WHERE function_codes = ''),
                 ' ',
@@ -130,14 +130,14 @@ MENU_BAD="$(one "${EXPAND_PAGES}
             ON e.tenant_id = m.tenant_id AND e.role_id = m.role_id AND e.subject = m.subject_code
          WHERE m.tenant_id = ${TENANT_ID} AND m.subject_type = 'MENU'
            AND m.access <> COALESCE(e.access, 'ALLOW')")"
-check_eq "MENU 407 格逐格 == max(绑定功能码)，不符 = 0" 0 "${MENU_BAD}" \
+check_eq "MENU 418 格逐格 == max(绑定功能码)，不符 = 0" 0 "${MENU_BAD}" \
     "页面档位必须由功能码推导（空 ⇒ ALLOW）：升级后旧 canAny 语义不能变"
 
 MENU_COMPARED="$(one "${EXPAND_PAGES}
         SELECT COUNT(*) FROM sys_role_permission m
           JOIN expect e ON e.tenant_id = m.tenant_id AND e.role_id = m.role_id AND e.subject = m.subject_code
          WHERE m.tenant_id = ${TENANT_ID} AND m.subject_type = 'MENU'")"
-check_eq "MENU 实际比对了 363 格（407 − 44 空格），不是空跑" 363 "${MENU_COMPARED}" \
+check_eq "MENU 实际比对了 363 格（418 − 55 空格），不是空跑" 363 "${MENU_COMPARED}" \
     "比对数不足说明推导没跑：门禁会假绿"
 
 # ---------------------------------------------------------------- 3. ACTION 逐格
@@ -149,15 +149,15 @@ ACTION_BAD="$(one "${EXPAND_ACTIONS}
          WHERE m.tenant_id = ${TENANT_ID} AND m.subject_type = 'ACTION'
            AND m.access <> CASE WHEN ov.role_id IS NOT NULL THEN 'DENY'
                                 ELSE COALESCE(e.access, 'ALLOW') END")"
-check_eq "ACTION 825 格逐格 == max(所需功能码)（11 条覆盖例外 ⇒ DENY），不符 = 0" 0 "${ACTION_BAD}" \
+check_eq "ACTION 891 格逐格 == max(所需功能码)（11 条覆盖例外 ⇒ DENY），不符 = 0" 0 "${ACTION_BAD}" \
     "动作档位是按钮判据：一格格错就会出现「按钮亮着、点下去 403」（r17 的类）"
 
 ACTION_COMPARED="$(one "${EXPAND_ACTIONS}
         SELECT COUNT(*) FROM sys_role_permission m
           JOIN expect e ON e.tenant_id = m.tenant_id AND e.role_id = m.role_id AND e.subject = m.subject_code
          WHERE m.tenant_id = ${TENANT_ID} AND m.subject_type = 'ACTION'")"
-check_eq "ACTION 实际比对了 825 格（全量，无空跑）" 825 "${ACTION_COMPARED}" \
-    "75 个动作都有功能码，必须整格比对"
+check_eq "ACTION 实际比对了 891 格（全量，无空跑）" 891 "${ACTION_COMPARED}" \
+    "81 个动作都有功能码，必须整格比对"
 
 # 3.3 覆盖例外本身也要被证明：11 条必须条条命中库里的行。命中数不足说明码写错（或角色不存在），
 # 此时 ACTION_BAD 仍可能全绿——因为错的那行根本没人跟它比。
@@ -188,7 +188,7 @@ CANON_SQL="SELECT CONCAT(r.code, '|', p.subject_type, '|', p.subject_code, '|', 
              FROM sys_role_permission p JOIN sys_role r ON r.id = p.role_id AND r.tenant_id = p.tenant_id
             WHERE p.tenant_id = ${TENANT_ID}
             ORDER BY BINARY l"
-# group_concat_max_len 默认 1024，1903 行规范化文本约 76KB：不抬到 1MB，MySQL 侧只会算前 1024
+# group_concat_max_len 默认 1024，1980 行规范化文本约 79KB：不抬到 1MB，MySQL 侧只会算前 1024
 # 字节的哈希，与 bash 侧的全量哈希必然不等（假红），也失去「整表一行不差」的意义。
 SQL_HASH="$(db_q "SET SESSION group_concat_max_len = 1048576;
         SELECT SHA2(GROUP_CONCAT(l ORDER BY BINARY l SEPARATOR '\n'), 256) FROM (${CANON_SQL}) x")"
@@ -216,4 +216,4 @@ if (( PASS != TOTAL )); then
 fi
 report_counts
 printf '  \033[1;30mCANONICAL_HASH=%s\033[0m\n' "${SQL_HASH}"
-ok "${SEGMENT}-seed-equivalence: ${PASS}/${TOTAL} 项通过（407+825 格逐格等价，含 11 条覆盖例外）"
+ok "${SEGMENT}-seed-equivalence: ${PASS}/${TOTAL} 项通过（418+891 格逐格等价，含 11 条覆盖例外）"

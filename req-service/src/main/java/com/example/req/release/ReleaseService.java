@@ -627,7 +627,7 @@ public class ReleaseService {
                         com.example.req.requirement.Rows.object(row, "closed_at")),
                 com.example.req.requirement.Rows.toDateTime(
                         com.example.req.requirement.Rows.object(row, "updated_at")),
-                null, actions, Map.of(), null, tags);
+                null, actions, Map.of(), null, null, tags);
     }
 
     private List<ParentGroup> groups(List<View> requirements) {

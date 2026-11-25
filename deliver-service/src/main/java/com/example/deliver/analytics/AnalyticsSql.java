@@ -98,7 +98,8 @@ public final class AnalyticsSql {
         return switch (dataset) {
             case AnalyticsDatasets.APPROVAL ->
                     " AND wi.started_at >= :fromTs AND wi.started_at < :toTs";
-            case AnalyticsDatasets.DELIVERY, AnalyticsDatasets.REQUIREMENT, AnalyticsDatasets.QUALITY ->
+            case AnalyticsDatasets.DELIVERY, AnalyticsDatasets.REQUIREMENT, AnalyticsDatasets.QUALITY,
+                    AnalyticsDatasets.PDR_REVIEW, AnalyticsDatasets.PDR_REVIEW_OPINION ->
                     " AND r.created_at >= :fromTs AND r.created_at < :toTs";
             default -> throw AnalyticsErrors.unknownDataset(dataset);
         };
@@ -161,6 +162,20 @@ public final class AnalyticsSql {
                         + " LEFT JOIN biz_domain bd ON bd.id = r.domain_id AND bd.tenant_id = r.tenant_id"
                         + " LEFT JOIN sys_vendor sv ON sv.id = r.assignee_vendor_id AND sv.tenant_id = r.tenant_id"
                         + " WHERE /*scope:r*/");
+        // r41：pdr_* 不在 ScopeSql 的登记表里，作用域只能挂在它们 JOIN 到的 requirement 上；
+        // 时间窗也用 r.created_at，与 PdrStatsService.reviews() 的 from/to 口径一致。
+        bases.put(AnalyticsDatasets.PDR_REVIEW,
+                "FROM pdr_review pr"
+                        + " JOIN requirement r ON r.id = pr.requirement_id"
+                        + " AND r.tenant_id = pr.tenant_id"
+                        + " WHERE /*scope:r*/");
+        bases.put(AnalyticsDatasets.PDR_REVIEW_OPINION,
+                "FROM pdr_review_opinion o"
+                        + " JOIN pdr_review pr ON pr.id = o.review_id"
+                        + " AND pr.tenant_id = o.tenant_id"
+                        + " JOIN requirement r ON r.id = pr.requirement_id"
+                        + " AND r.tenant_id = pr.tenant_id"
+                        + " WHERE /*scope:r*/");
         return Map.copyOf(bases);
     }
 
@@ -214,6 +229,20 @@ public final class AnalyticsSql {
         quality.put("status", "r.status");
         quality.put("month", "DATE_FORMAT(r.created_at, " + BUCKET_MONTH + ")");
         all.put(AnalyticsDatasets.QUALITY, quality);
+
+        Map<String, String> pdrReview = new LinkedHashMap<>();
+        pdrReview.put("status", "pr.status");
+        pdrReview.put("conclusion", "COALESCE(pr.conclusion, '未结论')");
+        pdrReview.put("initiatorId", "pr.initiator_id");
+        all.put(AnalyticsDatasets.PDR_REVIEW, pdrReview);
+
+        Map<String, String> pdrOpinion = new LinkedHashMap<>();
+        pdrOpinion.put("category", "o.category");
+        pdrOpinion.put("decision", "o.decision");
+        pdrOpinion.put("reviewerId", "o.reviewer_id");
+        pdrOpinion.put("reviewId", "o.review_id");
+        pdrOpinion.put("createdAt", "DATE_FORMAT(o.created_at, '%Y-%m-%d')");
+        all.put(AnalyticsDatasets.PDR_REVIEW_OPINION, pdrOpinion);
 
         return Map.copyOf(all);
     }
@@ -274,6 +303,15 @@ public final class AnalyticsSql {
                 "CASE WHEN rel.planned_release_date IS NOT NULL THEN 1 ELSE 0 END", null));
         all.put(AnalyticsDatasets.QUALITY, quality);
 
+        // r41：PDR 数据集只按行计数，与 PdrStatsService 的 reviewCount/opinionCount 同口径。
+        Map<String, Contribution> pdrReview = new LinkedHashMap<>();
+        pdrReview.put("reviewCount", new Contribution("1", null, null));
+        all.put(AnalyticsDatasets.PDR_REVIEW, pdrReview);
+
+        Map<String, Contribution> pdrOpinion = new LinkedHashMap<>();
+        pdrOpinion.put("opinionCount", new Contribution("1", null, null));
+        all.put(AnalyticsDatasets.PDR_REVIEW_OPINION, pdrOpinion);
+
         return Map.copyOf(all);
     }
 
@@ -286,6 +324,7 @@ public final class AnalyticsSql {
         map.put(AnalyticsDatasets.DELIVERY + "|planMonth", "rel.planned_release_date");
         map.put(AnalyticsDatasets.APPROVAL + "|month", "wi.started_at");
         map.put(AnalyticsDatasets.QUALITY + "|month", "r.created_at");
+        map.put(AnalyticsDatasets.PDR_REVIEW_OPINION + "|createdAt", "o.created_at");
         return Map.copyOf(map);
     }
 }

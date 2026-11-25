@@ -75,6 +75,25 @@ public record DataScope(long tenantId,
         return domainIds.contains(rowDomainId);
     }
 
+    /**
+     * 与 {@code RequirementDomainValidator.outOfScope} 同口径的域可见性：TENANT 档或 {@code domainIds} 空集
+     * 都表示「该维度不限制」（见类头注释的契约），只有非空集合才逐域判定。
+     *
+     * <p>为什么不能直接用 {@link #canSeeDomain(long)}：那个实现把空集当作「一个域都看不见」，
+     * 与契约相反。ORG 档用户（域由组织派生、{@code domainIds} 为空）在列表侧可见、详情侧却 403，
+     * 就是这两套语义并存导致的（r46 的 PDR 详情回归）。新代码一律用本方法；{@code canSeeDomain}
+     * 保留给已经按「空集=不可见」写死断言的既有调用点。</p>
+     */
+    public boolean canSeeDomainOrUnrestricted(long rowDomainId) {
+        if (tier == ScopeTier.TENANT) {
+            return true;
+        }
+        if (domainIds == null || domainIds.isEmpty()) {
+            return true;
+        }
+        return domainIds.contains(rowDomainId);
+    }
+
     private static Set<Long> copy(Collection<Long> values) {
         if (values == null || values.isEmpty()) {
             return Set.of();

@@ -119,6 +119,10 @@ api_call POST /api/req/requirements "{\"type\":\"PDR\",\"title\":\"gate-${GATE_T
 PDR_ID="$(jget_ "$HTTP_BODY" '.id')"
 [[ -n "$PDR_ID" && "$PDR_ID" != "null" ]] \
     || { err "建负向父链 PDR 失败：$(printf '%s' "$HTTP_BODY" | head -c 200)"; exit 1; }
+gate_pdr_review_pass "$PDR_ID" "负向父链 PDR" \
+    || { err "负向父链 PDR 未通过评审（r46 顺序门）"; exit 1; }
+gate_assign_vendor "$PDR_ID" "负向父链 PDR" \
+    || { err "负向父链 PDR 未指派厂商（r46 顺序门）"; exit 1; }
 api_call POST "/api/req/requirements/${PDR_ID}/estimate" '{"estimateDays":2,"note":"r34 负向门禁父链 PDR"}'
 [[ "$HTTP_CODE" == "201" ]] \
     || { err "负向父链 PDR 提交评估失败（HTTP ${HTTP_CODE}）：$(printf '%s' "$HTTP_BODY" | head -c 200)"; exit 1; }
@@ -158,6 +162,10 @@ api_call POST "/api/req/requirements/${SEED_POOLED_BUS}/decompose" "{\"title\":\
 allow "已入池 BUS 拆解 → 201（正向回归 AC-5）" 201 ""
 GATE_PDR="$(jget_ "$HTTP_BODY" '.id')"
 [[ -n "$GATE_PDR" && "$GATE_PDR" != "null" ]] || { err "拆解入池 BUS 未返回子需求 id，后续前置门用例无法执行"; exit 1; }
+gate_pdr_review_pass "$GATE_PDR" "4b 前置门 PDR" \
+    || { err "4b 前置门 PDR 未通过评审（r46 顺序门）"; exit 1; }
+gate_assign_vendor "$GATE_PDR" "4b 前置门 PDR" \
+    || { err "4b 前置门 PDR 未指派厂商（r46 顺序门）"; exit 1; }
 
 # 2) 未入池 BUS（新建停在 SUBMITTED）不可拆解出 PDR。
 api_call POST /api/req/requirements "{\"type\":\"BUS\",\"title\":\"neg-gate-bus-${RUN_TAG}\",\"domainIds\":[$DOMAIN1]}"
@@ -230,6 +238,8 @@ deny "未评估 PDR 排期 → 409 ESTIMATE_NOT_APPROVED" 409 "ESTIMATE_NOT_APPR
     "两个受门动作（schedule/start_dev）必须同源判定"
 
 # 待审核（PENDING）同样拦：单据在途 ≠ 已通过。
+gate_assign_vendor "$GATE_RD" "4c 评估门 RD" \
+    || { err "4c 评估门 RD 未指派厂商（r46 顺序门）"; exit 1; }
 api_call POST "/api/req/requirements/${GATE_RD}/estimate" '{"estimateDays":2,"note":"负向：待审核"}'
 allow "提交工时评估单 → 201（负向夹具就绪）" 201 "" "POST /{id}/estimate 与 /{id}/deliver 同址同风格"
 GATE_EST_INST="$(jget_ "$HTTP_BODY" '.instanceId')"
@@ -264,6 +274,7 @@ deny "已驳回 RD 开始开发 → 409 ESTIMATE_NOT_APPROVED(status=REJECTED)" 
     "驳回后必须重新提交并审批通过才能排期/开发"
 
 # 通过 → 改人天超 20% → 读时派生 STALE，门再次关；改回后门重新打开（同一函数派生，AC-11）。
+gate_assign_vendor "$GATE_RD" "4c 重提 RD" || true
 api_call POST "/api/req/requirements/${GATE_RD}/estimate" '{"estimateDays":2,"note":"负向：重提"}'
 allow "重提工时评估单 → 201（旧单转 SUPERSEDED）" 201 "" "重提必须先把旧 PENDING 置终态，否则唯一键冲突"
 login_as "pm" "Passw0rd!" || warn "pm 登录失败（重提审批）"
@@ -283,15 +294,15 @@ api_call PUT "/api/req/requirements/${GATE_RD}" '{"estimateDays":2}'
 api_call POST "/api/req/requirements/${GATE_RD}/actions" '{"action":"start_dev"}'
 allow "人天改回评估值 → 门重新放行 start_dev 200" 200 "" "六态与门判定同源：偏差收敛即恢复"
 
-# 越权：厂商账号没有 req:deliver，提交评估 403（且不落库）。
-if login_as "vpm1" "Passw0rd!"; then
+# 越权：产品经理只审不提，提交评估必须 403（且不落库）；厂商账号的口径在 pdr-flow-verify 的 B2-4 断言。
+if login_as "pm" "Passw0rd!"; then
     BEFORE_EST="$(db_count wf_instance "tenant_id=${TID} AND biz_type='WBS_ESTIMATE'")"
     api_call POST "/api/req/requirements/${GATE_RD}/estimate" '{"estimateDays":1,"note":"越权"}'
-    deny "厂商账号提交工时评估 → 403" 403 "" "req:deliver 缺失必须 403，不能落一张单"
+    deny "产品经理提交工时评估 → 403（只审不提）" 403 "" "req:estimate_submit 对 PRODUCT 必须 DENY"
     same_count "越权提交未建单" wf_instance "tenant_id=${TID} AND biz_type='WBS_ESTIMATE'" "$BEFORE_EST"
     API_TOKEN="$ADMIN_TOKEN"
 else
-    fail "vpm1 登录失败（评估越权用例）" "make platform-seed 必须创建 vpm1/Passw0rd!"
+    fail "pm 登录失败（评估越权用例）" "make platform-seed 必须创建 pm/Passw0rd!"
 fi
 
 # ---------------------------------------------------------------- 4d
@@ -364,7 +375,8 @@ allow "4d.3 造一张 TODO RD（父 PDR 已排期）→ 201" 201 "" "start_dev �
 R27_RD="$(jget_ "$HTTP_BODY" '.id')"
 if [[ -n "$R27_RD" && "$R27_RD" != "null" ]]; then
     R27_RD_KW="$(db_q "SELECT title FROM requirement WHERE id=${R27_RD}")"
-    api_call POST "/api/req/requirements/${R27_RD}/estimate" '{"estimateDays":1.5,"note":"r27 4d：RD 评估"}'
+    gate_assign_vendor "$R27_RD" "4d.3 RD" || true
+api_call POST "/api/req/requirements/${R27_RD}/estimate" '{"estimateDays":1.5,"note":"r27 4d：RD 评估"}'
     allow "4d.3 RD 提交工时评估 → 201" 201 "" "评估单是六态的输入，无单即 NONE"
     approve_est "$R27_RD" "4d.3 RD 评估初审"
     parity "4d.3 已通过评估的 RD 四处一致且含 start_dev" "$R27_RD" "$R27_RD_KW" 'any(.[]; . == "start_dev")'
@@ -861,6 +873,11 @@ if [[ -n "$VPM_VEN_A" && -n "$VPM_REQ_A" && -n "$VPM_REQ_B" ]]; then
                 # r26 起排期多了一道工时评估门：先以内部身份把这条 PDR 的评估单批掉，
                 # 否则权限正确也会被 409 ESTIMATE_NOT_APPROVED 拦住（门与权限是两件事）。
                 API_TOKEN="$ADMIN_TOKEN"
+                # r46 顺序门：评审 → 指派厂商 → 评估，缺一环都会被 409 挡住（门与权限是两件事）。
+                gate_pdr_review_pass "$VPM_REQ_SCHEDULE" "VENDOR_PM 排期夹具 PDR" \
+                    || warn "厂商排期夹具 PDR 未通过评审（排期断言可能被顺序门挡住）"
+                gate_assign_vendor "$VPM_REQ_SCHEDULE" "VENDOR_PM 排期夹具 PDR" \
+                    || warn "厂商排期夹具 PDR 未指派厂商（排期断言可能被 409 VENDOR_NOT_ASSIGNED 挡住）"
                 api_call POST "/api/req/requirements/${VPM_REQ_SCHEDULE}/estimate" '{"estimateDays":5,"note":"负向夹具：厂商排期前评估"}'
                 [[ "$HTTP_CODE" == "201" ]] || warn "厂商 PDR 评估单提交失败（HTTP ${HTTP_CODE}）：排期断言可能被评估门挡住"
                 login_as "pm" "Passw0rd!" || warn "pm 登录失败（厂商排期夹具）"

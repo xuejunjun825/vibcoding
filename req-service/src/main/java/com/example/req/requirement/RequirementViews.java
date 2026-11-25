@@ -1,5 +1,7 @@
 package com.example.req.requirement;
 
+import com.example.req.pdr.PdrViews;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -46,7 +48,7 @@ public final class RequirementViews {
                        LocalDate expectedDeliveryDate, LocalDate planStartDate, LocalDate planEndDate,
                        LocalDateTime closedAt, LocalDateTime updatedAt,
                        Rollup rollup, List<String> allowedActions, Map<String, Object> permissions,
-                       DecomposeGate decomposeGate, List<TagView> tags) {
+                       Long projectId, DecomposeGate decomposeGate, List<TagView> tags) {
 
         /*
          * 只有一个构造器，`tags` 是必填参数（r39 Q-1）。
@@ -83,7 +85,8 @@ public final class RequirementViews {
                          List<FieldRule> lockedFields,
                          List<Long> domainIds,
                          String sonarProjectKey,
-                         WbsEstimateViews.EstimateView estimate) {
+                         WbsEstimateViews.EstimateView estimate,
+                         PdrViews.ReviewDetail pdrReview) {
     }
 
     /** 提交评估 201 响应（{@code instanceId} 供前端直接跳审批单）。 */

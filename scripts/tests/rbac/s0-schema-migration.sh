@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# s0-schema-migration.sh — 迁移与计数：4 张表列齐、sys_role 行数、37/75/1903（TECHNICAL §3.1/§3.3）
+# s0-schema-migration.sh — 迁移与计数：4 张表列齐、sys_role 行数、38/81/1980（TECHNICAL §3.1/§3.3）
 #
 # 这一段是后面所有段的前提：迁移没落库或种子不齐，s1~s9 的失败都会指向错误的原因，
 # 所以先在最前面把「形状」和「数量」钉死。V12 只做 DDL、V13 只建 VENDOR_PM 角色行（授权行数据
@@ -102,15 +102,15 @@ ROLE_ROWS="$(one "SELECT COUNT(*) FROM sys_role WHERE tenant_id = ${TENANT_ID}")
 check_eq "t1 的 sys_role = 11 个内置角色（r24 起 VENDOR_PM）" 11 "${ROLE_ROWS}" \
     "V13 只保证 VENDOR_PM 角色行存在；行数少了说明迁移没跑（make platform-up）"
 
-check_eq "sys_menu = 37（MenuRegistry 页面数）" 37 \
+check_eq "sys_menu = 38（MenuRegistry 页面数）" 38 \
     "$(one "SELECT COUNT(*) FROM sys_menu")" \
     "RbacSeeder.seedRegistries 未跑或漏页"
 
-check_eq "sys_action = 75（ActionRegistry 动作数）" 75 \
+check_eq "sys_action = 81（ActionRegistry 动作数）" 81 \
     "$(one "SELECT COUNT(*) FROM sys_action")" \
     "RbacSeeder.seedRegistries 未跑或漏动作"
 
-check_eq "t1 的 sys_role_permission = 1903 行（671+407+825）" 1903 \
+check_eq "t1 的 sys_role_permission = 1980 行（671+418+891）" 1980 \
     "$(one "SELECT COUNT(*) FROM sys_role_permission WHERE tenant_id = ${TENANT_ID}")" \
     "RbacBootstrap/RbacSeeder.seedTenant 未补齐；先看 req-service 启动日志的 ERROR"
 
@@ -118,29 +118,29 @@ MIX="$(one "SELECT COUNT(*) FROM (
         SELECT subject_type, COUNT(*) AS c FROM sys_role_permission
          WHERE tenant_id = ${TENANT_ID} GROUP BY subject_type) x
        WHERE (subject_type = 'FUNCTION' AND c = 671)
-          OR (subject_type = 'MENU'     AND c = 407)
-          OR (subject_type = 'ACTION'   AND c = 825)")"
-check_eq "分布 671 FUNCTION / 407 MENU / 825 ACTION" 3 "${MIX}" \
-    "每层行数必须等于 11 角色 × 61/37/75"
+          OR (subject_type = 'MENU'     AND c = 418)
+          OR (subject_type = 'ACTION'   AND c = 891)")"
+check_eq "分布 671 FUNCTION / 418 MENU / 891 ACTION" 3 "${MIX}" \
+    "每层行数必须等于 11 角色 × 61/38/81"
 
 THIN="$(one "SELECT COUNT(*) FROM (
         SELECT role_id, COUNT(*) AS c FROM sys_role_permission
-         WHERE tenant_id = ${TENANT_ID} GROUP BY role_id) x WHERE c <> 173")"
-check_eq "每个角色恰好 173 行（61+37+75 之外无缺口）" 0 "${THIN}" \
+         WHERE tenant_id = ${TENANT_ID} GROUP BY role_id) x WHERE c <> 180")"
+check_eq "每个角色恰好 180 行（61+38+81 之外无缺口）" 0 "${THIN}" \
     "授权行必须写满：缺行在判定里等价于 DENY，会让内置角色突然失权"
 
 # ---------------------------------------------------------------- 4. 迁移版本与全租户
 FLYWAY="$(one "SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1")"
-# r40：V16__requirement_change.sql（需求变更单两表）是当前最高版本；
-# 本条同时兜住「V15/V16 迁移没跑成功」——版本落后会让后续所有授权断言在错库上假绿。
-check_eq "Flyway 最新成功版本 = 16" 16 "${FLYWAY}" \
-    "V16__requirement_change.sql 未执行（先 make platform-up）"
+# r46：V21__report_definition_dataset_width.sql（报表数据集列宽）是当前最高版本；
+# 本条同时兜住「V17–V21 迁移没跑成功」——版本落后会让后续所有授权断言在错库上假绿。
+check_eq "Flyway 最新成功版本 = 21" 21 "${FLYWAY}" \
+    "V21__report_definition_dataset_width.sql 未执行（先 make platform-up）"
 
 BAD_TENANTS="$(one "SELECT COUNT(*) FROM (
         SELECT t.id FROM sys_tenant t
           LEFT JOIN sys_role_permission p ON p.tenant_id = t.id
-         GROUP BY t.id HAVING COUNT(*) <> 1903) x")"
-check_eq "所有租户都补齐 1903 行（RbacBootstrap 遍历全部租户）" 0 "${BAD_TENANTS}" \
+         GROUP BY t.id HAVING COUNT(*) <> 1980) x")"
+check_eq "所有租户都补齐 1980 行（RbacBootstrap 遍历全部租户）" 0 "${BAD_TENANTS}" \
     "新租户由 TenantProvisioner 同事务种子；存量租户由 RbacBootstrap.seedAllTenants 补齐"
 
 # ---------------------------------------------------------------- 汇总
@@ -155,4 +155,4 @@ if (( PASS != TOTAL )); then
     exit 1
 fi
 report_counts
-ok "s0-schema-migration: ${PASS}/${TOTAL} 项通过（V13 形状 + 37/75/1903）"
+ok "s0-schema-migration: ${PASS}/${TOTAL} 项通过（V13 形状 + 38/81/1980）"

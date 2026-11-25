@@ -41,6 +41,10 @@ public class RequirementEntity {
     @Column(name = "parent_id")
     private Long parentId;
 
+    /** 项目组（r41，V17）：NULL = 未挂项目，PDR 评审人回退「产品经理 + 域负责人」。 */
+    @Column(name = "project_id")
+    private Long projectId;
+
     @Column(name = "domain_id", nullable = false)
     private Long domainId;
 
@@ -153,6 +157,8 @@ public class RequirementEntity {
     public void setType(String type) { this.type = type; }
     public Long getParentId() { return parentId; }
     public void setParentId(Long parentId) { this.parentId = parentId; }
+    public Long getProjectId() { return projectId; }
+    public void setProjectId(Long projectId) { this.projectId = projectId; }
     public Long getDomainId() { return domainId; }
     public void setDomainId(Long domainId) { this.domainId = domainId; }
     public Long getOriginOrgId() { return originOrgId; }

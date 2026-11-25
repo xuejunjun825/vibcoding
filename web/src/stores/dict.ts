@@ -48,6 +48,9 @@ export type StatusKind =
   | 'mrReviewState'
   // r40 需求变更单（第 6 类审批单）：APPROVED 只表示「审批通过」，文案见 CHANGE_STATUS
   | 'reqChange'
+  // r49 PDR 评审单 / 意见状态（分类码表不在这里：见 api/pdrCategories.ts）
+  | 'pdrReview'
+  | 'pdrOpinion'
   // M9 分析域回显（TECHNICAL §5）：与服务端标签注册表 AnalyticsLabels 逐字符串一致
   | 'reqType'
   | 'severity'
@@ -367,6 +370,26 @@ export const CHANGE_TYPE: Record<string, string> = {
   PARENT: '父需求',
 }
 
+/**
+ * PDR 评审单（r49）：文案对齐 `PdrReviewService.ST_*` 与交互稿「评审中/已通过/已驳回」。
+ * 通过态是 `APPROVED`（不是 PASSED），驳回是整单 `REJECTED`；
+ * 单条意见的结论复用 `caseReviewConclusion`（PASS/NEED_CHANGE/REJECT 同词同色，不再复制一份）。
+ */
+const PDR_REVIEW: Record<string, StatusMeta> = {
+  DRAFT: { label: '草稿', tone: 'neutral' },
+  IN_REVIEW: { label: '评审中', tone: 'warning' },
+  APPROVED: { label: '已通过', tone: 'success' },
+  REJECTED: { label: '已驳回', tone: 'danger' },
+  CANCELLED: { label: '已取消', tone: 'neutral' },
+}
+
+/** PDR 意见状态（`PdrReviewService.OP_*`）：待处理 → 已转任务 → 已解决 */
+const PDR_OPINION: Record<string, StatusMeta> = {
+  OPEN: { label: '待处理', tone: 'warning' },
+  TASKED: { label: '已转任务', tone: 'primary' },
+  RESOLVED: { label: '已解决', tone: 'success' },
+}
+
 const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   requirement: REQUIREMENT,
   defect: DEFECT,
@@ -395,6 +418,8 @@ const DICTS: Record<StatusKind, Record<string, StatusMeta>> = {
   executorHealth: EXECUTOR_HEALTH,
   caseReview: CASE_REVIEW,
   caseReviewConclusion: CASE_REVIEW_CONCLUSION,
+  pdrReview: PDR_REVIEW,
+  pdrOpinion: PDR_OPINION,
   wikiVisibility: WIKI_VISIBILITY,
   mrReviewState: MR_REVIEW_STATE,
   // r40 变更单状态（PENDING/APPROVED/APPLIED/REJECTED/WITHDRAWN）

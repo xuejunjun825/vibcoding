@@ -193,7 +193,7 @@ class WbsEstimateBatchParityTest {
     private static List<WbsEstimateService.GateSubject> subjects(List<RequirementEntity> entities) {
         return entities.stream()
                 .map(entity -> new WbsEstimateService.GateSubject(entity.getId(), entity.getType(),
-                        entity.getEstimateDays()))
+                        entity.getEstimateDays(), entity.getAssigneeVendorId()))
                 .toList();
     }
 

@@ -324,3 +324,85 @@ gate_pool_bus() {
     printf '  [gate] %s：已入池（POOLED）\n' "$label"
     return 0
 }
+
+# 把一条 PDR 真实推过「PDR 评审」（r46 顺序门）：发起评审 → 各评审人 PASS → conclude → APPROVED。
+# 评审人用显式名单（默认 pm + tl1，二者都在 GATE_FIXTURE_USERS 里，能收到待办/可提交意见）；
+# PDR 顺序门未过时 assign-vendor / estimate / schedule 全被 409 PDR_REVIEW_REQUIRED 拦，
+# 所以凡是要走评估/排期的 PDR 夹具，必须先过这道门。
+gate_pdr_review_pass() {
+    local req="$1" label="${2:-PDR $1}" saved="$API_TOKEN"
+    local rid="" u ok=0 status="" mine=0
+    api_call POST "/api/req/requirements/${req}/pdr-review" \
+        '{"reviewerIds":[],"mode":"MODE_ALL","note":"gate-fixture PDR 评审夹具"}'
+    if [[ "$HTTP_CODE" != "201" ]]; then
+        # 已经有在途评审单时复用（幂等：门禁可能在同一 PDR 上跑两段）
+        api_call GET "/api/req/requirements/${req}/pdr-review"
+        rid="$(jget "$HTTP_BODY" '.review.id // .id // empty')"
+        if [[ -z "$rid" || "$rid" == "null" ]]; then
+            err "[gate] ${label}：发起 PDR 评审失败（HTTP ${HTTP_CODE}）：$(printf '%s' "$HTTP_BODY" | head -c 200)"
+            API_TOKEN="$saved"
+            return 1
+        fi
+    else
+        rid="$(jget "$HTTP_BODY" '.review.id // .id // empty')"
+    fi
+    [[ -n "$rid" && "$rid" != "null" ]] || {
+        err "[gate] ${label}：评审单 id 缺失"
+        API_TOKEN="$saved"
+        return 1
+    }
+    for u in $GATE_FIXTURE_USERS; do
+        gate_login_as "$u" || continue
+        api_call POST "/api/req/pdr-reviews/${rid}/opinions" \
+            '{"opinions":[{"category":"RANGE","decision":"PASS","comment":"gate-fixture 评审通过"}]}'
+        if [[ "$HTTP_CODE" == "201" || "$HTTP_CODE" == "200" ]]; then
+            mine=$((mine + 1))
+        fi
+    done
+    if [[ "$mine" -eq 0 ]]; then
+        err "[gate] ${label}：没有任何夹具用户能提交评审意见（评审人名单与夹具用户不重叠）"
+        API_TOKEN="$saved"
+        return 1
+    fi
+    gate_login_as "$GATE_FIXTURE_ADMIN_USER" || {
+        err "[gate] ${label}：管理员登录失败（汇总评审需要 pdr_review_conclude）"
+        API_TOKEN="$saved"
+        return 1
+    }
+    api_call POST "/api/req/pdr-reviews/${rid}/conclude" '{"note":"gate-fixture 汇总"}'
+    # 全员 PASS 时评审引擎会自动收口（再 conclude 返回 409 REVIEW_CLOSED + status=APPROVED），按成功处理。
+    if [[ "$HTTP_CODE" != "200" ]]; then
+        if [[ "$HTTP_CODE" == "409" && "$(printf '%s' "$HTTP_BODY" | grep -c '"status":"APPROVED"')" -gt 0 ]]; then
+            printf '  [gate] %s：评审已自动收口（APPROVED）\n' "$label"
+        else
+            err "[gate] ${label}：评审汇总失败（HTTP ${HTTP_CODE}）：$(printf '%s' "$HTTP_BODY" | head -c 200)"
+            API_TOKEN="$saved"
+            return 1
+        fi
+    fi
+    api_call GET "/api/req/requirements/${req}/pdr-review"
+    status="$(jget "$HTTP_BODY" '.review.status // .status // empty')"
+    API_TOKEN="$saved"
+    if [[ "$status" != "APPROVED" ]]; then
+        err "[gate] ${label}：评审后状态 ${status:-<缺失>}，期望 APPROVED"
+        return 1
+    fi
+    printf '  [gate] %s：已通过 PDR 评审（APPROVED，意见 %d 条）\n' "$label" "$mine"
+    return 0
+}
+
+# r46 顺序门第二步：评估前必须先指派承接厂商（409 VENDOR_NOT_ASSIGNED）。
+gate_assign_vendor() {
+    local req="$1" label="${2:-需求 $1}" saved="$API_TOKEN" vid="${3:-1}"
+    gate_login_as "$GATE_FIXTURE_ADMIN_USER" || return 1
+    api_call POST "/api/req/requirements/${req}/assign-vendor" \
+        "{\"vendorId\":${vid},\"reason\":\"gate-fixture 指派承接厂商\"}"
+    if [[ "$HTTP_CODE" != "200" ]]; then
+        err "[gate] ${label}：指派厂商失败（HTTP ${HTTP_CODE}）：$(printf '%s' "$HTTP_BODY" | head -c 200)"
+        API_TOKEN="$saved"
+        return 1
+    fi
+    API_TOKEN="$saved"
+    printf '  [gate] %s：已指派承接厂商 vendorId=%s\n' "$label" "$vid"
+    return 0
+}

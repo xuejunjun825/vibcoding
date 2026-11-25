@@ -64,30 +64,48 @@ REL_ACT="$(jget "$HTTP_BODY" '.id')"
 api_call POST "${C_REQ}/releases/${REL_ACT}/approval"
 INST="$(jget "$HTTP_BODY" '.instanceId')"
 TASK_ID=""
+APPROVE_OK=0
+APPROVE_ERR=""
 if [[ -n "$INST" && "$INST" != "null" ]]; then
-    api_call GET "${C_REQ}/approvals/instances/${INST}"
-    TASK_ID="$(jget "$HTTP_BODY" '(.tasks[]? | select(.status=="PENDING") | .id) // empty' | head -1)"
-    APPROVER_ID="$(jget "$HTTP_BODY" '(.tasks[]? | select(.status=="PENDING") | .approverId) // empty' | head -1)"
+    # NORMAL 版本是三级链（n1 产品经理 → n2 PMO/厂商 ALL 会签 → n3 管理层）：只批第一条待办
+    # 只会推进一级、不会触发 publish。发布路径的 actual_start_date 写入要等最后一级通过，
+    # 所以夹具必须逐级把所有 PENDING 任务批完，而不是只批 n1。
+    for _round in 1 2 3 4 5 6 7 8; do
+        api_call GET "${C_REQ}/approvals/instances/${INST}"
+        TASKS="$(printf '%s' "$HTTP_BODY" | jq -r '.tasks[]? | select(.status=="PENDING") | "\(.id) \(.approverId)"' 2>/dev/null)"
+        [[ -z "$TASKS" ]] && break
+        while read -r TASK_ID APPROVER_ID; do
+            [[ -z "$TASK_ID" ]] && continue
+            APPROVER="$(db_q "SELECT username FROM sys_user WHERE id=${APPROVER_ID}")"
+            ACT_TOKEN="$(curl -sS -m 8 -X POST "${GATEWAY_URL}${C_REQ}/auth/login" -H 'Content-Type: application/json' \
+                -d "$(jq -cn --arg u "$APPROVER" '{tenantCode:"t1",username:$u,password:"Passw0rd!"}')" | jq -r '.token // empty')"
+            if [[ -z "$ACT_TOKEN" ]]; then
+                APPROVE_ERR="审批人 ${APPROVER:-id=${APPROVER_ID}} 登录失败：检查种子账号密码"
+                break
+            fi
+            http_call POST "${GATEWAY_URL}${C_REQ}/approvals/tasks/${TASK_ID}/actions" \
+                '{"action":"APPROVE","comment":"s1 实际期回归"}' \
+                -H "Authorization: Bearer ${ACT_TOKEN}" -H 'X-Tenant-Id: 1'
+            if [[ "$HTTP_CODE" != "200" ]]; then
+                APPROVE_ERR="任务 ${TASK_ID} 通过返回 ${HTTP_CODE}：${HTTP_BODY:0:200}"
+                break
+            fi
+            APPROVE_OK=$((APPROVE_OK + 1))
+        done <<<"$TASKS"
+        [[ -n "$APPROVE_ERR" ]] && break
+    done
 fi
-if [[ -z "$TASK_ID" || "$TASK_ID" == "null" ]]; then
+if [[ -n "$APPROVE_ERR" ]]; then
+    fail "审批人通过 → 发布 200" "${APPROVE_ERR}"
+elif [[ "$APPROVE_OK" -eq 0 ]]; then
     fail "发布单没有生成待办审批任务（instance=${INST:-none}）" "审批流夹具缺失：先 make platform-seed"
 else
-    APPROVER="$(db_q "SELECT username FROM sys_user WHERE id=${APPROVER_ID}")"
-    ACT_TOKEN="$(curl -sS -m 8 -X POST "${GATEWAY_URL}${C_REQ}/auth/login" -H 'Content-Type: application/json' \
-        -d "$(jq -cn --arg u "$APPROVER" '{tenantCode:"t1",username:$u,password:"Passw0rd!"}')" | jq -r '.token // empty')"
-    if [[ -z "$ACT_TOKEN" ]]; then
-        fail "审批人 ${APPROVER} 登录失败" "审批驱动不了就没法验证 publish 路径：检查种子账号密码"
-    else
-        http_call POST "${GATEWAY_URL}${C_REQ}/approvals/tasks/${TASK_ID}/actions" \
-            '{"action":"APPROVE","comment":"s1 实际期回归"}' \
-            -H "Authorization: Bearer ${ACT_TOKEN}" -H 'X-Tenant-Id: 1'
-        expect "审批人通过 → 发布 200" 200
-        q_admin_login >/dev/null 2>&1
-        expect_db "发布后 actual_start_date 已写入（RELEASE 接入 ActualPeriodRecorder）" \
-            "SELECT COUNT(*) FROM \`release\` WHERE id=${REL_ACT} AND tenant_id=${TENANT_ID}
-                AND status='PUBLISHED' AND actual_start_date IS NOT NULL" eq 1 \
-            "ReleaseService.publish 必须调用 ActualPeriodRecorder.record(RELEASE,…)：否则甘特发布视图永远没有实际条"
-    fi
+    expect "逐级审批通过 → 发布 200（共 ${APPROVE_OK} 个待办）" 200
+    q_admin_login >/dev/null 2>&1
+    expect_db "发布后 actual_start_date 已写入（RELEASE 接入 ActualPeriodRecorder）" \
+        "SELECT COUNT(*) FROM \`release\` WHERE id=${REL_ACT} AND tenant_id=${TENANT_ID}
+            AND status='PUBLISHED' AND actual_start_date IS NOT NULL" eq 1 \
+        "ReleaseService.publish 必须调用 ActualPeriodRecorder.record(RELEASE,…)：否则甘特发布视图永远没有实际条"
 fi
 
 section "s1 · 改期唯一写入口"

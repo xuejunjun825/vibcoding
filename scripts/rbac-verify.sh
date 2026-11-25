@@ -25,9 +25,9 @@ SEGMENTS=(s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s2r)
 # 每段下限 = TECHNICAL §10.2 的断言数；删断言必须先改这里并说明理由，否则门禁静默缩水。
 segment_min() {
     case "$1" in
-        s0) echo 8 ;;   # 4 表列/行数/37/75/1903/671-407-825
+        s0) echo 8 ;;   # 4 表列/行数/38/81/1980/671-418-891
         s1) echo 8 ;;   # DB=MenuRegistry=nav.ts=ActionRegistry + 命名 + 归属
-        s2) echo 8 ;;   # 1903 行 + 推导等价 + 规范化哈希
+        s2) echo 8 ;;   # 1980 行 + 推导等价 + 规范化哈希
         s3) echo 6 ;;   # 三序、并集、RESTRICTED、未注册码
         s4) echo 5 ;;   # 撤销即时、恢复、epoch 单调、TTL<=60
         s5) echo 8 ;;   # CRUD/不可改码/内置不可删停/停用失权/防锁死
@@ -35,7 +35,7 @@ segment_min() {
         s7) echo 9 ;;   # AC-18 九例
         s8) echo 6 ;;   # 四类审计 + 无差异不写 + reset 幂等
         s9) echo 5 ;;   # 未保护写端点=0/白名单/只读/默认 fail-fast
-        s2r) echo 8 ;;  # 与 s2 同一套 1903/173/671/407/825/hash：套件结束库=预设
+        s2r) echo 8 ;;  # 与 s2 同一套 1980/180/671/418/891/hash：套件结束库=预设
         *)  echo 0 ;;
     esac
 }

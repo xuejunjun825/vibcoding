@@ -35,6 +35,9 @@ public final class DemoFixture {
     public static final String RELEASE_CODE = "DEMO-REL-1";
     public static final String SPRINT_NAME = "演示迭代-1";
     public static final String PLAN_NAME = "演示回归计划";
+    /** r41：PDR 评审演示项目组（设计 §9）。 */
+    public static final String PROJECT_CODE = "DEMO-PROJ-1";
+    public static final String PROJECT_NAME = "供应链平台";
 
     /**
      * r32 演示交付：演示链要跑到 PUBLISHED，RD 的 MR 与实际人天是发布会话准入的第 4/5 项。
@@ -69,6 +72,11 @@ public final class DemoFixture {
     public static final long TEST_ENV_SEED_COUNT = 1;
     /** r15-fix：门禁 RUN_TAG 残留，三张种子表合计的唯一合法值。 */
     public static final long GATE_RESIDUE_COUNT = 0;
+    /** r41 演示夹具：1 张在评单 + 6 条分类意见（其中 1 条 TASKED）+ 2 个附件。 */
+    public static final long PDR_REVIEW_COUNT = 1;
+    public static final long PDR_OPINION_COUNT = 6;
+    public static final long PDR_ATTACHMENT_COUNT = 2;
+    public static final long PROJECT_MEMBER_COUNT = 5;
     public static final long PO1_VISIBLE = 8;
     public static final long VENDOR_A_VISIBLE = 3;
     public static final long VENDOR_B_VISIBLE = 0;
@@ -261,6 +269,11 @@ public final class DemoFixture {
             TableReset.purge("deploy_order"),
             TableReset.purge("release_requirement"),
             TableReset.purge("milestone"),
+            // r41：评审单/意见/项目组都指向需求，必须排在 requirement 之前。
+            TableReset.purge("pdr_review_opinion"),
+            TableReset.purge("pdr_review"),
+            TableReset.purge("project_member"),
+            TableReset.purge("project"),
             TableReset.purge("task"),
             TableReset.purge("sprint"),
             TableReset.purge("attachment"),

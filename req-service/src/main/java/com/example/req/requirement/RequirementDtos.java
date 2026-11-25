@@ -24,6 +24,8 @@ public final class RequirementDtos {
         public LocalDate expectedDeliveryDate;
         public Long parentId;
         public Long ownerUserId;
+        /** 可选项目组（r41）：不传 = 不挂项目，行为与 r40 完全一致。 */
+        public Long projectId;
         public BigDecimal estimateDays;
         public BigDecimal actualDays;
         public List<Object> attachments = new ArrayList<>();
@@ -45,6 +47,8 @@ public final class RequirementDtos {
         public String priority;
         public LocalDate expectedDeliveryDate;
         public List<Long> domainIds;
+        /** 可选项目组（r41）：不传 = 不改；显式 null 与缺省同义（本类无「清空项目」语义）。 */
+        public Long projectId;
         private final Map<String, Object> extra = new LinkedHashMap<>();
 
         @JsonAnySetter
@@ -113,6 +117,15 @@ public final class RequirementDtos {
 
     public record CreateCommand(String type, String title, String description, List<Long> domainIds,
                                 String priority, LocalDate expectedDeliveryDate, Long parentId,
-                                Long ownerUserId, BigDecimal estimateDays, BigDecimal actualDays) {
+                                Long ownerUserId, BigDecimal estimateDays, BigDecimal actualDays,
+                                Long projectId) {
+
+        /** 十参兼容构造：既有单测与拆解路径不挂项目组。 */
+        public CreateCommand(String type, String title, String description, List<Long> domainIds,
+                             String priority, LocalDate expectedDeliveryDate, Long parentId,
+                             Long ownerUserId, BigDecimal estimateDays, BigDecimal actualDays) {
+            this(type, title, description, domainIds, priority, expectedDeliveryDate, parentId,
+                    ownerUserId, estimateDays, actualDays, null);
+        }
     }
 }

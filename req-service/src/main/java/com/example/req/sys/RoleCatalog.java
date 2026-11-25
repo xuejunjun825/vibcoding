@@ -67,7 +67,17 @@ public final class RoleCatalog {
             new DictDef("case_priority", "P0", "冒烟", 0),
             new DictDef("case_priority", "P1", "核心", 1),
             new DictDef("case_priority", "P2", "常规", 2),
-            new DictDef("case_priority", "P3", "边缘", 3));
+            new DictDef("case_priority", "P3", "边缘", 3),
+            // r41：PDR 评审意见分类（设计 §4.4）。九类，顺序即前端下拉与统计分桶顺序。
+            new DictDef("review_opinion_category", "RANGE", "范围/需求理解", 0),
+            new DictDef("review_opinion_category", "TECH", "技术可行性", 1),
+            new DictDef("review_opinion_category", "SCHEDULE", "工期/排期", 2),
+            new DictDef("review_opinion_category", "RISK", "风险/依赖", 3),
+            new DictDef("review_opinion_category", "ACCEPTANCE", "验收标准", 4),
+            new DictDef("review_opinion_category", "UI", "界面/交互", 5),
+            new DictDef("review_opinion_category", "DATA", "数据/兼容", 6),
+            new DictDef("review_opinion_category", "COMPLIANCE", "合规/安全", 7),
+            new DictDef("review_opinion_category", "OTHER", "其他", 8));
 
     public static final List<String> DEFAULT_DOMAIN_CODES = DOMAINS.stream()
             .map(DomainDef::code).toList();

@@ -38,6 +38,13 @@ public class TaskEntity {
     @Column(name = "title", nullable = false, length = 200)
     private String title;
 
+    /**
+     * 任务描述（r41，V17 迁移追加）。只由「评审意见转任务」写入来源说明；空值 = 手建任务。
+     * 用 {@code TEXT} 与需求描述同类型，避免长意见原文被截断。
+     */
+    @Column(name = "description")
+    private String description;
+
     @Column(name = "assignee_id")
     private Long assigneeId;
 
@@ -112,6 +119,14 @@ public class TaskEntity {
 
     public void setTitle(String title) {
         this.title = title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
     }
 
     public Long getAssigneeId() {

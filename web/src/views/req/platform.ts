@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { pdrErrorInfo } from '@/views/req/pdr'
 import { loadDictionaries } from '@/api/dictionaries'
 import type { DictionaryDomain, DictionaryUser, DictionaryVendor } from '@/api/dictionaries'
 import type {
@@ -137,6 +138,12 @@ export function normalizeRequirementDetail(raw: unknown): RequirementDetail {
         typeof record.sonarProjectKey === 'string'
           ? record.sonarProjectKey
           : (view.sonarProjectKey ?? null),
+      // r49：PDR 评审单同样在 Detail 顶层（`RequirementViews.Detail.pdrReview`）。
+      // 搬漏 = 「评审」tab 永远显示「还没发起评审」，而且会诱导重复发起，所以显式搬运。
+      pdrReview:
+        (record.pdrReview as RequirementDetail['pdrReview']) ?? view.pdrReview ?? null,
+      projectId:
+        typeof record.projectId === 'number' ? record.projectId : (view.projectId ?? null),
     }
   }
   const detail = raw as RequirementDetail
@@ -144,6 +151,8 @@ export function normalizeRequirementDetail(raw: unknown): RequirementDetail {
     ...detail,
     children: detail.children ?? [],
     allowedActions: detail.allowedActions ?? [],
+    pdrReview: detail.pdrReview ?? null,
+    projectId: detail.projectId ?? null,
   }
 }
 
@@ -163,6 +172,10 @@ export function summaryText(summary: unknown, fallback = '—'): string {
 }
 
 export function messageOf(error: unknown): string {
+  // r49：PDR 链路（评审门 / 厂商门 / 分类）的错误码统一翻成人话；
+  // 未登记的码 `pdrErrorInfo` 会回退 `error.message`，行为与旧版一致。
+  const info = pdrErrorInfo(error)
+  if (info.code) return info.text
   if (error instanceof Error && error.message) return error.message
   return String(error)
 }

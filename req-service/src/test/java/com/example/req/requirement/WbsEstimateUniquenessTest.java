@@ -221,6 +221,8 @@ class WbsEstimateUniquenessTest {
         entity.setStatus("PENDING_ANALYSIS");
         entity.setReporterId(5L);
         entity.setDomainId(1L);
+        // r41：工时评估必须指向承接厂商（设计 §6 R4），未指派的单在 submit 时 409 VENDOR_NOT_ASSIGNED。
+        entity.setAssigneeVendorId(3L);
         return entity;
     }
 

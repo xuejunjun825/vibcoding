@@ -38,6 +38,10 @@ registerPageRoute('automation-runs', ['automation.rules'])
 registerPageRoute('automation-rule-create', ['automation.rules'])
 registerPageRoute('automation-rule-edit', ['automation.rules'])
 
+// r49：评审单详情不是导航项（列表→详情是页内跳转），但深链刷新同样要过页面准入，
+// 所以显式登记到「评审中心」的页面码下——缺这一行，直接打开 /pdr-reviews/12 会 403。
+registerPageRoute('pdr-review-detail', ['pdr.review'])
+
 /** 该路由接受的页面码（any-of）；空数组 = 不受页面保护 */
 export function pageCodesFor(routeName?: string | null): string[] {
   if (!routeName) return []

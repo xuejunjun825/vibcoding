@@ -1,65 +1,41 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>平台功能总览与角色演示手册</title>
 <style>
 :root{--primary:#2B6FE5;--text:#1F2329;--body:#4E5969;--muted:#86909C;--border:#E5E6EB;--divider:#F2F3F5;--bg:#F5F7FA}
-*{box-sizing:border-box}body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
-.page{max-width:960px;margin:0 auto;padding:28px 32px}
+*{box-sizing:border-box}
+body{margin:0;padding:0 60px;background:#fff;color:var(--body);font:400 14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif}
+.page{max-width:980px;margin:0 auto;padding:28px 32px}
 h1,h2,h3,h4,h5{color:var(--text);font-weight:600;line-height:1.4}
 h1{font-size:24px;margin:8px 0 18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
 h2{font-size:19px;margin:34px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--divider)}
-h3{font-size:15px;margin:24px 0 8px}h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
-p{margin:8px 0}a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+h3{font-size:15px;margin:24px 0 8px}
+h4{font-size:14px;margin:18px 0 6px;color:var(--body)}
+p{margin:8px 0}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
 hr{border:none;border-top:1px solid var(--divider);margin:24px 0}
-ul,ol{margin:8px 0 8px 22px;padding:0}li{margin:4px 0}
+ul,ol{margin:8px 0 8px 22px;padding:0}
+li{margin:4px 0}
 table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
 th{background:#FAFBFC;color:var(--muted);font-weight:400;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
 td{padding:9px 12px;border-bottom:1px solid var(--divider);vertical-align:top;color:var(--text)}
 tr:hover td{background:#F7F9FC}
+td:first-child,th:first-child{white-space:nowrap}
 code{background:var(--bg);border-radius:4px;padding:1px 5px;font-size:12px;color:#C7254E;font-family:"SF Mono",Menlo,Consolas,monospace}
 pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12px;line-height:1.6}
 pre code{background:none;padding:0;color:var(--text)}
 blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--primary);background:#F7F9FC;color:var(--body)}
 blockquote p{margin:4px 0}
 .toc{border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:18px 0 26px;background:#FAFBFC}
-.toc ul{margin:0 0 0 18px}.toc>ul{margin-left:0}.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
-td:first-child,th:first-child{white-space:nowrap}
-@media print{body{padding:0}.toc{break-inside:avoid}}
+.toc ul{margin:0 0 0 18px}
+.toc>ul{margin-left:0}
+.toc-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
 h1.title{display:none}
-</style>
-</head>
-<body>
-<div class="page">
-<div class="toc"><div class="toc-title">目录</div>
-<ul>
-<li><a href="#平台功能总览与角色演示手册"
-id="toc-平台功能总览与角色演示手册">平台功能总览与角色演示手册</a>
-<ul>
-<li><a href="#1-演示环境与账号" id="toc-1-演示环境与账号">1.
-演示环境与账号</a></li>
-<li><a href="#2-已交付能力地图按域均为页面实测可打开"
-id="toc-2-已交付能力地图按域均为页面实测可打开">2.
-已交付能力地图（按域，均为页面实测可打开）</a></li>
-<li><a href="#3-角色--页面可用性矩阵r24-起--10-账号--13-页新增-vpm1"
-id="toc-3-角色--页面可用性矩阵r24-起--10-账号--13-页新增-vpm1">3. 角色 ×
-页面可用性矩阵（r24 起 · 10 账号 × 13 页，新增
-<code>vpm1</code>）</a></li>
-<li><a href="#4-各角色演示脚本" id="toc-4-各角色演示脚本">4.
-各角色演示脚本</a></li>
-<li><a href="#5-端到端演示剧本15-分钟"
-id="toc-5-端到端演示剧本15-分钟">5. 端到端演示剧本（15 分钟）</a></li>
-<li><a href="#6-本轮修复的两条-p0已修复含验证命令"
-id="toc-6-本轮修复的两条-p0已修复含验证命令">6. 本轮修复的两条
-P0（已修复，含验证命令）</a></li>
-<li><a href="#7-截图与复现" id="toc-7-截图与复现">7. 截图与复现</a></li>
-<li><a href="#8-建议的下一步" id="toc-8-建议的下一步">8.
-建议的下一步</a></li>
-</ul></li>
-</ul>
-</div>
+.page{max-width:1560px;margin:0 auto;padding:28px 32px}
+img{max-width:100%;height:auto}
+</style></head><body><div class="page">
+
 <h1 id="平台功能总览与角色演示手册">平台功能总览与角色演示手册</h1>
 <blockquote>
 <p>生成时间：2026-11-10（r7 角色准入修复轮） · 代码基线
@@ -95,7 +71,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>平台管理员</td>
 <td>PLATFORM_ADMIN</td>
 <td><code>Admin@12345</code></td>
-<td>56</td>
+<td>61</td>
 <td>12</td>
 </tr>
 <tr>
@@ -103,7 +79,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>产品经理-张</td>
 <td>PRODUCT</td>
 <td><code>Passw0rd!</code></td>
-<td>26</td>
+<td>29</td>
 <td>12</td>
 </tr>
 <tr>
@@ -111,7 +87,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>项目域负责人-李</td>
 <td>PMO（域负责人）</td>
 <td><code>Passw0rd!</code></td>
-<td>40</td>
+<td>44</td>
 <td>12</td>
 </tr>
 <tr>
@@ -119,7 +95,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>二级企业负责人-王</td>
 <td>SUB_BUSINESS_LEADER</td>
 <td><code>Passw0rd!</code></td>
-<td>11</td>
+<td>14</td>
 <td><strong>8</strong>（仅本企业提报）</td>
 </tr>
 <tr>
@@ -127,7 +103,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>研发-赵</td>
 <td>DEV</td>
 <td><code>Passw0rd!</code></td>
-<td>24</td>
+<td>26</td>
 <td>12</td>
 </tr>
 <tr>
@@ -135,7 +111,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>研发-钱</td>
 <td>DEV</td>
 <td><code>Passw0rd!</code></td>
-<td>24</td>
+<td>26</td>
 <td>12</td>
 </tr>
 <tr>
@@ -143,7 +119,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>测试-孙</td>
 <td>QA</td>
 <td><code>Passw0rd!</code></td>
-<td>33</td>
+<td>35</td>
 <td>12</td>
 </tr>
 <tr>
@@ -151,7 +127,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>测试-周</td>
 <td>QA</td>
 <td><code>Passw0rd!</code></td>
-<td>33</td>
+<td>35</td>
 <td>12</td>
 </tr>
 <tr>
@@ -159,7 +135,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>厂商管理员-钱</td>
 <td>PMO + 厂商 VEN-A</td>
 <td><code>Passw0rd!</code></td>
-<td>40</td>
+<td>44</td>
 <td><strong>3</strong>（仅本厂商承接）</td>
 </tr>
 <tr>
@@ -167,7 +143,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>厂商研发-郑</td>
 <td>DEV + 厂商 VEN-B</td>
 <td><code>Passw0rd!</code></td>
-<td>24</td>
+<td>26</td>
 <td><strong>0</strong>（未承接）</td>
 </tr>
 <tr>
@@ -184,7 +160,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>陈业务</td>
 <td>BUSINESS（业务部门）</td>
 <td><code>Passw0rd!</code></td>
-<td>8 ᵃ</td>
+<td>10 ᵃ</td>
 <td>8 ᵃ</td>
 </tr>
 <tr>
@@ -192,7 +168,7 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="
 <td>许二级</td>
 <td>SUB_BUSINESS_LEADER（二级企业业务）</td>
 <td><code>Passw0rd!</code></td>
-<td>11 ᵃ</td>
+<td>14 ᵃ</td>
 <td>8 ᵃ</td>
 </tr>
 </tbody>
@@ -206,11 +182,11 @@ admin/pm/tl1/po1/dev1/qa1
 同组织同域口径推导、未被不变量单独断言。</p>
 <p>ᵈ r24 新增的第 11
 个内置角色演示账号（<code>VENDOR_PM</code>，<code>sys_user_role</code>
-恰 1 条，权限行 168 格/租户）。<code>13</code> = FUNCTION 层 12 个
+恰 1 条，权限行 171 格/租户）。<code>13</code> = FUNCTION 层 12 个
 <code>ALLOW</code> + 1 个
 <code>RESTRICTED</code>（<code>trace:view</code>）；ACTION 层另有 7 条
 <code>ALLOW</code>（<code>req.action.schedule</code> + 6
-个缺陷处理动作），其余 65 条 DENY（其中 11
+个缺陷处理动作），其余 66 条 DENY（其中 11
 条为显式覆盖：<code>release.action.create/update/approve/close</code>、<code>task.action.*</code>4
 条、<code>sprint.action.create/close</code>、<code>test.action.case_edit</code>）。数字按
 <code>PermissionMatrix</code> 与 PRD §3.3/§3.4 推导，实测以授权页
@@ -291,7 +267,7 @@ admin/pm/tl1/po1/dev1/qa1
 </tr>
 <tr>
 <td>平台治理</td>
-<td>组织/租户/用户/角色/权限矩阵（10 角色 × 56
+<td>组织/租户/用户/角色/权限矩阵（11 角色 × 61
 功能码）、指标字典、审计日志、API 客户端</td>
 <td><code>/admin/*</code></td>
 </tr>
@@ -301,8 +277,10 @@ admin/pm/tl1/po1/dev1/qa1
 张、验证套件（r1 14 / platform 168 / quality 348 / integration 230 /
 collab 263 / access 约 85 / negative 25 / unit 234 / lint 16）。</p>
 <hr />
-<h2 id="3-角色--页面可用性矩阵r24-起--10-账号--13-页新增-vpm1">3. 角色 ×
-页面可用性矩阵（r24 起 · 10 账号 × 13 页，新增 <code>vpm1</code>）</h2>
+<h2
+id="3-角色--页面可用性矩阵r24-起--10-账号--14-页r39-新增-automationrules">3.
+角色 × 页面可用性矩阵（r24 起 · 10 账号 × 14 页，r39 新增
+<code>/automation/rules</code>）</h2>
 <table>
 <thead>
 <tr>
@@ -489,6 +467,19 @@ collab 263 / access 约 85 / negative 25 / unit 234 / lint 16）。</p>
 <td>⛔²</td>
 <td>⛔²</td>
 </tr>
+<tr>
+<td>自动化规则 <code>/automation/rules</code></td>
+<td>✅</td>
+<td>⛔²</td>
+<td>✅</td>
+<td>⛔²</td>
+<td>⛔²</td>
+<td>⛔²</td>
+<td>⛔⁸</td>
+<td>⛔⁸</td>
+<td>⛔²</td>
+<td>⛔²</td>
+</tr>
 </tbody>
 </table>
 <p>¹ <code>po1</code>/<code>biz1</code>/<code>suite1</code> 无
@@ -537,6 +528,17 @@ AC-5）：路由 <code>meta.vendorPmAllowed</code> + 导航
 <code>/403?code=INTERNAL_ONLY</code>。例外只开「进入页面看」：导入/新建/复制/删除/保存新版本全部由
 <code>test.action.case_edit</code> 关掉，用例数据本身仍由
 <code>test_case.vendor_id</code> 经 <code>ScopeSql</code> 收敛。</p>
+<p>⁸ <strong>自动化规则页对厂商账号一律
+<code>INTERNAL_ONLY</code>（r39）</strong>：<code>vendor1</code>
+的角色是 <code>PMO</code>，角色矩阵里 <code>automation:manage</code> 是
+<code>ALLOW</code>，所以这一格不是「权限不够」；拦截发生得更早——<code>AutomationInternalOnlyInterceptor</code>
+以 <code>order(-100)</code> 注册（<code>PermissionInterceptor</code>
+是默认 0），对任何 <code>vendorId != null</code> 的账号直接 403
+<code>INTERNAL_ONLY</code>。<code>vpm1</code>（<code>VENDOR_PM</code>）与
+<code>vendor2</code>（<code>DEV</code>）角色层本来也拒绝，服务端仍先回
+<code>INTERNAL_ONLY</code>（更早的闸先说话）。导航隐藏与深链 403
+同源：<code>/automation/**</code> 的路由
+<code>meta.internalOnly</code>。</p>
 <blockquote>
 <p>判据是<strong>两段同源</strong>：菜单看
 <code>navVisible()</code>，路由看
@@ -575,7 +577,7 @@ tab（生命周期/用例/轮次/执行/报告/风险）；执行页勾结果。
 <li>分支策略 <code>/code-policies</code>：登记规则 → "对照核验" GitLab
 现状（未配置集成时 必须显示 UNVERIFIED，不得假绿）。</li>
 <li>设置
-<code>/admin/users</code>、<code>/admin/permissions</code>（10×56
+<code>/admin/users</code>、<code>/admin/permissions</code>（11×61
 权限矩阵）、<code>/admin/audit</code>（审计日志）。</li>
 </ol>
 <h3 id="42-产品经理-pm权限-26">4.2 产品经理 <code>pm</code>（权限
@@ -683,7 +685,7 @@ id="49-厂商项目经理-vpm1r24-新增第-11-角色本厂商交付的只读驾
 角色，本厂商交付的只读驾驶舱 + 排期扳手）</h3>
 <ul>
 <li>账号：<code>VENDOR_PM</code> + 厂商 <code>VEN-A</code>，密码
-<code>Passw0rd!</code>；一个账号恰 1 条角色绑定，168 格授权（授权页
+<code>Passw0rd!</code>；一个账号恰 1 条角色绑定，171 格授权（授权页
 <code>/admin/roles/{id}/permissions</code> 可逐格看）。</li>
 <li><strong>能看的</strong>：需求池（只有 VEN-A 承接的 3 条 +
 既有内部行）、版本计划、迭代、缺陷、用例库（唯一只读例外）、测试计划、追溯矩阵、甘特、Wiki、缺陷看板、质量指标；侧栏另有个人待办中心（见
@@ -948,10 +950,19 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="
 该命令调内部端点 <code>POST /api/req/internal/demo-reset</code>（需
 <code>X-Internal-Token</code>，且 <code>PLATFORM_SEED_ENABLED</code>
 关闭时端点不存在），重建 12 条需求小链路 + 1 版本 + 1 迭代 + 12 用例 + 3
-缺陷 + 1 测试计划 + 1 甘特组 8 行 + ≤5 通知，并自检 4 条不变量（需求 12
-/ <code>po1</code> 见 8 / <code>vendor1</code> 见 3 /
-<code>vendor2</code> 见
-0）与夹具痕迹清零；不进自动门禁，属演示前手动动作。</li>
+缺陷 + 1 测试计划 + 1 甘特组 8 行 + <strong>4 条种子通知</strong> + 2
+条自动化规则（§9），并自检 4 条不变量（需求 12 / <code>po1</code> 见 8 /
+<code>vendor1</code> 见 3 / <code>vendor2</code> 见
+0）与夹具痕迹清零；不进自动门禁，属演示前手动动作。
+<blockquote>
+<p>口径（r39 Q-5）：重置脚本断言的 <strong>4</strong>
+是"种子通知"，即重置事务（Tx1）写完的计数；紧接着的 Tx2/Tx3
+会跑一遍演示审批链，再产生 <strong>22 条</strong>
+<code>APPROVAL</code>/<code>APPROVAL_RESULT</code> 通知，所以重置后直接
+<code>SELECT COUNT(*) FROM notification</code> 看到的是
+<strong>26</strong>，这不是回归、也不是种子多写了。要复核种子数就看自检输出里的那
+4 条，不要用全表行数。</p>
+</blockquote></li>
 <li>账号缺口已补：<code>biz1</code>/<code>suite1</code>（§1）。</li>
 </ul>
 <hr />
@@ -983,7 +994,7 @@ alt="质量门" /><br>质量门总览</td>
 <td><img src="demo-shots/admin-wiki.png"
 alt="Wiki" /><br>Wiki：空间/页面树/版本</td>
 <td><img src="demo-shots/admin-users.png"
-alt="用户与角色" /><br>用户与角色（10 角色 × 56 功能码）</td>
+alt="用户与角色" /><br>用户与角色（11 角色 × 61 功能码）</td>
 </tr>
 </tbody>
 </table>
@@ -1013,7 +1024,7 @@ alt="po1 追溯" /><br>po1：追溯矩阵（二级企业视角）</td>
 <p><strong>r8 新增：dev1 打开分支策略（修复后）</strong></p>
 <p><img src="demo-shots/dev1-code-policies-fixed.png"
 alt="dev1 分支策略（修复后）" /></p>
-<p><code>dev1</code>（DEV，24 权限码）打开 <code>/code-policies</code>
+<p><code>dev1</code>（DEV，26 权限码）打开 <code>/code-policies</code>
 的实测：URL 停在 <code>/code-policies</code>、筛选器与表格正常渲染 2
 行、顶部常驻黄条写明「当前账号无法读取 GitLab 集成配置（需
 integration:manage）」，行内 pill
@@ -1049,8 +1060,176 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="
 <code>dev1</code> 可见源自 <code>DEV</code> 对 <code>case:manage</code>
 的 <code>RESTRICTED</code>（收窄而非拒绝）。若产品要求 <code>dev1</code>
 不可见，需改权限矩阵，属独立需求。</li>
-<li>之后再做 M8-B（自动化规则引擎、风险与基线、敏感信息扫描）。</li>
+<li>M8-B 剩余：风险与基线、敏感信息扫描（其中的自动化规则引擎已由 r39
+交付，见 §9）。</li>
 </ol>
-</div>
-</body>
-</html>
+<hr />
+<h2 id="9-自动化规则引擎r39--三步脚本--3-张截图">9. 自动化规则引擎（r39
+· 三步脚本 + 3 张截图）</h2>
+<p>一条规则 = <strong>触发事件 + 条件 +
+动作</strong>，可启停、有执行日志、能防循环。动作只有 4 类（通知 /
+指派负责人 / 打标签 / 调
+Webhook），<strong>不改状态、不进审批、不动人天与发布单</strong>——规则是"帮你做事"，不是"替你签字"。事件由服务端审计旁路产出（同一事务写
+<code>automation_event</code>），前端没有任何上报入口：<code>/automation/events</code>
+不存在，直接请求是 404。</p>
+<h3 id="91-前置">9.1 前置</h3>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> platform-up</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> platform-demo-reset   <span class="co"># 含 2 条演示规则，自检 80 项（原 76 + 自动化 4 项）</span></span></code></pre></div>
+<p>演示规则（<code>automation_rule</code>，作用域 = <code>ORD</code>
+域）：</p>
+<table>
+<thead>
+<tr>
+<th>代号</th>
+<th>规则名</th>
+<th>触发</th>
+<th>条件</th>
+<th>动作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R1</td>
+<td>P0/P1 新建通知域负责人</td>
+<td><code>REQUIREMENT_CREATED</code></td>
+<td><code>priorityIn = [P0,P1]</code></td>
+<td><code>NOTIFY</code> → <code>DOMAIN_OWNER</code></td>
+</tr>
+<tr>
+<td>R2</td>
+<td>大需求自动打标</td>
+<td><code>FIELD_CHANGE</code></td>
+<td><code>fields 含 estimate_days</code> 且
+<code>estimateDays ≥ 10</code></td>
+<td><code>ADD_TAG</code> → <code>大需求</code></td>
+</tr>
+</tbody>
+</table>
+<p>导航「自动化规则」<code>http://127.0.0.1:5173/automation/rules</code>，页内双
+tab：<strong>规则</strong> /
+<strong>执行日志</strong>（<code>/automation/runs</code>）。规则行是一句因果句
+<code>[触发][作用域] 且 [条件] → [动作]</code>，列表、编辑器摘要、编辑回显三处同一组件渲染，不靠文案对齐。</p>
+<h3 id="92-三步脚本admin">9.2 三步脚本（admin）</h3>
+<table>
+<thead>
+<tr>
+<th>步</th>
+<th>操作</th>
+<th>期望（约 5 秒内可复核）</th>
+<th>截图</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>确认 R1 为「已启用」→ 需求池新建 <strong>P0</strong>
+需求（<code>ORD</code> 域）</td>
+<td>「执行日志」出现 1 行 <code>SUCCESS</code>，展开可见动作
+<code>NOTIFY</code> 结果为成功；<code>tl1</code>（<code>ORD</code>
+域负责人）通知 +1。建需求的 HTTP
+请求<strong>不等执行</strong>——消费在后台
+worker，业务侧响应时间不受规则影响</td>
+<td><code>demo-shots/r39-automation-r1-success.png</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>把 <code>ORD</code> 域<strong>叶子</strong>需求
+<code>DEMO-R-10</code>（RD，子需求）的 <code>estimateDays</code> 改成
+<strong>12</strong>（≥10 命中
+R2）。<strong>不要改父需求</strong>：父需求（P0/PDR）的人天由子需求汇总，改成父需求会
+400 <code>PARENT_DAYS_READONLY</code>（r39
+Q-2，原文档写的就是父需求，按字面走会撞墙）</td>
+<td>日志出现 <code>ADD_TAG</code> 行
+<code>SUCCESS</code>；<code>DEMO-R-10</code>
+在需求列表与详情概览都出现「<strong>大需求</strong>」chip（同一个
+<code>TagChips</code> 组件，列表与详情同源——详情缺标签是 r39
+Q-1，已修）</td>
+<td><code>demo-shots/r39-automation-r2-tag.png</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>规则列表把 R1 <strong>停用</strong> → 再新建一条 P0 需求</td>
+<td>日志无新行（0 run）、<code>tl1</code> 无新通知；R1
+行显示「已停用」，只降字色<strong>不降透明度</strong>（停用恰恰是最该核对配置的时刻）</td>
+<td><code>demo-shots/r39-automation-r1-disabled.png</code></td>
+</tr>
+</tbody>
+</table>
+<p>三步的判据都是「<strong>执行日志里有没有那一行</strong>」，不是
+toast：执行是异步的，页面弹一句"已触发"就是在撒谎。</p>
+<h3 id="93-负向三例不截图make-automation-verify-已覆盖">9.3
+负向三例（不截图，<code>make automation-verify</code> 已覆盖）</h3>
+<ul>
+<li><strong>厂商账号</strong>：<code>vendor1</code> 或 <code>vpm1</code>
+深链 <code>/automation/rules</code> → 403
+<code>INTERNAL_ONLY</code>（<strong>不是</strong>
+<code>FORBIDDEN</code>：<code>AutomationInternalOnlyInterceptor</code>
+以 <code>order(-100)</code> 注册，早于权限校验；<code>vendor1</code>
+的角色 <code>PMO</code> 本来是有 <code>automation:manage</code>
+的，所以这一格证明了拦截来自"厂商"而不是"没权限"）。</li>
+<li><strong>作用域放宽</strong>：规则作用域选
+<code>ORD</code>，条件里再塞 <code>INV</code> 的域过滤 → 400
+<code>CONDITION_WIDENS_SCOPE</code>。前端把条件的域/厂商行做成只读
+<code>= 作用域</code>，先让人写不出来；服务端只是兜底。</li>
+<li><strong>动作越界</strong>：动作只有 4
+型可选，界面上没有"改状态""走审批"的入口；提交第 5 型被 400 拒绝，且
+<code>scripts/tests/lint.sh</code> 的 L21 静态禁止
+<code>automation</code> 包出现 <code>.transition(</code> /
+<code>ApprovalEngine</code> / <code>ReleaseService</code>。</li>
+</ul>
+<h3 id="94-自动门禁与复现">9.4 自动门禁与复现</h3>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> automation-verify                          <span class="co"># 6 段 40 条：正例 / 负例 / 幂等 / 防循环 / 越权 / 停用+动作边界</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/automation-verify.sh <span class="at">--static-only</span> <span class="co"># 免栈的静态部分</span></span></code></pre></div>
+<p>幂等与防循环各有一条可复述的判据：同一业务动作重放不会产生第 2
+次执行（<code>automation_run</code> 的
+<code>(tenant, rule, requirement, event)</code>
+唯一键先抢后判）；规则触发的动作<strong>不再</strong>作为新事件进入求值（<code>origin=RULE</code>
+直接丢弃），人工 <code>deliver</code> 后再触发也会在链深 ≥4 时丢弃。</p>
+<p>截图按 §7.4 的 CDP 流程现截（路由换 <code>/automation/rules</code> 与
+<code>/automation/runs</code>），1440×900，落
+<code>docs/teamflow/demo-shots/</code>。该目录必须可提交：<code>git check-ignore -v docs/teamflow/demo-shots/r39-automation-r1-success.png</code>
+无输出（未被忽略）。</p>
+<h2 id="411-产品需求评审--厂商工时评估r46-新增评审中心">4.11
+产品需求评审 + 厂商工时评估（r46 新增，评审中心）</h2>
+<p><strong>角色与入口</strong>：产品经理/项目域负责人/评审人 →
+左侧「需求域 · 评审中心」（<code>/pdr-reviews</code>，页面码
+<code>pdr.review</code>）。</p>
+<p><strong>数据</strong>：演示基线自带 1
+张评审单（<code>DEMO-R-02</code> 采购订单移动审批）4 名评审人 6
+条意见（其中 1 条已转任务）、2 个附件。</p>
+<p><strong>四步脚本（约 3 分钟）</strong></p>
+<ol type="1">
+<li>打开「评审中心」→ 上部看四个 KPI（评审单 1 / 意见 6 / 需修改率 16.7%
+/ 平均评审时长）与「意见分类分布」（九类，RANGE 2、TECH 2、ACCEPTANCE
+1、DATA 1），右栏「按评审人 Top5」。</li>
+<li>点任意一条评审单 → 评审单详情：顶部 <code>3/4 已评</code>、评审人
+chip（通过/需修改/待评）、按人分组的意见（每条带分类徽标、序号、状态徽标「待处理
+/ 已转任务」、附件 chip）。</li>
+<li>在「待处理」意见上点「转为任务」→ 选择负责人/截止日期 →
+创建后该条变「已转任务 #任务号」，任务表多一行、审计记
+<code>PDR_OPINION_TO_TASK</code>（重复点会 409）。</li>
+<li>回到需求详情 <code>DEMO-R-02</code> → 「评审」Tab
+能看到同一份评审单与评审状态（概要页右侧也显示「评审状态：评审中 · 3/4
+已评」）。</li>
+</ol>
+<p><strong>顺序门（可现场验证，也是这轮的重点）</strong></p>
+<ul>
+<li>新建的 PDR
+未过评审时：<code>转派</code>/<code>提交评估</code>/<code>排期</code>
+全灰，接口 409 <code>PDR_REVIEW_REQUIRED</code>（detail 带
+<code>required:"pdr_review"</code>）。</li>
+<li>过了评审但没指派厂商 → <code>提交评估</code> 409
+<code>VENDOR_NOT_ASSIGNED</code>。</li>
+<li>指派厂商后由<strong>厂商账号</strong>（vpm1）提交评估 →
+201；产品经理提交 → 403（只审不提）。</li>
+<li>评估通过后换厂商 → 原评估单转 <code>STALE</code>（需重评）；子 RD
+已进 <code>IN_DEV</code> 再换厂商 → 409
+<code>VENDOR_LOCKED</code>（detail 带阻塞子需求 id）。</li>
+</ul>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> pdr-verify                                 <span class="co"># 6 段 66 条：顺序门/评审/换厂商/附件/统计/多条意见转任务</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">bash</span> scripts/pdr-flow-verify.sh <span class="at">--dry-run</span>       <span class="co"># 免栈只打印断言清单</span></span></code></pre></div>
+<p>截图：<code>docs/teamflow/demo-shots/pdr-1-review-center.png</code>、<code>pdr-2-review-detail.png</code>、<code>pdr-3-requirement-tab.png</code>。</p>
+</div></body></html>

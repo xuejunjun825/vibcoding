@@ -52,6 +52,9 @@ PASS=0
 FAIL=0
 FIXTURES_SET=0
 STATIC_ONLY=0
+# set -u 保护：正向链任一环节失败时这些变量也必须已定义，S3/S4 才能逐条报 FAIL，
+# 而不是在 create_order / GET /releases/ 处 unbound 直接打断整轮（F_REL: unbound variable）。
+F_BUS="" F_PDR="" F_RD="" F_REL="" F_PLAN="" F_CASE="" F_RPT="" F_ORDER=""
 [[ "${1:-}" == "--static-only" ]] && STATIC_ONLY=1
 [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && {
     sed -n '2,/^set -uo pipefail$/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
@@ -282,6 +285,11 @@ build_positive_chain() {
 
     F_PDR="$(create_req PDR "r30-正向PDR-${prefix}-${TAG}" "$F_BUS")"
     [[ -n "$F_PDR" ]] || return 1
+    # r46 顺序门：PDR 未过评审 → assign-vendor/estimate/schedule 全 409 PDR_REVIEW_REQUIRED；
+    # estimate 前还必须先指派承接厂商（VENDOR_NOT_ASSIGNED）。门禁夹具失败必须显式返回 1，
+    # 由 S2 的「发布单夹具缺失」判红，不能用 || true 吞掉。
+    gate_pdr_review_pass "$F_PDR" "S2 正向 PDR" || return 1
+    gate_assign_vendor "$F_PDR" "S2 正向 PDR" || return 1
     approve_estimate "$F_PDR" 2 || return 1
     act "$F_PDR" schedule
 
@@ -309,6 +317,8 @@ build_positive_chain() {
     api_call POST "/api/deliver/test-plans/${F_PLAN}/execute" \
         "$(jq -cn --argjson c "$F_CASE" '{caseId:$c,result:"PASS",note:"r30 门禁"}')"
 
+    # RD 的承接厂商不自动继承父 PDR，必须单独指派，否则 /estimate 409 VENDOR_NOT_ASSIGNED。
+    gate_assign_vendor "$F_RD" "S2 正向 RD" || return 1
     approve_estimate "$F_RD" 2 || return 1
     act "$F_RD" start_dev
     act "$F_RD" submit_test
@@ -1311,6 +1321,16 @@ s7_fixture_ready() {
         fail "S7 自造夹具未建成：建 PDR 失败（HTTP ${HTTP_CODE}）" "PDR 必须挂在刚入池的 BUS 下（parentGate 要求 SCHEDULED/IN_DEV 之上的池化父）"
         return 1
     }
+    gate_pdr_review_pass "$S7_PDR" "S7 PDR" || {
+        S7_ERR="PDR ${S7_PDR} 未过 PDR 评审"
+        fail "S7 自造夹具未建成：PDR ${S7_PDR} 未过评审（r46 顺序门）" "[gate] 行里写了卡在哪一步；评审门未过时 assign-vendor/estimate/schedule 都 409"
+        return 1
+    }
+    gate_assign_vendor "$S7_PDR" "S7 PDR" || {
+        S7_ERR="PDR ${S7_PDR} 未指派承接厂商"
+        fail "S7 自造夹具未建成：PDR ${S7_PDR} 未指派厂商（r46 顺序门）" "estimate 前必须 POST /assign-vendor，否则 409 VENDOR_NOT_ASSIGNED"
+        return 1
+    }
     approve_estimate "$S7_PDR" 2 || {
         S7_ERR="PDR ${S7_PDR} 预估未批到 APPROVED"
         fail "S7 自造夹具未建成：PDR 预估未批（${S7_PDR}）" "approve_estimate 含 pm 会签并读回 APPROVED；返回非 0 就是会签没走完"
@@ -1334,6 +1354,11 @@ s7_fixture_ready() {
     [[ "$HTTP_CODE" == "200" ]] || {
         S7_ERR="deliver 失败 ${HTTP_CODE} $(printf '%s' "$HTTP_BODY" | head -c 160)"
         fail "S7 自造夹具未建成：deliver 失败（HTTP ${HTTP_CODE}）" "deliver 要早于 approve_estimate：先落人天与 MR，再走预估会签"
+        return 1
+    }
+    gate_assign_vendor "$S7_RD" "S7 RD" || {
+        S7_ERR="RD ${S7_RD} 未指派承接厂商"
+        fail "S7 自造夹具未建成：RD ${S7_RD} 未指派厂商（r46 顺序门）" "RD 不自动继承父 PDR 的厂商，estimate 前必须单独 /assign-vendor"
         return 1
     }
     approve_estimate "$S7_RD" 2 || {
